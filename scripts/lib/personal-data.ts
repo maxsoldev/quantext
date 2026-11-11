@@ -5,7 +5,7 @@ export interface Finding {
 }
 
 export interface ScanOptions {
-  /** Local identity terms (user name, email, host name) built at run time; never stored in the repo. */
+  /** Local identity terms (git email, host name) built at run time; never stored in the repo. */
   deny?: readonly string[];
 }
 
@@ -26,7 +26,7 @@ const RESERVED_DOMAIN = /(?:^|\.)(?:example\.(?:com|net|org)|example|test|invali
 
 const WEB_URL = /\b(?:https?|wss?):\/\/[^\s"'<>)\]]+/g;
 
-/** Local names shorter than this match too much ordinary text (`max`, `pc`). */
+/** Local terms shorter than this match too much ordinary text (`pc`). */
 const MIN_LOCAL_TERM = 4;
 
 const PATTERNS: readonly Pattern[] = [
@@ -68,10 +68,18 @@ export function scanText(text: string, options: ScanOptions = {}): Finding[] {
   return findings;
 }
 
-/** Terms that identify this machine's user: the user name, git email and host name, if long enough to scan for. */
-export function localDenylist(local: { user: string; email: string; hostname: string }): string[] {
-  const host = local.hostname.toLowerCase();
-  const terms = [local.user, local.email, host, host.split(".")[0] ?? ""].map((t) => t.trim().toLowerCase());
+/** Host names that name no person: loopback and the usual CI runner hosts (GitHub, Azure, AWS). */
+const GENERIC_HOST = /^(?:localhost|runner|runnervm\w*|fv-az[\w-]*|ip-[\d-]+|ec2[\w-]*|buildkitsandbox)(?:\.|$)/i;
+
+/**
+ * Terms that identify this machine's user: the git email and the host name, as literals.
+ * Not the login name: user names show up in home paths, which the path rules catch, and CI names (`runner`)
+ * are ordinary words. Empty, short and generic host names are skipped.
+ */
+export function localDenylist(local: { email: string; hostname: string }): string[] {
+  const host = local.hostname.trim().toLowerCase();
+  const hosts = GENERIC_HOST.test(host) ? [] : [host, host.split(".")[0] ?? ""];
+  const terms = [local.email.trim().toLowerCase(), ...hosts];
   return [...new Set(terms.filter((t) => t.length >= MIN_LOCAL_TERM))];
 }
 

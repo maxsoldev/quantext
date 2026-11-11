@@ -2,11 +2,11 @@
  * Fail when the repo contains personal data (see lib/personal-data.ts).
  * Usage: scan-personal-data.ts [--history] [repo root].
  * Default: tracked and untracked files that git does not ignore, and their paths. --history: every line that any
- * commit on any ref added. Also looks for this machine's user name, git email and host name, read at run time.
+ * commit on any ref added. Also looks for this checkout's git email and this machine's host name, read at run time.
  */
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { hostname, userInfo } from "node:os";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { localDenylist, scanPatch, scanText } from "./lib/personal-data.ts";
 
@@ -20,7 +20,7 @@ const gitEmail = () => {
   const result = spawnSync("git", ["config", "user.email"], { cwd: root, encoding: "utf8" });
   return result.status === 0 ? result.stdout : ""; // exit 1: no email configured
 };
-const deny = localDenylist({ user: process.env.USER ?? userInfo().username, email: gitEmail(), hostname: hostname() });
+const deny = localDenylist({ email: gitEmail(), hostname: hostname() });
 
 /** Lines of `where  rule`. Never the matched value, so the output does not leak what it found. */
 const findings: string[] = [];

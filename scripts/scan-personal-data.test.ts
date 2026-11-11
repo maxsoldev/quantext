@@ -39,10 +39,28 @@ test("fails and names file, line and kind, without printing the match", () => {
   expect(result.stderr).not.toContain(j("/Us", "ers"));
 });
 
-test("finds the local user name, read from the environment at run time", () => {
-  const result = runOn({ "notes.md": "Recorded by Zelda-Q.\n" }, { USER: "zelda-q" });
+test("finds the git email of this checkout, read at run time", () => {
+  const email = j("zed.q", "@example.com"); // reserved domain: only the local identity rule can find it
+  root = mkdtempSync(join(tmpdir(), "qx-scan-"));
+  spawnSync("git", ["init", "-q"], { cwd: root });
+  spawnSync("git", ["config", "user.email", email], { cwd: root });
+  writeFileSync(join(root, "notes.md"), `Recorded by ${email}.\n`);
+  const result = spawnSync(process.execPath, [script, root], { encoding: "utf8" });
   expect(result.status).toBe(1);
   expect(result.stderr).toContain("notes.md:1  local identity");
+});
+
+test("a CI user name such as runner causes no findings in this repo", () => {
+  root = mkdtempSync(join(tmpdir(), "qx-scan-")); // unused; keeps afterEach simple
+  const repo = join(import.meta.dirname, "..");
+  for (const args of [[repo], ["--history", repo]]) {
+    const result = spawnSync(process.execPath, [script, ...args], {
+      encoding: "utf8",
+      env: { ...process.env, USER: "runner", CI: "true" },
+    });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+  }
 });
 
 test("checks file paths too", () => {

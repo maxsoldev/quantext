@@ -15,8 +15,10 @@ secrets to a secret scanner, and they can contain API keys. Neither must reach t
 - `scripts/scan-personal-data.ts` scans every tracked and untracked, not ignored file, and each file path, for:
   home paths (`/Users/<name>`, `/home/<name>`, `/root`, `C:\Users\<name>` also JSON-escaped, Claude Code's
   dash-encoded project folders `-Users-<name>-…`, URL-encoded `%2FUsers%2F…`), emails outside reserved example
-  domains, AWS access keys and `sk-` API keys. It also looks for this machine's user name, git email and host name;
-  these terms are read at run time and never stored in the repo. Its patterns live in `scripts/lib/personal-data.ts`
+  domains, AWS access keys and `sk-` API keys. It also looks for this checkout's git email and this machine's host name
+  (not generic ones such as `localhost` or CI runner hosts); these terms are read at run time and never stored in
+  the repo. The login name is not a term: CI names such as `runner` are ordinary words, and user names in paths are
+  caught by the home-path rules. Its patterns live in `scripts/lib/personal-data.ts`
   (`scanText`, `localDenylist`), so the fixture tooling (build step 2) reuses them. Output names the file, the line
   and the rule, never the matched value. `--history` (`pnpm scan:history`, part of `pnpm check`) scans every
   line that any commit added, so data that a later commit removed still fails the check.
@@ -24,7 +26,6 @@ secrets to a secret scanner, and they can contain API keys. Neither must reach t
 ## Consequences
 
 - Placeholders such as `/Users/<name>` and `~/.quantext` pass; real names do not. `/home/` inside web URLs and
-  `git@host:` SSH remotes pass. Local names under 4 characters are not scanned for (too much noise); the path
-  patterns still apply.
+  `git@host:` SSH remotes pass. Local terms under 4 characters are not scanned for (too much noise).
 - Fixtures must be rewritten to placeholders before they are committed.
 - The gitleaks script supports macOS and Linux on x64 and arm64 only. A new gitleaks version means new checksums.

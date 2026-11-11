@@ -68,19 +68,22 @@ describe("scanText", () => {
     expect(scanText(text)).toEqual([]);
   });
 
-  test("finds the local user name, email and host name, given at run time", () => {
-    const deny = localDenylist({ user: "ivan", email: j("ivan.k", "@corp.io"), hostname: "Ivans-MacBook.local" });
-    const text = ["owner: Ivan", j("by ivan.k", "@corp.io"), "on ivans-macbook today", "ivanhoe is fine"].join("\n");
+  test("finds the local git email and host name, given at run time", () => {
+    const deny = localDenylist({ email: j("ivan.k", "@corp.io"), hostname: "Ivans-MacBook.local" });
+    const text = ["owner: Ivan", j("by ivan.k", "@corp.io"), "on ivans-macbook today", "ivans-macbooks is fine"].join(
+      "\n",
+    );
     expect(scanText(text, { deny }).map((f) => [f.line, f.kind])).toEqual([
-      [1, "local identity"],
       [2, "email"],
       [2, "local identity"],
       [3, "local identity"],
     ]);
   });
 
-  test("skips local names too short to scan for without noise", () => {
-    expect(localDenylist({ user: "max", email: "", hostname: "pc" })).toEqual([]);
+  test("skips host names that are empty, short or generic", () => {
+    for (const hostname of ["", "pc", "localhost", "runnervm0abc12", "fv-az123-456", "ip-10-1-2-3.ec2.internal"]) {
+      expect(localDenylist({ email: "", hostname })).toEqual([]);
+    }
   });
 });
 
