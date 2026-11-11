@@ -226,8 +226,32 @@ describe("findLayerViolations", () => {
     expect(findLayerViolations(files).map((v) => [v.line, v.reason])).toEqual([
       [1, "node:module (createRequire) is not allowed; use import"],
       [2, "node:module (createRequire) is not allowed; use import"],
-      [3, "require() is not allowed; use import"],
+      [3, "require is not allowed; use import"],
       [4, "process.getBuiltinModule() is not allowed; use import"],
+    ]);
+  });
+
+  test("engine and mod code may not reach require, eval or Function in any form", () => {
+    const text = [
+      "const r = require;",
+      'globalThis["require"]("x");',
+      'module.require("x");',
+      'import.meta.require("x");',
+      'eval("1");',
+      'new Function("return 1");',
+      'Function("x")();',
+      "const ok = { require: true, eval: 1 }; let f: Function; ok.evaluate; type R = typeof require;",
+    ].join("\n");
+    const files = [engine("query", text), { path: "packages/mod/src/index.ts", text: "const e = eval;\n" }];
+    expect(findLayerViolations(files).map((v) => [v.file.split("/")[1], v.line, v.reason])).toEqual([
+      ["engine", 1, "require is not allowed; use import"],
+      ["engine", 2, "require is not allowed; use import"],
+      ["engine", 3, "require is not allowed; use import"],
+      ["engine", 4, "require is not allowed; use import"],
+      ["engine", 5, "eval is not allowed"],
+      ["engine", 6, "Function is not allowed"],
+      ["engine", 7, "Function is not allowed"],
+      ["mod", 1, "eval is not allowed"],
     ]);
   });
 });

@@ -84,10 +84,16 @@ export function findLayerViolations(files: readonly SourceFile[]): Violation[] {
         if (!isTypeOnlyStatement(statement)) report(statement.start, "", "shared may contain only types");
       }
     }
+    const found: { offset: number; specifier: string; reason: string }[] = [];
     for (const ref of importsOf(program.body)) {
       const reason = checkImport(file.path, pkg, fromLayer, ref);
-      if (reason !== undefined) report(ref.offset, ref.specifier ?? "", reason);
+      if (reason !== undefined) found.push({ offset: ref.offset, specifier: ref.specifier ?? "", reason });
     }
+    if (pkg === "engine" || pkg === "mod") {
+      for (const { offset, reason } of forbiddenReferences(program.body)) found.push({ offset, specifier: "", reason });
+    }
+    found.sort((a, b) => a.offset - b.offset);
+    for (const f of found) report(f.offset, f.specifier, f.reason);
   }
   return violations;
 }
@@ -201,10 +207,9 @@ function importsOf(body: unknown): ImportRef[] {
   return refs;
 }
 
-/** `require` or `process.getBuiltinModule` when `callee` is one of them: calls that load modules without `import`. */
+/** `process.getBuiltinModule` when `callee` is it: a call that loads modules without `import`. */
 function bypassName(callee: unknown): string | undefined {
   const c = callee as { type?: string; name?: string; property?: { name?: string } } | null;
-  if (c?.type === "Identifier" && c.name === "require") return "require";
   if (c?.type === "MemberExpression" && c.property?.name === "getBuiltinModule") return "process.getBuiltinModule";
   return undefined;
 }
@@ -212,6 +217,55 @@ function bypassName(callee: unknown): string | undefined {
 function ref(source: { type?: unknown; value?: unknown; start: number }, typeOnly: boolean): ImportRef {
   const literal = source.type === "Literal" && typeof source.value === "string";
   return { specifier: literal ? (source.value as string) : null, typeOnly, offset: source.start };
+}
+
+/** Type-only subtrees: an identifier inside them (`let f: Function`) is never run. */
+const TYPE_NODES = new Set([
+  "TSTypeAnnotation",
+  "TSTypeReference",
+  "TSTypeQuery",
+  "TSInterfaceDeclaration",
+  "TSTypeAliasDeclaration",
+]);
+const FORBIDDEN: Record<string, string> = {
+  require: "require is not allowed; use import",
+  eval: "eval is not allowed",
+  Function: "Function is not allowed",
+};
+
+/**
+ * Every runtime reference to `require`, `eval` or `Function`: as a name, or `require` as a property
+ * (`module.require`, `import.meta.require`, `globalThis["require"]`). These load or run code around `import`.
+ */
+function forbiddenReferences(body: unknown): { offset: number; reason: string }[] {
+  const found: { offset: number; reason: string }[] = [];
+  const visit = (node: unknown, isName: boolean): void => {
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child, isName);
+      return;
+    }
+    if (node === null || typeof node !== "object") return;
+    const n = node as Record<string, unknown> & { type?: string; start: number };
+    if (n.type !== undefined && TYPE_NODES.has(n.type)) return;
+    if (n.type === "Identifier" && isName && typeof n.name === "string" && n.name in FORBIDDEN) {
+      found.push({ offset: n.start, reason: FORBIDDEN[n.name] as string });
+    }
+    if (n.type === "MemberExpression") {
+      const property = n.property as { type?: string; name?: unknown; value?: unknown };
+      const name = n.computed ? (property.type === "Literal" ? property.value : undefined) : property.name;
+      if (name === "require") found.push({ offset: n.start, reason: FORBIDDEN.require as string });
+    }
+    for (const [key, value] of Object.entries(n)) {
+      // Names that are not references: `a.b` (b), `{ b: 1 }` (b), `class { b() {} }` (b), labels.
+      const notReference =
+        (key === "property" && n.type === "MemberExpression" && !n.computed) ||
+        (key === "key" && !n.computed) ||
+        key === "label";
+      visit(value, !notReference);
+    }
+  };
+  visit(body, true);
+  return found;
 }
 
 function lineAt(text: string, offset: number): number {
