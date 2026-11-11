@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": { "ignoreUnknown": true, "includes": ["**", "!**/*.md"] },
+  "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 120 },
+  "javascript": { "formatter": { "quoteStyle": "double" } },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "linter": {
+    "rules": {
+      "preset": "recommended",
+      "style": {
+        "useImportType": { "level": "error", "options": { "style": "separatedType" } },
+        "useExportType": "error",
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "vitest": {
+                "importNames": ["vi"],
+                "message": "Tests also run under `bun test`, which has no `vi`. Pass fakes in as arguments instead."
+              }
+            }
+          }
+        }
+      },
+      "suspicious": { "noExplicitAny": "error", "noEmptyBlockStatements": "error" }
+    }
+  }
+}

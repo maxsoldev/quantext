@@ -1,0 +1,13 @@
+{
+  "name": "@quantext/mod",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Claude Code plugin. Imports only types from @quantext/shared.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}

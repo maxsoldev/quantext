@@ -1,0 +1,15 @@
+packages:
+  - packages/*
+
+# Supply chain. Stated explicitly so a change of pnpm defaults does not weaken them.
+saveExact: true
+strictDepBuilds: true
+# No dependency may run install scripts. Add an entry only with a reason in a comment.
+allowBuilds: {}
+minimumReleaseAge: 1440
+trustPolicy: no-downgrade
+blockExoticSubdeps: true
+trustPolicyExclude:
+  # Types for Node 22 (@types/node@22) pin the 6.x line, published in 2024 before
+  # undici added provenance to its 7.x releases. Same repo (nodejs/undici), not a takeover.
+  - undici-types@6.21.0
