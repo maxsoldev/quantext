@@ -50,3 +50,17 @@ test("checks file paths too", () => {
   expect(result.status).toBe(1);
   expect(result.stderr).toContain("(path)  email");
 });
+
+test("with --history, finds personal data that a later commit removed", () => {
+  runOn({ "fixtures/a.jsonl": j('{"cwd":"/Us', 'ers/alice/x"}\n') });
+  const git = (...args: string[]) =>
+    spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...args], { cwd: root });
+  git("add", "-A");
+  git("commit", "-qm", "add");
+  git("rm", "-q", "fixtures/a.jsonl");
+  git("commit", "-qm", "remove");
+  expect(spawnSync(process.execPath, [script, root]).status).toBe(0);
+  const history = spawnSync(process.execPath, [script, "--history", root], { encoding: "utf8" });
+  expect(history.status).toBe(1);
+  expect(history.stderr).toMatch(/^[0-9a-f]{7} fixtures\/a\.jsonl {2}home path$/m);
+});

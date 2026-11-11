@@ -81,3 +81,46 @@ function identityPatterns(deny: readonly string[]): Pattern[] {
     regex: new RegExp(`(?<![A-Za-z0-9])${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9])`, "gi"),
   }));
 }
+
+export interface PatchFinding {
+  commit: string;
+  path: string;
+  kind: string;
+}
+
+/**
+ * Find personal data in the lines (and paths) that commits added, in `git log -p` output.
+ * Catches data that a later commit removed. At most one finding per commit, file and kind.
+ */
+export function scanPatch(log: string, options: ScanOptions = {}): PatchFinding[] {
+  const findings: PatchFinding[] = [];
+  const seen = new Set<string>();
+  let commit = "";
+  let path = "";
+  let inHeader = false;
+  const add = (text: string) => {
+    for (const { kind } of scanText(text, options)) {
+      const key = `${commit} ${path} ${kind}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      findings.push({ commit: commit.slice(0, 7), path, kind });
+    }
+  };
+  for (const line of log.split("\n")) {
+    if (line.startsWith("commit ")) {
+      commit = line.slice("commit ".length).trim();
+      inHeader = false;
+    } else if (line.startsWith("diff --git ")) {
+      inHeader = true;
+      path = "";
+    } else if (inHeader && line.startsWith("+++ ")) {
+      path = line === "+++ /dev/null" ? "" : line.slice("+++ b/".length);
+      if (path !== "") add(path);
+    } else if (line.startsWith("@@")) {
+      inHeader = false;
+    } else if (!inHeader && path !== "" && line.startsWith("+")) {
+      add(line.slice(1));
+    }
+  }
+  return findings;
+}

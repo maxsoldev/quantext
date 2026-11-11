@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { localDenylist, scanText } from "./personal-data.ts";
+import { localDenylist, scanPatch, scanText } from "./personal-data.ts";
 
 /** Join parts at run time, so this file does not itself trip the scan. */
 const j = (...parts: string[]) => parts.join("");
@@ -81,5 +81,31 @@ describe("scanText", () => {
 
   test("skips local names too short to scan for without noise", () => {
     expect(localDenylist({ user: "max", email: "", hostname: "pc" })).toEqual([]);
+  });
+});
+
+describe("scanPatch", () => {
+  test("finds personal data in lines that a commit added, once per commit, file and kind", () => {
+    const log = [
+      "commit 1111111111111111111111111111111111111111",
+      "diff --git a/fixtures/a.jsonl b/fixtures/a.jsonl",
+      "new file mode 100644",
+      "--- /dev/null",
+      "+++ b/fixtures/a.jsonl",
+      "@@ -0,0 +1,2 @@",
+      j('+{"cwd":"/Us', 'ers/alice/x"}'),
+      j('+{"cwd":"/Us', 'ers/alice/y"}'),
+      "commit 2222222222222222222222222222222222222222",
+      "diff --git a/fixtures/a.jsonl b/fixtures/a.jsonl",
+      "deleted file mode 100644",
+      "+++ /dev/null",
+      "@@ -1,2 +0,0 @@",
+      j('-{"cwd":"/Us', 'ers/alice/x"}'),
+      "diff --git a/README.md b/README.md",
+      "+++ b/README.md",
+      "@@ -1 +1 @@",
+      "+Data lives in ~/.quantext.",
+    ].join("\n");
+    expect(scanPatch(log)).toEqual([{ commit: "1111111", path: "fixtures/a.jsonl", kind: "home path" }]);
   });
 });
