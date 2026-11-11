@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { scanText } from "./personal-data.ts";
+import { localDenylist, scanText } from "./personal-data.ts";
 
 /** Join parts at run time, so this file does not itself trip the scan. */
 const j = (...parts: string[]) => parts.join("");
@@ -24,16 +24,14 @@ describe("scanText", () => {
     expect(scanText(text)).toEqual([]);
   });
 
-  test("finds emails, except at reserved example domains and allowlisted addresses", () => {
+  test("finds emails, except at reserved example domains and git SSH remotes", () => {
     const text = [
       j("author: dave", "@corp.io"),
       j("ok: user", "@example.com, a", "@b.example, x", "@sub.example.org, t", "@host.test"),
-      j("bot: noreply", "@vendor.dev"),
+      j("remote: git", "@github.com:org/repo.git"),
       "not an email: @scope/pkg@1.2.3 typescript@7.0.2",
     ].join("\n");
-    expect(scanText(text, { allowEmails: [j("noreply", "@vendor.dev")] })).toEqual([
-      { line: 1, kind: "email", match: j("dave", "@corp.io") },
-    ]);
+    expect(scanText(text)).toEqual([{ line: 1, kind: "email", match: j("dave", "@corp.io") }]);
   });
 
   test("finds AWS access keys and sk- API keys", () => {
@@ -46,5 +44,42 @@ describe("scanText", () => {
       { line: 2, kind: "API key (sk-)", match: anthropic },
       { line: 3, kind: "API key (sk-)", match: openai },
     ]);
+  });
+
+  test("finds home paths in escaped and encoded forms", () => {
+    const text = [
+      j('{"cwd":"C:', "\\\\Users\\\\erin\\\\code"),
+      j("projects/-Us", "ers-frank-code-app/1.jsonl"),
+      j("projects/-ho", "me-gina-src/2.jsonl"),
+      j("/ro", "ot/.claude/settings.json"),
+      j("file%3A%2F%2F%2FUs", "ers%2Fhank%2Fx"),
+    ].join("\n");
+    expect(scanText(text).map((f) => [f.line, f.kind])).toEqual([
+      [1, "home path"],
+      [2, "home path"],
+      [3, "home path"],
+      [4, "home path"],
+      [5, "home path"],
+    ]);
+  });
+
+  test("ignores /home/ and /Users/ inside web URLs", () => {
+    const text = j("see https://example.com/ho", "me/docs and http://host.test/Us", "ers/list\n");
+    expect(scanText(text)).toEqual([]);
+  });
+
+  test("finds the local user name, email and host name, given at run time", () => {
+    const deny = localDenylist({ user: "ivan", email: j("ivan.k", "@corp.io"), hostname: "Ivans-MacBook.local" });
+    const text = ["owner: Ivan", j("by ivan.k", "@corp.io"), "on ivans-macbook today", "ivanhoe is fine"].join("\n");
+    expect(scanText(text, { deny }).map((f) => [f.line, f.kind])).toEqual([
+      [1, "local identity"],
+      [2, "email"],
+      [2, "local identity"],
+      [3, "local identity"],
+    ]);
+  });
+
+  test("skips local names too short to scan for without noise", () => {
+    expect(localDenylist({ user: "max", email: "", hostname: "pc" })).toEqual([]);
   });
 });

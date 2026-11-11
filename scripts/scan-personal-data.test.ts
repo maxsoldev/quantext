@@ -11,14 +11,14 @@ let root = "";
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 /** Write `files` into a fresh git repo and run the scan on it. */
-function runOn(files: Record<string, string>) {
+function runOn(files: Record<string, string>, env: Record<string, string> = {}) {
   root = mkdtempSync(join(tmpdir(), "qx-scan-"));
   spawnSync("git", ["init", "-q"], { cwd: root });
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), text);
   }
-  return spawnSync(process.execPath, [script, root], { encoding: "utf8" });
+  return spawnSync(process.execPath, [script, root], { encoding: "utf8", env: { ...process.env, ...env } });
 }
 
 test("passes on a repo with no personal data, and skips ignored files", () => {
@@ -31,11 +31,18 @@ test("passes on a repo with no personal data, and skips ignored files", () => {
   expect(result.status).toBe(0);
 });
 
-test("fails and names file, line and kind, without printing the full match", () => {
+test("fails and names file, line and kind, without printing the match", () => {
   const result = runOn({ "fixtures/session.jsonl": j('{"a":1}\n{"cwd":"/Us', 'ers/alice/project"}\n') });
   expect(result.status).toBe(1);
   expect(result.stderr).toContain("fixtures/session.jsonl:2  home path");
   expect(result.stderr).not.toContain("alice");
+  expect(result.stderr).not.toContain(j("/Us", "ers"));
+});
+
+test("finds the local user name, read from the environment at run time", () => {
+  const result = runOn({ "notes.md": "Recorded by Zelda-Q.\n" }, { USER: "zelda-q" });
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain("notes.md:1  local identity");
 });
 
 test("checks file paths too", () => {
