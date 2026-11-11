@@ -44,6 +44,9 @@ const PACKAGE_DEPS: Record<string, readonly string[]> = {
   mod: ["shared"],
 };
 
+/** The only bare specifier the Claude Code mod sandbox resolves. */
+const MOD_SANDBOX_MODULE = "claude-code";
+
 const ENGINE_SRC = "packages/engine/src/";
 const WORKSPACE_SCOPE = "@quantext/";
 
@@ -62,7 +65,7 @@ export function findLayerViolations(files: readonly SourceFile[]): Violation[] {
       report(0, "", `package ${pkg} has no layer rules; add it to scripts/lib/layers.ts`);
       continue;
     }
-    const program = parse(file.text);
+    const program = parse(file.path, file.text);
     if (typeof program === "string") {
       report(0, "", `cannot parse: ${program}`);
       continue;
@@ -102,7 +105,9 @@ function checkImport(path: string, pkg: string, fromLayer: string | undefined, r
     if (name === "shared" && !typeOnly) return "import only types from @quantext/shared (use `import type`)";
     return undefined;
   }
-  if (pkg === "mod") return "mod runs in the mod sandbox and may import only types from @quantext/shared";
+  if (pkg === "mod" && specifier !== MOD_SANDBOX_MODULE) {
+    return "the mod sandbox accepts only relative imports, claude-code, and types from @quantext/shared";
+  }
   return undefined;
 }
 
@@ -125,10 +130,12 @@ function isTypeOnlyStatement(statement: object): boolean {
   return (node.specifiers as unknown[]).length === 0 && node.source === null; // `export {}`
 }
 
-/** The AST of `text`, or the parser's message when the text is not valid TypeScript. */
-function parse(text: string): ReturnType<typeof parseAst> | string {
+/** The AST of `text`, or the parser's message when it does not parse. The extension of `path` picks the syntax. */
+function parse(path: string, text: string): ReturnType<typeof parseAst> | string {
+  const ext = posix.extname(path);
+  const lang = ext === ".tsx" ? "tsx" : ext === ".jsx" ? "jsx" : /^\.[mc]?js$/.test(ext) ? "js" : "ts";
   try {
-    return parseAst(text, { lang: "ts" });
+    return parseAst(text, { lang });
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
   }

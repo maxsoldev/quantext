@@ -25,8 +25,10 @@ some imports must be type-only, `shared` must hold no runtime code, and `mod` ma
 
 core is a shared kernel: every layer may import its types and pure functions.
 
-Packages: `engine`, `web` and `mod` may import `@quantext/shared`, types only. `shared` contains only types. `mod`
-imports nothing else (the mod sandbox accepts no imports). Relative imports may not leave their package. Engine files
+Packages: `engine`, `web` and `mod` may import `@quantext/shared`, types only. `shared` contains only types. Besides
+relative paths and types from `@quantext/shared`, `mod` may import only the bare specifier `claude-code`: that is all
+the Claude Code mod sandbox accepts. Each file is parsed by its extension (`.ts`, `.tsx`, `.mts`, `.cts`, `.js`,
+`.jsx`, `.mjs`, `.cjs`). Relative imports may not leave their package. Engine files
 must sit inside a layer. Dynamic imports need a literal specifier. A file that does not parse is a violation.
 
 ## Consequences

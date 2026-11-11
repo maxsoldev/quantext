@@ -132,7 +132,8 @@ describe("findLayerViolations", () => {
     ]);
   });
 
-  test("mod imports nothing but types from shared and its own files", () => {
+  test("mod imports only claude-code, types from shared, and its own files", () => {
+    const sandbox = "the mod sandbox accepts only relative imports, claude-code, and types from @quantext/shared";
     const files = [
       {
         path: "packages/mod/src/index.ts",
@@ -141,12 +142,30 @@ describe("findLayerViolations", () => {
           'import { widget } from "./widget.ts";',
           'import { readFile } from "node:fs";',
           'import React from "react";',
+          'import { tool } from "claude-code";',
+          'import { x } from "claude-code/internal";',
         ].join("\n"),
       },
     ];
     expect(findLayerViolations(files).map((v) => [v.line, v.reason])).toEqual([
-      [3, "mod runs in the mod sandbox and may import only types from @quantext/shared"],
-      [4, "mod runs in the mod sandbox and may import only types from @quantext/shared"],
+      [3, sandbox],
+      [4, sandbox],
+      [6, sandbox],
+    ]);
+  });
+
+  test("parses each file by its extension", () => {
+    const files = [
+      {
+        path: "packages/web/src/App.tsx",
+        text: 'import type { S } from "@quantext/shared";\nexport const App = () => <div />;\n',
+      },
+      { path: "packages/web/src/legacy.jsx", text: "export const Old = () => <p />;\n" },
+      { path: "packages/mod/src/plain.mjs", text: 'import { readFile } from "node:fs";\n' },
+      engine("cli", "export const n: number = 1;\n", "main.mts"),
+    ];
+    expect(findLayerViolations(files).map((v) => [v.file, v.reason.slice(0, 20)])).toEqual([
+      ["packages/mod/src/plain.mjs", "the mod sandbox acce"],
     ]);
   });
 
