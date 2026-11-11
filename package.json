@@ -1,0 +1,24 @@
+{
+  "name": "quantext-workspace",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.18.0+sha512.9d7882d5dc82147ecfc4e062aa34834e0ad0296710a1837a1115ae012127d36b7109e321ac1598a1dd0a65597681b1e99917e12ed0d749eae91187943363beb3",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "lint": "biome ci .",
+    "format": "biome check --write .",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run --passWithNoTests",
+    "test:bun": "bun test",
+    "check": "pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.6",
+    "@types/node": "22.20.5",
+    "rolldown": "1.2.18",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
