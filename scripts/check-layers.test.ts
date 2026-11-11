@@ -37,3 +37,13 @@ test("fails and names the file when a layer imports from a layer above it", () =
   expect(result.stderr).toContain("packages/engine/src/core/index.ts:1");
   expect(result.stderr).toContain("core may not import ingest");
 });
+
+test("checks JavaScript and JSX files too", () => {
+  const result = runOn({
+    "packages/engine/src/core/index.ts": "export const one = 1;\n",
+    "packages/engine/src/core/legacy.mjs": 'import { x } from "../api/index.ts";\n',
+    "packages/engine/src/api/index.ts": "export const x = 1;\n",
+  });
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain("packages/engine/src/core/legacy.mjs:1");
+});

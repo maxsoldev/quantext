@@ -19,6 +19,8 @@ interface ImportRef {
   specifier: string | null;
   typeOnly: boolean;
   offset: number;
+  /** Set when the module is loaded by a call that bypasses `import`; such a ref is always a violation. */
+  bypass?: string;
 }
 
 /**
@@ -91,7 +93,15 @@ export function findLayerViolations(files: readonly SourceFile[]): Violation[] {
 
 function checkImport(path: string, pkg: string, fromLayer: string | undefined, ref: ImportRef): string | undefined {
   const { specifier, typeOnly } = ref;
+  if (ref.bypass !== undefined) return `${ref.bypass}() is not allowed; use import`;
   if (specifier === null) return "dynamic import with a non-literal specifier cannot be checked";
+  if (specifier.startsWith("#")) return "subpath imports (#...) are not allowed; use a relative path";
+  if (specifier.startsWith("/") || specifier.startsWith("file:")) {
+    return "absolute and file: specifiers are not allowed; use a relative path";
+  }
+  if (specifier === "module" || specifier === "node:module") {
+    return "node:module (createRequire) is not allowed; use import";
+  }
   if (specifier.startsWith(".")) {
     const target = posix.normalize(posix.join(posix.dirname(path), specifier));
     if (packageOf(target) !== pkg)
@@ -177,11 +187,24 @@ function importsOf(body: unknown): ImportRef[] {
       case "TSImportType":
         if (source) refs.push(ref(source, true));
         break;
+      case "CallExpression": {
+        const bypass = bypassName(n.callee);
+        if (bypass !== undefined) refs.push({ specifier: null, typeOnly: false, offset: n.start as number, bypass });
+        break;
+      }
     }
     for (const value of Object.values(n)) visit(value);
   };
   visit(body);
   return refs;
+}
+
+/** `require` or `process.getBuiltinModule` when `callee` is one of them: calls that load modules without `import`. */
+function bypassName(callee: unknown): string | undefined {
+  const c = callee as { type?: string; name?: string; property?: { name?: string } } | null;
+  if (c?.type === "Identifier" && c.name === "require") return "require";
+  if (c?.type === "MemberExpression" && c.property?.name === "getBuiltinModule") return "process.getBuiltinModule";
+  return undefined;
 }
 
 function ref(source: { type?: unknown; value?: unknown; start: number }, typeOnly: boolean): ImportRef {

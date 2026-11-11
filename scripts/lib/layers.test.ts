@@ -191,4 +191,42 @@ describe("findLayerViolations", () => {
       "package tools has no layer rules; add it to scripts/lib/layers.ts",
     ]);
   });
+
+  test("subpath, absolute and file: specifiers cannot bypass the rules", () => {
+    const files = [
+      engine(
+        "query",
+        [
+          'import { a } from "#ingest/index.ts";',
+          'import { b } from "/repo/packages/engine/src/ingest/index.ts";',
+          'import { c } from "file:///repo/packages/engine/src/ingest/index.ts";',
+        ].join("\n"),
+      ),
+    ];
+    expect(findLayerViolations(files).map((v) => [v.line, v.reason])).toEqual([
+      [1, "subpath imports (#...) are not allowed; use a relative path"],
+      [2, "absolute and file: specifiers are not allowed; use a relative path"],
+      [3, "absolute and file: specifiers are not allowed; use a relative path"],
+    ]);
+  });
+
+  test("require cannot bypass the rules", () => {
+    const files = [
+      engine(
+        "api",
+        [
+          'import { createRequire } from "node:module";',
+          'import * as mod from "module";',
+          'const store = require("../store/index.ts");',
+          'const m = process.getBuiltinModule("module");',
+        ].join("\n"),
+      ),
+    ];
+    expect(findLayerViolations(files).map((v) => [v.line, v.reason])).toEqual([
+      [1, "node:module (createRequire) is not allowed; use import"],
+      [2, "node:module (createRequire) is not allowed; use import"],
+      [3, "require() is not allowed; use import"],
+      [4, "process.getBuiltinModule() is not allowed; use import"],
+    ]);
+  });
 });

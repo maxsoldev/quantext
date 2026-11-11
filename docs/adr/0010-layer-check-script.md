@@ -29,7 +29,9 @@ Packages: `engine`, `web` and `mod` may import `@quantext/shared`, types only. `
 relative paths and types from `@quantext/shared`, `mod` may import only the bare specifier `claude-code`: that is all
 the Claude Code mod sandbox accepts. Each file is parsed by its extension (`.ts`, `.tsx`, `.mts`, `.cts`, `.js`,
 `.jsx`, `.mjs`, `.cjs`). Relative imports may not leave their package. Engine files
-must sit inside a layer. Dynamic imports need a literal specifier. A file that does not parse is a violation.
+must sit inside a layer. Dynamic imports need a literal specifier. `#` subpath imports, absolute and `file:`
+specifiers, `node:module` (`createRequire`), `require()` and `process.getBuiltinModule()` are not allowed, so
+nothing can load a module around the check. A file that does not parse is a violation.
 
 ## Consequences
 
