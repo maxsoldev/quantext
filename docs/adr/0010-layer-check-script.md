@@ -15,7 +15,7 @@ some imports must be type-only, `shared` must hold no runtime code, and `mod` ma
 
 | Engine layer | May import |
 |---|---|
-| core | nothing outside core: no built-ins, no packages |
+| core | nothing outside core except types from `@quantext/shared`: no built-ins, no packages |
 | adapters | core |
 | store | core |
 | ingest | core, adapters, store |
@@ -23,7 +23,8 @@ some imports must be type-only, `shared` must hold no runtime code, and `mod` ma
 | api | core, query |
 | cli (composition root) | core, adapters, store, ingest, query, api |
 
-core is a shared kernel: every layer may import its types and pure functions.
+core is a shared kernel: every layer may import its pure functions. Every layer may import types from
+`@quantext/shared` (ADR 14).
 
 Packages: `engine`, `web` and `mod` may import `@quantext/shared`, types only. `shared` contains only types. Besides
 relative paths and types from `@quantext/shared`, `mod` may import only the bare specifier `claude-code`: that is all

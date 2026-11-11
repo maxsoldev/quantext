@@ -84,7 +84,7 @@ kept running after the session ended, and `$.http.fetch` reached it. Interactive
 | Layer | Responsibility | Depends on |
 |---|---|---|
 | **adapters** | Turn one harness's files into domain events: session, call (request + usage), block, tool call, compaction. Report unknown row types | core |
-| **core** | Domain types; rebuild the request of each call (`keep` + `tail` + blobs); split each call's input into blocks with tokens (exact deltas, then estimates); prices as data. Pure: no I/O, no built-ins, no packages | nothing |
+| **core** | Logic over the domain types defined in shared: rebuild the request of each call (`keep` + `tail` + blobs); split each call's input into blocks with tokens (exact deltas, then estimates); prices as data. Pure: no I/O, no built-ins, no packages | shared (types only) |
 | **ingest** | Find files, read new bytes, call the adapter, write events in one transaction; watch files for live updates | adapters, core, store |
 | **store** | Schema, migrations, writes, behind a driver interface (`node:sqlite`, `bun:sqlite`). WAL mode, so readers never block the writer | core |
 | **query** | Read API: sessions, calls, context at call N, change from N-1, block lifetime cost. SQL views for agents | core, store |
@@ -92,8 +92,9 @@ kept running after the session ended, and `$.http.fetch` reached it. Interactive
 | **cli** | The `qx` command and the composition root: wires store, ingest and api together (`qx serve`). No business logic | every layer below |
 | **surfaces** | Viewer, mod, agent docs. No business logic: they only call the api (or the CLI) | api |
 
-**core is a shared kernel.** Every engine layer may import core (types and pure functions); core imports nothing
-outside itself. Besides core, a layer imports only the layers in its row: api must not import ingest or store, and
+**core is a shared kernel.** Every engine layer may import core (pure functions). core imports nothing outside
+itself except types from `@quantext/shared`, where the domain types (`Session`, `Call`, `Block`, …) and the API
+types live; every layer may import those types. Besides core, a layer imports only the layers in its row: api must not import ingest or store, and
 query must not import adapters or ingest. `scripts/check-layers.ts` enforces this table in CI.
 
 The mod imports only the shared **types** from `@quantext/shared` (erased at build time) and `claude-code`, because

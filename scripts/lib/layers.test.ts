@@ -41,7 +41,7 @@ describe("findLayerViolations", () => {
     expect(findLayerViolations(files)).toEqual([]);
   });
 
-  test("core imports nothing outside core", () => {
+  test("core imports nothing outside core, except types from shared", () => {
     const files = [
       engine(
         "core",
@@ -50,13 +50,14 @@ describe("findLayerViolations", () => {
           'import { readFile } from "node:fs";',
           'import { z } from "zod";',
           'import type { Session } from "@quantext/shared";',
+          'import { Call } from "@quantext/shared";',
         ].join("\n"),
       ),
     ];
     expect(findLayerViolations(files).map((v) => [v.line, v.reason])).toEqual([
       [2, "core imports nothing outside core (no built-ins, no packages)"],
       [3, "core imports nothing outside core (no built-ins, no packages)"],
-      [4, "core imports nothing outside core (no built-ins, no packages)"],
+      [5, "import only types from @quantext/shared (use `import type`)"],
     ]);
   });
 

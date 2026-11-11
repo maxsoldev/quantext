@@ -25,7 +25,8 @@ interface ImportRef {
 
 /**
  * Engine layers, bottom to top, and the layers each one may import. Mirrors docs/ARCHITECTURE.md "Layers".
- * core is a shared kernel: every layer may import it, and it imports nothing outside itself.
+ * core is a shared kernel: every layer may import it. It imports nothing outside itself except types from
+ * @quantext/shared, where the domain and API types live (as every package may).
  * cli is the composition root: it may import every layer below it.
  */
 const ENGINE_LAYERS: Record<string, readonly string[]> = {
@@ -108,7 +109,8 @@ function checkImport(path: string, pkg: string, fromLayer: string | undefined, r
       return "a relative import may not leave its package; import @quantext/<name> instead";
     return fromLayer === undefined ? undefined : checkEngineImport(fromLayer, target);
   }
-  if (fromLayer === "core") return "core imports nothing outside core (no built-ins, no packages)";
+  const isShared = specifier === `${WORKSPACE_SCOPE}shared` || specifier.startsWith(`${WORKSPACE_SCOPE}shared/`);
+  if (fromLayer === "core" && !isShared) return "core imports nothing outside core (no built-ins, no packages)";
   if (specifier.startsWith(WORKSPACE_SCOPE)) {
     const [name = ""] = specifier.slice(WORKSPACE_SCOPE.length).split("/");
     if (!PACKAGE_DEPS[pkg]?.includes(name)) return `${pkg} may not import @quantext/${name}`;
