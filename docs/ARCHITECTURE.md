@@ -66,19 +66,20 @@ kept running after the session ended, and `$.http.fetch` reached it. Interactive
 ## Layers
 
 ```
- surfaces   viewer (web) ──┐    mod (Claude Code plugin) ──┐    agents (SQL, skill, MCP later) ──┐
-                           └──────────── HTTP ─────────────┤                                     │ qx …
-                                                           ▼                                     ▼
- cli        qx · the composition root: wires store + ingest + api (`qx serve`); its commands read through query
-               │                       │                        │
-               ▼                       ▼                        ▼
- api        HTTP JSON + SSE ──────► query    sessions · calls · context at call N · diffs · views
-                                       │
-                                       ▼
- ingest     watcher + reader ─────► store    SQLite (WAL), versioned schema, migrations; ingest is the one writer
-               │
-               ▼
- adapters   claude-code (JSONL + api-request* rows) · codex (later) · …
+ surfaces   viewer (web)            mod (Claude Code plugin)            agents (SQL, skill, MCP later)
+                │                            │                                    │
+                └─────────── HTTP ───────────┤                                    │ qx …
+                                             ▼                                    ▼
+ api        HTTP JSON + SSE ◄────────────────────────── serves ──────────── cli   qx · the composition root:
+                │                                                            │    wires store, ingest and api
+                ▼                                                            │    (`qx serve`)
+ query      sessions · calls · context at call N · diffs · views ◄───────────┤    commands read through query
+                │                                                            │
+                ▼                                                            ▼
+ store      SQLite (WAL), versioned schema, migrations ◄─────────────── ingest   watcher + reader, the one writer
+                                                                             │
+                                                                             ▼
+ adapters                                         claude-code (JSONL + api-request* rows) · codex (later) · …
 
  core       shared kernel, used by every layer: context rebuild · token attribution · pricing (data)
  shared     domain and API types, types only, used by every package
@@ -97,8 +98,9 @@ kept running after the session ended, and `$.http.fetch` reached it. Interactive
 
 **core is a shared kernel.** Every engine layer may import core (pure functions). core imports nothing outside
 itself except types from `@quantext/shared`, where the domain types (`Session`, `Call`, `Block`, …) and the API
-types live; every layer may import those types. Besides core, a layer imports only the layers in its row: api must not import ingest or store, and
-query must not import adapters or ingest. `scripts/check-layers.ts` enforces this table in CI.
+types live; every layer may import those types. Besides core, a layer imports only the layers in its row: api must
+not import ingest or store, and query must not import adapters or ingest. `scripts/check-layers.ts` enforces this
+table in CI.
 
 The mod imports only the shared **types** from `@quantext/shared` (erased at build time) and `claude-code`, because
 the mod sandbox accepts no other imports besides relative paths.
