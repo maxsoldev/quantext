@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { localDenylist, scanPatch, scanText } from "./personal-data.ts";
+import { localDenylist, redactPath, scanPatch, scanText } from "./personal-data.ts";
 
 /** Join parts at run time, so this file does not itself trip the scan. */
 const j = (...parts: string[]) => parts.join("");
@@ -110,5 +110,18 @@ describe("scanPatch", () => {
       "+Data lives in ~/.quantext.",
     ].join("\n");
     expect(scanPatch(log)).toEqual([{ commit: "1111111", path: "fixtures/a.jsonl", kind: "home path" }]);
+  });
+});
+
+describe("redactPath", () => {
+  test("replaces each path segment that holds personal data, keeping the extension", () => {
+    expect(redactPath(j("fixtures/dave", "@corp.io/a.jsonl"))).toBe("fixtures/<redacted>/a.jsonl");
+    expect(redactPath("fixtures/clean/a.jsonl")).toBe("fixtures/clean/a.jsonl");
+    expect(redactPath(j("notes/dave", "@corp.io.txt"))).toBe("notes/<redacted>.txt");
+  });
+
+  test("hides the whole path behind a short hash when the match spans segments", () => {
+    expect(redactPath(j("fixtures/-Us", "ers-alice-app/x.jsonl"))).toBe("fixtures/<redacted>/x.jsonl");
+    expect(redactPath(j("x/Us", "ers/alice/a.txt"))).toMatch(/^<redacted path [0-9a-f]{8}>$/);
   });
 });

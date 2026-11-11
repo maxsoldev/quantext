@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { posix } from "node:path";
+
 export interface Finding {
   line: number;
   kind: string;
@@ -131,4 +134,20 @@ export function scanPatch(log: string, options: ScanOptions = {}): PatchFinding[
     }
   }
   return findings;
+}
+
+/**
+ * `path` safe to print: each segment with personal data becomes `<redacted>` (the file keeps its extension).
+ * When the match spans segments (`x/Users/<name>`), the whole path becomes `<redacted path HASH>`.
+ */
+export function redactPath(path: string, options: ScanOptions = {}): string {
+  if (scanText(path, options).length === 0) return path;
+  const segments = path.split("/");
+  const redacted = segments.map((segment, index) => {
+    if (scanText(segment, options).length === 0) return segment;
+    return `<redacted>${index === segments.length - 1 ? posix.extname(segment) : ""}`;
+  });
+  const result = redacted.join("/");
+  if (scanText(result, options).length === 0) return result;
+  return `<redacted path ${createHash("sha256").update(path).digest("hex").slice(0, 8)}>`;
 }

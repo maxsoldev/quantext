@@ -63,10 +63,12 @@ test("a CI user name such as runner causes no findings in this repo", () => {
   }
 });
 
-test("checks file paths too", () => {
-  const result = runOn({ [j("notes/dave", "@", "corp.io.txt")]: "hello\n" });
+test("checks file paths too, and prints them redacted", () => {
+  const result = runOn({ [j("notes/dave", "@", "corp.io.txt")]: j("cwd /Us", "ers/alice\n") });
   expect(result.status).toBe(1);
-  expect(result.stderr).toContain("(path)  email");
+  expect(result.stderr).toContain("notes/<redacted>.txt  (path)  email");
+  expect(result.stderr).toContain("notes/<redacted>.txt:1  home path");
+  expect(result.stderr).not.toContain("dave");
 });
 
 test("with --history, finds personal data that a later commit removed", () => {
@@ -81,4 +83,14 @@ test("with --history, finds personal data that a later commit removed", () => {
   const history = spawnSync(process.execPath, [script, "--history", root], { encoding: "utf8" });
   expect(history.status).toBe(1);
   expect(history.stderr).toMatch(/^[0-9a-f]{7} fixtures\/a\.jsonl {2}home path$/m);
+});
+
+test("with --history, prints matching paths redacted", () => {
+  runOn({ [j("notes/dave", "@", "corp.io.txt")]: "hello\n" });
+  spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "add", "-A"], { cwd: root });
+  spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "add"], { cwd: root });
+  const history = spawnSync(process.execPath, [script, "--history", root], { encoding: "utf8" });
+  expect(history.status).toBe(1);
+  expect(history.stderr).toMatch(/^[0-9a-f]{7} notes\/<redacted>\.txt {2}email$/m);
+  expect(history.stderr).not.toContain("dave");
 });

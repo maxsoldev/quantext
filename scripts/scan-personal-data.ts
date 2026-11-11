@@ -8,7 +8,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { localDenylist, scanPatch, scanText } from "./lib/personal-data.ts";
+import { localDenylist, redactPath, scanPatch, scanText } from "./lib/personal-data.ts";
 
 const args = process.argv.slice(2);
 const history = args.includes("--history");
@@ -28,16 +28,17 @@ let scope: string;
 
 if (history) {
   const log = git("log", "-p", "--all", "--no-color", "--no-ext-diff", "--no-textconv", "--format=commit %H");
-  for (const f of scanPatch(log, { deny })) findings.push(`${f.commit} ${f.path}  ${f.kind}`);
+  for (const f of scanPatch(log, { deny })) findings.push(`${f.commit} ${redactPath(f.path, { deny })}  ${f.kind}`);
   scope = `history of ${git("rev-list", "--all", "--count").trim()} commits`;
 } else {
   const listing = git("ls-files", "-z", "--cached", "--others", "--exclude-standard");
   const paths = listing.split("\0").filter((path) => path !== "" && existsSync(join(root, path)));
   for (const path of paths) {
-    for (const f of scanText(path, { deny })) findings.push(`${path}  (path)  ${f.kind}`);
+    const shown = redactPath(path, { deny });
+    for (const f of scanText(path, { deny })) findings.push(`${shown}  (path)  ${f.kind}`);
     const bytes = readFileSync(join(root, path));
     if (bytes.includes(0)) continue; // binary file
-    for (const f of scanText(bytes.toString("utf8"), { deny })) findings.push(`${path}:${f.line}  ${f.kind}`);
+    for (const f of scanText(bytes.toString("utf8"), { deny })) findings.push(`${shown}:${f.line}  ${f.kind}`);
   }
   scope = `${paths.length} files`;
 }
