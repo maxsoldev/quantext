@@ -148,4 +148,11 @@ describe("findLayerViolations", () => {
     const [violation] = findLayerViolations([engine("core", "export const = ;\n")]);
     expect(violation?.reason).toMatch(/^cannot parse: /);
   });
+
+  test("a package without rules is a violation, so new packages are not skipped", () => {
+    const files = [{ path: "packages/tools/src/index.ts", text: "export {};\n" }];
+    expect(findLayerViolations(files).map((v) => v.reason)).toEqual([
+      "package tools has no layer rules; add it to scripts/lib/layers.ts",
+    ]);
+  });
 });

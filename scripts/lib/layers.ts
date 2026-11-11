@@ -56,6 +56,10 @@ export function findLayerViolations(files: readonly SourceFile[]): Violation[] {
     if (pkg === undefined) continue;
     const report = (offset: number, specifier: string, reason: string) =>
       violations.push({ file: file.path, line: lineAt(file.text, offset), specifier, reason });
+    if (!(pkg in PACKAGE_DEPS)) {
+      report(0, "", `package ${pkg} has no layer rules; add it to scripts/lib/layers.ts`);
+      continue;
+    }
     const program = parse(file.text);
     if (typeof program === "string") {
       report(0, "", `cannot parse: ${program}`);
@@ -133,7 +137,7 @@ function parse(text: string): ReturnType<typeof parseAst> | string {
 
 function packageOf(path: string): string | undefined {
   const [top, name] = path.split("/");
-  return top === "packages" && name !== undefined && name in PACKAGE_DEPS ? name : undefined;
+  return top === "packages" && name !== undefined ? name : undefined;
 }
 
 function engineLayer(path: string): string | undefined {
