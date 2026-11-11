@@ -9,7 +9,7 @@ secrets to a secret scanner, and they can contain API keys. Neither must reach t
 
 ## Decision
 
-- `scripts/gitleaks.sh` downloads a pinned gitleaks release once into `.cache/`, checks its SHA-256, and scans the git
+- `scripts/gitleaks.sh` downloads a pinned gitleaks release once into `.cache/`, checks its SHA-256 on every run, and scans the git
   history and the working tree with the default rules (`.gitleaks.toml`). The same script runs locally and in CI, so
   there is no third-party action and no licence key.
 - `scripts/scan-personal-data.ts` scans every tracked and untracked, not ignored file, and each file path, for:

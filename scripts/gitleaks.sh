@@ -1,12 +1,11 @@
 #!/bin/sh
 # Run gitleaks on the git history and on the working tree.
-# Downloads a pinned release once into .cache/ and checks its SHA-256 first.
+# Downloads a pinned release once into .cache/, and checks its SHA-256 on every run before it extracts it.
 set -eu
 
 VERSION=8.30.1
 root=$(cd "$(dirname "$0")/.." && pwd)
-bin_dir="$root/.cache/gitleaks/$VERSION"
-bin="$bin_dir/gitleaks"
+archive="$root/.cache/gitleaks/gitleaks_${VERSION}.tar.gz"
 
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64) platform=darwin_arm64 sha=b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5 ;;
@@ -20,20 +19,24 @@ sha256() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
 
-if [ ! -x "$bin" ]; then
-  archive="$bin_dir/gitleaks.tar.gz"
-  mkdir -p "$bin_dir"
-  curl -fsSL -o "$archive" \
+if [ ! -f "$archive" ]; then
+  mkdir -p "$(dirname "$archive")"
+  curl -fsSL -o "$archive.part" \
     "https://github.com/gitleaks/gitleaks/releases/download/v$VERSION/gitleaks_${VERSION}_$platform.tar.gz"
-  actual=$(sha256 "$archive")
-  if [ "$actual" != "$sha" ]; then
-    rm -f "$archive"
-    echo "gitleaks.sh: checksum mismatch for gitleaks $VERSION ($platform): got $actual" >&2
-    exit 1
-  fi
-  tar -xzf "$archive" -C "$bin_dir" gitleaks
-  rm -f "$archive"
+  mv "$archive.part" "$archive"
 fi
+
+# Check the archive on every run, not only after download, so a changed cache cannot run.
+actual=$(sha256 "$archive")
+if [ "$actual" != "$sha" ]; then
+  rm -f "$archive"
+  echo "gitleaks.sh: checksum mismatch for gitleaks $VERSION ($platform): got $actual; removed the cached archive" >&2
+  exit 1
+fi
+bin_dir=$(mktemp -d)
+trap 'rm -rf "$bin_dir"' EXIT
+tar -xzf "$archive" -C "$bin_dir" gitleaks
+bin="$bin_dir/gitleaks"
 
 cd "$root"
 "$bin" git --no-banner --redact --config .gitleaks.toml .
