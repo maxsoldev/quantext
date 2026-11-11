@@ -1,6 +1,6 @@
 /**
  * Fail when an import breaks the layer rules in docs/ARCHITECTURE.md.
- * Usage: check-layers.ts [repo root]. Checks every .ts/.tsx file under packages/<name>/src.
+ * Usage: check-layers.ts [repo root]. Checks every .ts, .tsx, .js, .jsx file (and their .m and .c forms) under packages/<name>/src.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
@@ -14,7 +14,7 @@ for (const pkg of existsSync(packagesDir) ? readdirSync(packagesDir) : []) {
   const src = join(packagesDir, pkg, "src");
   if (!existsSync(src)) continue;
   for (const entry of readdirSync(src, { recursive: true, encoding: "utf8" })) {
-    if (!/\.tsx?$/.test(entry)) continue;
+    if (!/\.[mc]?[jt]sx?$/.test(entry)) continue;
     const absolute = join(src, entry);
     files.push({ path: relative(root, absolute).split(sep).join("/"), text: readFileSync(absolute, "utf8") });
   }

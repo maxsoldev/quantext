@@ -9,7 +9,7 @@ The release is one plugin folder. The engine must be one file, `dist/engine.js`,
 
 ## Decision
 
-Bundle the engine with Rolldown: ESM output for Node ≥ 22, with `node:*` and `bun:*` built-ins kept external, so the
+Bundle the engine with Rolldown: ESM output for Node ≥ 22.18, with `node:*` and `bun:*` built-ins kept external, so the
 store adapter for the current runtime is selected at run time (ADR 3). Step 1 adds no bundler config; build step 7
 adds it, together with the engine entry point.
 

@@ -20,7 +20,7 @@ quality bar. Decisions that are hard to change are recorded in `docs/adr/`.
 
 ## Code
 
-- TypeScript strict, ESM, Node ≥ 22 and Bun. No `any` without a comment that explains it.
+- TypeScript strict, ESM, Node ≥ 22.18 and Bun. No `any` without a comment that explains it.
 - Short docstrings (up to 5 lines) on exported functions and on tricky code. No comments that repeat the code.
 - Small files with one job. Prefer pure functions in `core/`.
 
@@ -28,7 +28,7 @@ quality bar. Decisions that are hard to change are recorded in `docs/adr/`.
 
 - Add a dependency only when it clearly pays for itself. Prefer the platform (Node built-ins, Web APIs).
 - Well-known packages only, exact versions, lockfile committed. Install scripts are off by default
-  (`pnpm.onlyBuiltDependencies` lists the few that need them).
+  (`allowBuilds` in `pnpm-workspace.yaml` lists the few that need them, each with a reason).
 - The engine never makes outbound network calls. The server binds `127.0.0.1`, checks the `Host` header, and sends
   no CORS headers.
 - **Never commit real session data.** Fixtures come only from the scripted dummy repo (`fixtures/README.md`) and must

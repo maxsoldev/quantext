@@ -25,4 +25,5 @@ JavaScript compiler API is not stable yet.
 - Each package sees only the globals of its runtime: engine code cannot use DOM types, mod code cannot use Node types.
 - Tools that need the TypeScript compiler API (for example dependency-cruiser) do not work with TypeScript 7 yet
   (see ADR 10).
-- Contributors need Node ≥ 22.18 (`engines`). The built engine still runs on any Node ≥ 22.
+- Node ≥ 22.18 is the one minimum, for contributors (`engines`) and for the built engine (ADR 3), so there is
+  only one number to check.

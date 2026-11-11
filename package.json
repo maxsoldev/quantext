@@ -14,8 +14,9 @@
     "test:bun": "bun test",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm layers && pnpm scan",
     "layers": "node scripts/check-layers.ts",
-    "check:bun": "pnpm lint && pnpm typecheck && pnpm test:bun && bun scripts/check-layers.ts && bun scripts/scan-personal-data.ts && sh scripts/gitleaks.sh",
-    "scan": "node scripts/scan-personal-data.ts && sh scripts/gitleaks.sh"
+    "check:bun": "bun test && bun scripts/check-layers.ts && bun scripts/scan-personal-data.ts && bun scripts/scan-personal-data.ts --history",
+    "scan": "node scripts/scan-personal-data.ts && pnpm scan:history && sh scripts/gitleaks.sh",
+    "scan:history": "node scripts/scan-personal-data.ts --history"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

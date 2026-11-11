@@ -1,2 +1,2 @@
-/** Live context viewer. Reads the engine API only. */
-export {};
+// Proves the workspace link to @quantext/shared type checks; real imports replace it.
+import type {} from "@quantext/shared";

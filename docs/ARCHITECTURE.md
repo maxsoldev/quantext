@@ -30,7 +30,7 @@ agents (SQL, CLI, later MCP). Nothing leaves the machine.
 | Part | Runs in | Can do | Cannot do |
 |---|---|---|---|
 | **Mod** | Claude Code's mod sandbox (no DOM, no Node; I/O only through `$`) | Read each call's `usage`, status line, toasts, commands, `/clear-tool-outputs`; `$.http.fetch` to the engine; start the engine with `$.process.run` | Open a server, use npm packages or Node built-ins, keep a child process alive (`$.process.spawn` dies with the session) |
-| **Engine** | A separate Node ≥ 22 or Bun process, started detached | Watch and parse transcripts, write the store, serve HTTP + SSE and the viewer's files | — |
+| **Engine** | A separate Node ≥ 22.18 or Bun process, started detached | Watch and parse transcripts, write the store, serve HTTP + SSE and the viewer's files | — |
 | **Viewer** | The browser | Read the engine's API | — |
 
 ### Starting the engine
@@ -38,7 +38,7 @@ agents (SQL, CLI, later MCP). Nothing leaves the machine.
 `/quantext view`:
 
 1. `$.http.fetch('http://127.0.0.1:<port>/health')`. If it answers, go to step 4.
-2. Find a runtime: `node` ≥ 22, else `bun`, else show a clear message with install steps.
+2. Find a runtime: `node` ≥ 22.18, else `bun`, else show a clear message with install steps.
 3. Start it detached: `$.process.run(['sh', '-c', 'nohup <runtime> "<plugin root>/dist/engine.js" >>"<log>" 2>&1 </dev/null &'])`.
    Poll `/health`.
 4. Open the URL: `open` on macOS, `xdg-open` on Linux (there is no open-URL API in the mod).
@@ -58,38 +58,52 @@ kept running after the session ended, and `$.http.fetch` reached it. Interactive
 
 - The native Claude Code install brings no Node or Bun. Most developers have one, but it is not guaranteed.
 - The store goes through a small driver interface with two implementations, `node:sqlite` and `bun:sqlite`.
+- The minimum is Node 22.18 (one number for users and contributors): `node:sqlite` works without a flag from
+  22.13, and the repo scripts need type stripping without a flag, from 22.18.
 - Later, to remove the runtime need: one compiled engine binary per platform (`bun build --compile`), shipped in
   the plugin.
 
 ## Layers
 
 ```
- surfaces     viewer (web)   mod (Claude Code plugin)   CLI (qx)   agents (SQL, skill, MCP later)
-                  │                 │                     │              │
- api          HTTP JSON + SSE (shared TypeScript types) ◄─┴──────────────┘
-                  │
- query        sessions · calls · context at call N · diffs · views
-                  │
- store        SQLite (WAL), versioned schema, migrations          ◄── one writer: the engine
-                  │
- ingest       watcher + incremental reader (byte offset per file, restart if a file shrinks)
-                  │
- core         domain model ── context rebuild ── token attribution ── pricing (data)
-                  │
- adapters     claude-code (JSONL + api-request* rows)   codex (later)   ...
+ surfaces   viewer (web)            mod (Claude Code plugin)            agents (SQL, skill, MCP later)
+                │                            │                                    │
+                └─────────── HTTP ───────────┤                                    │ qx …
+                                             ▼                                    ▼
+ api        HTTP JSON + SSE ◄────────────────────────── serves ──────────── cli   qx · the composition root:
+                │                                                            │    wires store, ingest and api
+                ▼                                                            │    (`qx serve`)
+ query      sessions · calls · context at call N · diffs · views ◄───────────┤    commands read through query
+                │                                                            │
+                ▼                                                            ▼
+ store      SQLite (WAL), versioned schema, migrations ◄─────────────── ingest   watcher + reader, the one writer
+                                                                             │
+                                                                             ▼
+ adapters                                         claude-code (JSONL + api-request* rows) · codex (later) · …
+
+ core       shared kernel, used by every layer: context rebuild · token attribution · pricing (data)
+ shared     domain and API types, types only, used by every package
 ```
 
 | Layer | Responsibility | Depends on |
 |---|---|---|
-| **adapters** | Turn one harness's files into domain events: session, call (request + usage), block, tool call, compaction. Report unknown row types | core types only |
-| **core** | Domain types; rebuild the request of each call (`keep` + `tail` + blobs); split each call's input into blocks with tokens (exact deltas, then estimates); prices as data | nothing |
+| **adapters** | Turn one harness's files into domain events: session, call (request + usage), block, tool call, compaction. Report unknown row types | core |
+| **core** | Logic over the domain types defined in shared: rebuild the request of each call (`keep` + `tail` + blobs); split each call's input into blocks with tokens (exact deltas, then estimates); prices as data. Pure: no I/O, no built-ins, no packages | shared (types only) |
 | **ingest** | Find files, read new bytes, call the adapter, write events in one transaction; watch files for live updates | adapters, core, store |
-| **store** | Schema, migrations, writes, behind a driver interface (`node:sqlite`, `bun:sqlite`). WAL mode, so readers never block the writer | core types |
-| **query** | Read API: sessions, calls, context at call N, change from N-1, block lifetime cost. SQL views for agents | store |
-| **api** | HTTP JSON + SSE events ("call added"), plus the viewer's static files. Request and response types live in a shared package | query |
-| **surfaces** | Viewer, mod, CLI, agent docs. No business logic: they only call the api or query layer | api / query |
+| **store** | Schema, migrations, writes, behind a driver interface (`node:sqlite`, `bun:sqlite`). WAL mode, so readers never block the writer | core |
+| **query** | Read API: sessions, calls, context at call N, change from N-1, block lifetime cost. SQL views for agents | core, store |
+| **api** | HTTP JSON + SSE events ("call added"), plus the viewer's static files. Request and response types live in a shared package | core, query |
+| **cli** | The `qx` command and the composition root: wires store, ingest and api together (`qx serve`). No business logic | every layer below |
+| **surfaces** | Viewer, mod, agent docs. No business logic: they only call the api (or the CLI) | api |
 
-The mod imports only the shared **types** (erased at build time), because the mod sandbox accepts no other imports.
+**core is a shared kernel.** Every engine layer may import core (pure functions). core imports nothing outside
+itself except types from `@quantext/shared`, where the domain types (`Session`, `Call`, `Block`, …) and the API
+types live; every layer may import those types. Besides core, a layer imports only the layers in its row: api must
+not import ingest or store, and query must not import adapters or ingest. `scripts/check-layers.ts` enforces this
+table in CI.
+
+The mod imports only the shared **types** from `@quantext/shared` (erased at build time) and `claude-code`, because
+the mod sandbox accepts no other imports besides relative paths.
 
 ## Domain model
 

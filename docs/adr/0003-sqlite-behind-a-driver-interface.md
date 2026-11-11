@@ -4,7 +4,7 @@ Status: accepted
 
 ## Context
 
-The engine runs on Node ≥ 22 or Bun, whichever the user has. Native SQLite packages (for example `better-sqlite3`)
+The engine runs on Node ≥ 22.18 or Bun, whichever the user has. Native SQLite packages (for example `better-sqlite3`)
 need install scripts or prebuilt binaries per platform and runtime, and they break the single-file engine bundle.
 Both runtimes now have a built-in SQLite module.
 
@@ -19,4 +19,6 @@ versioned and changed only by migrations.
 - No native dependency and no install script for the database.
 - Store tests run on both runtimes (build step 5), so the two adapters cannot drift.
 - The driver interface holds only what both modules support. No runtime-specific SQLite features above the driver.
-- `node:sqlite` is not marked stable in Node 22. We accept this and pin the behaviour we use with tests.
+- `node:sqlite` works without a flag from Node 22.13; our one minimum is 22.18, because the repo scripts need
+  type stripping without a flag (ADR 8). The module is not marked stable in Node 22. We accept this and pin the
+  behaviour we use with tests.

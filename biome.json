@@ -1,29 +1,67 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
-  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
-  "files": { "ignoreUnknown": true, "includes": ["**", "!**/*.md"] },
-  "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 120 },
-  "javascript": { "formatter": { "quoteStyle": "double" } },
-  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": ["**", "!**/*.md"]
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double"
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
   "linter": {
     "rules": {
       "preset": "recommended",
       "style": {
-        "useImportType": { "level": "error", "options": { "style": "separatedType" } },
+        "useImportType": {
+          "level": "error",
+          "options": {
+            "style": "separatedType"
+          }
+        },
         "useExportType": "error",
         "noRestrictedImports": {
           "level": "error",
           "options": {
             "paths": {
               "vitest": {
-                "importNames": ["vi"],
-                "message": "Tests also run under `bun test`, which has no `vi`. Pass fakes in as arguments instead."
+                "message": "Tests also run under `bun test`. Import only describe, test, it, expect and the before/after hooks; no `vi`, no namespace import.",
+                "allowImportNames": [
+                  "describe",
+                  "test",
+                  "it",
+                  "expect",
+                  "beforeAll",
+                  "beforeEach",
+                  "afterAll",
+                  "afterEach"
+                ]
               }
             }
           }
         }
       },
-      "suspicious": { "noExplicitAny": "error", "noEmptyBlockStatements": "error" }
+      "suspicious": {
+        "noExplicitAny": "error",
+        "noEmptyBlockStatements": "error"
+      }
     }
   }
 }
