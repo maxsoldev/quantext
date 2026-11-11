@@ -1,0 +1,8 @@
+# gitleaks config: the default rules, minus paths that are not ours.
+# Personal data (home paths, emails) is checked by scripts/scan-personal-data.ts.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Installed and generated files"
+paths = ['''(^|/)node_modules/''', '''(^|/)\.cache/''', '''(^|/)dist/''', '''(^|/)\.git/''']
