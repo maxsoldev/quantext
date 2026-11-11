@@ -15,7 +15,8 @@ started it as its parent.
 _Avoid_: conversation, transcript, thread, chat
 
 **Call**:
-One request from the harness to the model, with the response and its usage.
+One request from the harness to the model, with the response and its usage. The model and the parameters (max
+tokens, thinking, effort, betas) belong to the Call, not to its Shape.
 _Avoid_: turn, request, message, step
 
 **Usage**:
@@ -23,15 +24,20 @@ The token counts that the model provider reports for one Call: input, cache read
 _Avoid_: token stats, metrics
 
 **Shape**:
-The structure of a Call's request apart from the conversation content: model, parameters, system prompt and tool
-schemas. When the shape changes, the cache cannot be reused.
-_Avoid_: signature, config
+The system prompt blocks and the tool schemas of a Call's request, identified by its shape hash. Many Calls share one
+Shape; it is stored once (in Claude Code logs: the `api-request-shape` row).
+_Avoid_: signature, config, header
 
 **Compaction**:
 An event where the harness replaces most of a Session's context with a shorter summary, to free room.
 _Avoid_: summarisation, truncation, reset
 
 ## Context
+
+**Blob**:
+One message of a Call's message list, stored once by the hash of its content (in Claude Code logs: the
+`api-request-blob` row).
+_Avoid_: message body, payload
 
 **Block**:
 One unique piece of content sent to the model (a system prompt, a tool schema, a user message, a tool result, and so
@@ -47,12 +53,18 @@ One use of a tool by the model: the tool, its input, and the Block that holds it
 _Avoid_: tool use, function call, action
 
 **Keep**:
-The part of a Call's input that the harness carried over unchanged from the previous Call.
+The number of messages, from the start of the previous Call's message list, that a Call keeps unchanged.
 _Avoid_: history, carry-over
 
 **Tail**:
-The part of a Call's input that is new since the previous Call.
+The list of Blob hashes that a Call appends after the kept messages. The messages of Call N are the first Keep
+messages of Call N−1, then the Blobs of the Tail.
 _Avoid_: delta, diff, new messages
+
+**Cache breakpoint**:
+A place in a Call's request that carries a `cache_control` marker, recorded as its path in the request. The model
+provider caches the request up to each breakpoint.
+_Avoid_: cache marker, cacheControl (that is the field that holds the paths)
 
 **Cached prefix**:
 The leading part of a Call's input that the model provider read from its cache instead of processing again.
