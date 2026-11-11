@@ -182,13 +182,25 @@ importers:
         specifier: 5.1.0
         version: 5.1.0(@types/node@22.20.5)(vite@8.3.7(@types/node@22.20.5))
 
-  packages/engine: {}
+  packages/engine:
+    dependencies:
+      '@quantext/shared':
+        specifier: workspace:*
+        version: link:../shared
 
-  packages/mod: {}
+  packages/mod:
+    devDependencies:
+      '@quantext/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/shared: {}
 
-  packages/web: {}
+  packages/web:
+    dependencies:
+      '@quantext/shared':
+        specifier: workspace:*
+        version: link:../shared
 
 packages:
 

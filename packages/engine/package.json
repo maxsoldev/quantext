@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "description": "Ingest, store, query and API. Bundled to one file, dist/engine.js.",
-  "exports": {
-    ".": "./src/index.ts"
-  },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@quantext/shared": "workspace:*"
   }
 }
