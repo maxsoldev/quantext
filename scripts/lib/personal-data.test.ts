@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { localDenylist, redactPath, scanPatch, scanText } from "./personal-data.ts";
 
@@ -84,6 +86,17 @@ describe("scanText", () => {
     for (const hostname of ["", "pc", "localhost", "runnervm0abc12", "fv-az123-456", "ip-10-1-2-3.ec2.internal"]) {
       expect(localDenylist({ email: "", hostname })).toEqual([]);
     }
+  });
+
+  test("skips common default host names", () => {
+    const defaults = ["ubuntu", "Debian", "fedora", "raspberrypi", "MacBook", "macbook-pro.local", "MacBook-Air"];
+    const more = ["iMac", "mac-mini", "desktop", "laptop", "devbox", "codespaces-1a2b3c"];
+    for (const hostname of [...defaults, ...more]) expect(localDenylist({ email: "", hostname })).toEqual([]);
+  });
+
+  test("a host named ubuntu gives no finding on the CI workflow", () => {
+    const workflow = readFileSync(join(import.meta.dirname, "../../.github/workflows/ci.yml"), "utf8");
+    expect(scanText(workflow, { deny: localDenylist({ email: "", hostname: "ubuntu" }) })).toEqual([]);
   });
 });
 

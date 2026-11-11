@@ -71,8 +71,30 @@ export function scanText(text: string, options: ScanOptions = {}): Finding[] {
   return findings;
 }
 
-/** Host names that name no person: loopback and the usual CI runner hosts (GitHub, Azure, AWS). */
-const GENERIC_HOST = /^(?:localhost|runner|runnervm\w*|fv-az[\w-]*|ip-[\d-]+|ec2[\w-]*|buildkitsandbox)(?:\.|$)/i;
+/** Host names that name no person: loopback, CI runner hosts (GitHub, Azure, AWS) and common OS defaults. */
+const GENERIC_HOST = new RegExp(
+  `^(?:${[
+    "localhost",
+    "runner",
+    "runnervm\\w*",
+    "fv-az[\\w-]*",
+    "ip-[\\d-]+",
+    "ec2[\\w-]*",
+    "buildkitsandbox",
+    "codespaces-[\\w-]*",
+    "ubuntu",
+    "debian",
+    "fedora",
+    "raspberrypi",
+    "macbook(?:-pro|-air)?",
+    "imac",
+    "mac-mini",
+    "desktop",
+    "laptop",
+    "devbox",
+  ].join("|")})(?:\\.|$)`,
+  "i",
+);
 
 /**
  * Terms that identify this machine's user: the git email and the host name, as literals.
