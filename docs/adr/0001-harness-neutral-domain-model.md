@@ -11,7 +11,8 @@ these shapes leak into the store, the queries or the viewer, each new harness ch
 
 Only `adapters/` knows a harness's row names and shapes. An adapter turns them into domain events: `Session`, `Call`,
 `Block`, `CallBlock`, `ToolCall`, `Compaction` (see `docs/GLOSSARY.md`). All layers above speak only this model. The
-layer check enforces that only `ingest` imports `adapters`, and that `adapters` imports only types from `core`.
+layer check enforces that only `ingest` (and `cli`, the composition root) imports `adapters`, and that `adapters`
+imports only `core`.
 
 ## Consequences
 

@@ -15,13 +15,15 @@ some imports must be type-only, `shared` must hold no runtime code, and `mod` ma
 
 | Engine layer | May import |
 |---|---|
-| core | nothing |
-| adapters | core (types only) |
-| store | core (types only) |
+| core | nothing outside core: no built-ins, no packages |
+| adapters | core |
+| store | core |
 | ingest | core, adapters, store |
 | query | core, store |
 | api | core, query |
-| cli | core, store, ingest, query, api |
+| cli (composition root) | core, adapters, store, ingest, query, api |
+
+core is a shared kernel: every layer may import its types and pure functions.
 
 Packages: `engine`, `web` and `mod` may import `@quantext/shared`, types only. `shared` contains only types. `mod`
 imports nothing else (the mod sandbox accepts no imports). Relative imports may not leave their package. Engine files

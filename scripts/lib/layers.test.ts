@@ -35,30 +35,47 @@ describe("findLayerViolations", () => {
     expect(findLayerViolations(files)).toEqual([]);
   });
 
-  test("adapters and store may import only types from core", () => {
+  test("core is a shared kernel: every layer may import its types and functions", () => {
+    const layers = ["adapters", "store", "ingest", "query", "api", "cli"];
+    const files = layers.map((layer) => engine(layer, 'import { rebuild, type Call } from "../core/index.ts";\n'));
+    expect(findLayerViolations(files)).toEqual([]);
+  });
+
+  test("core imports nothing outside core", () => {
     const files = [
-      engine("adapters", 'import type { Call } from "../core/index.ts";\nexport type * from "../core/index.ts";\n'),
-      engine("store", 'import { hash } from "../core/index.ts";\n'),
+      engine(
+        "core",
+        [
+          'import { a } from "./a.ts";',
+          'import { readFile } from "node:fs";',
+          'import { z } from "zod";',
+          'import type { Session } from "@quantext/shared";',
+        ].join("\n"),
+      ),
     ];
-    expect(findLayerViolations(files)).toEqual([
-      {
-        file: "packages/engine/src/store/index.ts",
-        line: 1,
-        specifier: "../core/index.ts",
-        reason: "store may import only types from core (use `import type`)",
-      },
+    expect(findLayerViolations(files).map((v) => [v.line, v.reason])).toEqual([
+      [2, "core imports nothing outside core (no built-ins, no packages)"],
+      [3, "core imports nothing outside core (no built-ins, no packages)"],
+      [4, "core imports nothing outside core (no built-ins, no packages)"],
     ]);
   });
 
-  test("nothing above ingest imports adapters", () => {
-    const files = [engine("query", '\n\nimport type { Row } from "../adapters/rows.ts";\n', "sessions.ts")];
-    expect(findLayerViolations(files)).toEqual([
-      {
-        file: "packages/engine/src/query/sessions.ts",
-        line: 3,
-        specifier: "../adapters/rows.ts",
-        reason: "query may not import adapters",
-      },
+  test("cli is the composition root and may import every layer", () => {
+    const layers = ["core", "adapters", "store", "ingest", "query", "api"];
+    const text = layers.map((layer) => `import * as ${layer} from "../${layer}/index.ts";`).join("\n");
+    expect(findLayerViolations([engine("cli", text)])).toEqual([]);
+  });
+
+  test("api reads only through query, and query never sees adapters or ingest", () => {
+    const files = [
+      engine("api", 'import { a } from "../ingest/index.ts";\nimport { b } from "../store/index.ts";\n'),
+      engine("query", 'import { c } from "../adapters/index.ts";\nimport { d } from "../ingest/index.ts";\n'),
+    ];
+    expect(findLayerViolations(files).map((v) => v.reason)).toEqual([
+      "api may not import ingest",
+      "api may not import store",
+      "query may not import adapters",
+      "query may not import ingest",
     ]);
   });
 

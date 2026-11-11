@@ -21,17 +21,19 @@ interface ImportRef {
   offset: number;
 }
 
-type Access = "any" | "types";
-
-/** Engine layers, bottom to top, and what each one may import. Mirrors docs/ARCHITECTURE.md "Layers". */
-const ENGINE_LAYERS: Record<string, Record<string, Access>> = {
-  core: {},
-  adapters: { core: "types" },
-  store: { core: "types" },
-  ingest: { core: "any", adapters: "any", store: "any" },
-  query: { core: "any", store: "any" },
-  api: { core: "any", query: "any" },
-  cli: { core: "any", store: "any", ingest: "any", query: "any", api: "any" },
+/**
+ * Engine layers, bottom to top, and the layers each one may import. Mirrors docs/ARCHITECTURE.md "Layers".
+ * core is a shared kernel: every layer may import it, and it imports nothing outside itself.
+ * cli is the composition root: it may import every layer below it.
+ */
+const ENGINE_LAYERS: Record<string, readonly string[]> = {
+  core: [],
+  adapters: ["core"],
+  store: ["core"],
+  ingest: ["core", "adapters", "store"],
+  query: ["core", "store"],
+  api: ["core", "query"],
+  cli: ["core", "adapters", "store", "ingest", "query", "api"],
 };
 
 /** Workspace packages and which other workspace packages each one may import. */
@@ -91,8 +93,9 @@ function checkImport(path: string, pkg: string, fromLayer: string | undefined, r
     const target = posix.normalize(posix.join(posix.dirname(path), specifier));
     if (packageOf(target) !== pkg)
       return "a relative import may not leave its package; import @quantext/<name> instead";
-    return fromLayer === undefined ? undefined : checkEngineImport(fromLayer, target, typeOnly);
+    return fromLayer === undefined ? undefined : checkEngineImport(fromLayer, target);
   }
+  if (fromLayer === "core") return "core imports nothing outside core (no built-ins, no packages)";
   if (specifier.startsWith(WORKSPACE_SCOPE)) {
     const [name = ""] = specifier.slice(WORKSPACE_SCOPE.length).split("/");
     if (!PACKAGE_DEPS[pkg]?.includes(name)) return `${pkg} may not import @quantext/${name}`;
@@ -103,15 +106,11 @@ function checkImport(path: string, pkg: string, fromLayer: string | undefined, r
   return undefined;
 }
 
-function checkEngineImport(fromLayer: string, target: string, typeOnly: boolean): string | undefined {
+function checkEngineImport(fromLayer: string, target: string): string | undefined {
   const toLayer = engineLayer(target);
   if (toLayer === undefined || toLayer === fromLayer) return undefined;
   if (!(toLayer in ENGINE_LAYERS)) return "import target is outside the engine layers";
-  const access = ENGINE_LAYERS[fromLayer]?.[toLayer];
-  if (access === undefined) return `${fromLayer} may not import ${toLayer}`;
-  if (access === "types" && !typeOnly)
-    return `${fromLayer} may import only types from ${toLayer} (use \`import type\`)`;
-  return undefined;
+  return ENGINE_LAYERS[fromLayer]?.includes(toLayer) ? undefined : `${fromLayer} may not import ${toLayer}`;
 }
 
 function isTypeOnlyStatement(statement: object): boolean {
