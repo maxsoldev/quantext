@@ -36,7 +36,7 @@ the Claude Code mod sandbox accepts. Each file is parsed by its extension (`.ts`
 must sit inside a layer. Dynamic imports need a literal specifier. `#` subpath imports, absolute and `file:`
 specifiers, `node:module` (`createRequire`), `process.getBuiltinModule()` are not allowed, and engine and mod
 code may not refer to `require` (also `module.require`, `import.meta.require`, `globalThis["require"]`), `eval` or
-`Function`, so nothing can load or run code around the check. A file that does not parse is a violation.
+`Function` (also as a property, such as `globalThis.eval`), and may not call `.constructor()`, so nothing can load or run code around the check. A file that does not parse is a violation.
 
 ## Consequences
 

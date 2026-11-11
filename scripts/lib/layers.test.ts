@@ -254,4 +254,20 @@ describe("findLayerViolations", () => {
       ["mod", 1, "eval is not allowed"],
     ]);
   });
+
+  test("eval, Function and .constructor() calls are caught as properties too", () => {
+    const text = [
+      'globalThis.eval("1");',
+      'globalThis["eval"]("1");',
+      'self.Function("x");',
+      'f.constructor("return 1")();',
+      "class A { constructor() {} } const n = this.constructor.name; o.evaluate();",
+    ].join("\n");
+    expect(findLayerViolations([engine("api", text)]).map((v) => [v.line, v.reason])).toEqual([
+      [1, "eval is not allowed"],
+      [2, "eval is not allowed"],
+      [3, "Function is not allowed"],
+      [4, ".constructor() calls are not allowed (they reach Function)"],
+    ]);
+  });
 });

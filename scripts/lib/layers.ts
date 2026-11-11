@@ -234,8 +234,8 @@ const FORBIDDEN: Record<string, string> = {
 };
 
 /**
- * Every runtime reference to `require`, `eval` or `Function`: as a name, or `require` as a property
- * (`module.require`, `import.meta.require`, `globalThis["require"]`). These load or run code around `import`.
+ * Every runtime reference to `require`, `eval` or `Function`, as a name or a property (`module.require`,
+ * `globalThis["eval"]`), and every `.constructor()` call. These load or run code around `import`.
  */
 function forbiddenReferences(body: unknown): { offset: number; reason: string }[] {
   const found: { offset: number; reason: string }[] = [];
@@ -247,13 +247,21 @@ function forbiddenReferences(body: unknown): { offset: number; reason: string }[
     if (node === null || typeof node !== "object") return;
     const n = node as Record<string, unknown> & { type?: string; start: number };
     if (n.type !== undefined && TYPE_NODES.has(n.type)) return;
-    if (n.type === "Identifier" && isName && typeof n.name === "string" && n.name in FORBIDDEN) {
+    if (n.type === "Identifier" && isName && typeof n.name === "string" && Object.hasOwn(FORBIDDEN, n.name)) {
       found.push({ offset: n.start, reason: FORBIDDEN[n.name] as string });
     }
     if (n.type === "MemberExpression") {
       const property = n.property as { type?: string; name?: unknown; value?: unknown };
       const name = n.computed ? (property.type === "Literal" ? property.value : undefined) : property.name;
-      if (name === "require") found.push({ offset: n.start, reason: FORBIDDEN.require as string });
+      if (typeof name === "string" && Object.hasOwn(FORBIDDEN, name))
+        found.push({ offset: n.start, reason: FORBIDDEN[name] as string });
+    }
+    if (n.type === "CallExpression" || n.type === "NewExpression") {
+      const callee = n.callee as { type?: string; computed?: boolean; property?: { name?: unknown; value?: unknown } };
+      const name = callee.computed ? callee.property?.value : callee.property?.name;
+      if (callee.type === "MemberExpression" && name === "constructor") {
+        found.push({ offset: n.start, reason: ".constructor() calls are not allowed (they reach Function)" });
+      }
     }
     for (const [key, value] of Object.entries(n)) {
       // Names that are not references: `a.b` (b), `{ b: 1 }` (b), `class { b() {} }` (b), labels.
