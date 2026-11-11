@@ -15,6 +15,6 @@ Write the engine, the viewer and the mod in TypeScript, in one pnpm workspace. D
 ## Consequences
 
 - No generated clients and no schema drift between engine, viewer and mod.
-- The engine needs a JavaScript runtime (Node ≥ 22 or Bun) on the user's machine, until we ship a compiled binary.
+- The engine needs a JavaScript runtime (Node ≥ 22.18 or Bun) on the user's machine, until we ship a compiled binary.
 - `packages/shared` must hold no runtime code, because the mod can import only erased types. The layer check enforces
   this.

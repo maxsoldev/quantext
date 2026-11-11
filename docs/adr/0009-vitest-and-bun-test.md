@@ -4,7 +4,7 @@ Status: accepted
 
 ## Context
 
-The engine runs on Node ≥ 22 and on Bun, and the store has a different SQLite adapter on each. Tests must run on both
+The engine runs on Node ≥ 22.18 and on Bun, and the store has a different SQLite adapter on each. Tests must run on both
 runtimes, from one set of files.
 
 ## Decision

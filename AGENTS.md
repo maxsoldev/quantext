@@ -20,7 +20,7 @@ quality bar. Decisions that are hard to change are recorded in `docs/adr/`.
 
 ## Code
 
-- TypeScript strict, ESM, Node ≥ 22 and Bun. No `any` without a comment that explains it.
+- TypeScript strict, ESM, Node ≥ 22.18 and Bun. No `any` without a comment that explains it.
 - Short docstrings (up to 5 lines) on exported functions and on tricky code. No comments that repeat the code.
 - Small files with one job. Prefer pure functions in `core/`.
 

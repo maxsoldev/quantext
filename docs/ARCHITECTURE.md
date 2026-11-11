@@ -30,7 +30,7 @@ agents (SQL, CLI, later MCP). Nothing leaves the machine.
 | Part | Runs in | Can do | Cannot do |
 |---|---|---|---|
 | **Mod** | Claude Code's mod sandbox (no DOM, no Node; I/O only through `$`) | Read each call's `usage`, status line, toasts, commands, `/clear-tool-outputs`; `$.http.fetch` to the engine; start the engine with `$.process.run` | Open a server, use npm packages or Node built-ins, keep a child process alive (`$.process.spawn` dies with the session) |
-| **Engine** | A separate Node ≥ 22 or Bun process, started detached | Watch and parse transcripts, write the store, serve HTTP + SSE and the viewer's files | — |
+| **Engine** | A separate Node ≥ 22.18 or Bun process, started detached | Watch and parse transcripts, write the store, serve HTTP + SSE and the viewer's files | — |
 | **Viewer** | The browser | Read the engine's API | — |
 
 ### Starting the engine
@@ -38,7 +38,7 @@ agents (SQL, CLI, later MCP). Nothing leaves the machine.
 `/quantext view`:
 
 1. `$.http.fetch('http://127.0.0.1:<port>/health')`. If it answers, go to step 4.
-2. Find a runtime: `node` ≥ 22, else `bun`, else show a clear message with install steps.
+2. Find a runtime: `node` ≥ 22.18, else `bun`, else show a clear message with install steps.
 3. Start it detached: `$.process.run(['sh', '-c', 'nohup <runtime> "<plugin root>/dist/engine.js" >>"<log>" 2>&1 </dev/null &'])`.
    Poll `/health`.
 4. Open the URL: `open` on macOS, `xdg-open` on Linux (there is no open-URL API in the mod).
