@@ -58,6 +58,8 @@ kept running after the session ended, and `$.http.fetch` reached it. Interactive
 
 - The native Claude Code install brings no Node or Bun. Most developers have one, but it is not guaranteed.
 - The store goes through a small driver interface with two implementations, `node:sqlite` and `bun:sqlite`.
+- The minimum is Node 22.18 (one number for users and contributors): `node:sqlite` works without a flag from
+  22.13, and the repo scripts need type stripping without a flag, from 22.18.
 - Later, to remove the runtime need: one compiled engine binary per platform (`bun build --compile`), shipped in
   the plugin.
 
