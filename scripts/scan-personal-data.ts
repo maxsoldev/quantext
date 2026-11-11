@@ -9,7 +9,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { localDenylist, redactPath, scanPatch, scanText } from "./lib/personal-data.ts";
+import { createPathRedactor, localDenylist, scanPatch, scanText } from "./lib/personal-data.ts";
 
 const args = process.argv.slice(2);
 const history = args.includes("--history");
@@ -22,6 +22,7 @@ const gitEmail = () => {
   return result.status === 0 ? result.stdout : ""; // exit 1: no email configured
 };
 const deny = localDenylist({ email: gitEmail(), hostname: hostname() });
+const redact = createPathRedactor({ deny });
 
 /** Lines of `where  rule`. Never the matched value, so the output does not leak what it found. */
 const findings: string[] = [];
@@ -32,13 +33,13 @@ if (history) {
   const hasHead = spawnSync("git", ["rev-parse", "--verify", "-q", "HEAD"], { cwd: root }).status === 0;
   const refs = hasHead ? ["HEAD", "--remotes"] : ["--remotes"];
   const log = git("log", "-p", ...refs, "--no-color", "--no-ext-diff", "--no-textconv", "--format=commit %H");
-  for (const f of scanPatch(log, { deny })) findings.push(`${f.commit} ${redactPath(f.path, { deny })}  ${f.kind}`);
+  for (const f of scanPatch(log, { deny })) findings.push(`${f.commit} ${redact(f.path)}  ${f.kind}`);
   scope = `history of ${git("rev-list", ...refs, "--count").trim()} commits`;
 } else {
   const listing = git("ls-files", "-z", "--cached", "--others", "--exclude-standard");
   const paths = listing.split("\0").filter((path) => path !== "" && existsSync(join(root, path)));
   for (const path of paths) {
-    const shown = redactPath(path, { deny });
+    const shown = redact(path);
     for (const f of scanText(path, { deny })) findings.push(`${shown}  (path)  ${f.kind}`);
     const bytes = readFileSync(join(root, path));
     if (bytes.includes(0)) continue; // binary file

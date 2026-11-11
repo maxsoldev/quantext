@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { localDenylist, redactPath, scanPatch, scanText } from "./personal-data.ts";
+import { createPathRedactor, localDenylist, scanPatch, scanText } from "./personal-data.ts";
 
 /** Join parts at run time, so this file does not itself trip the scan. */
 const j = (...parts: string[]) => parts.join("");
@@ -126,15 +126,19 @@ describe("scanPatch", () => {
   });
 });
 
-describe("redactPath", () => {
+describe("createPathRedactor", () => {
   test("replaces each path segment that holds personal data, keeping the extension", () => {
+    const redactPath = createPathRedactor();
     expect(redactPath(j("fixtures/dave", "@corp.io/a.jsonl"))).toBe("fixtures/<redacted>/a.jsonl");
     expect(redactPath("fixtures/clean/a.jsonl")).toBe("fixtures/clean/a.jsonl");
     expect(redactPath(j("notes/dave", "@corp.io.txt"))).toBe("notes/<redacted>.txt");
+    expect(redactPath(j("fixtures/-Us", "ers-alice-app/x.jsonl"))).toBe("fixtures/<redacted>/x.jsonl");
   });
 
-  test("hides the whole path behind a short hash when the match spans segments", () => {
-    expect(redactPath(j("fixtures/-Us", "ers-alice-app/x.jsonl"))).toBe("fixtures/<redacted>/x.jsonl");
-    expect(redactPath(j("x/Us", "ers/alice/a.txt"))).toMatch(/^<redacted path [0-9a-f]{8}>$/);
+  test("numbers whole paths per run when the match spans segments, so nothing can be guessed back", () => {
+    const redactPath = createPathRedactor();
+    expect(redactPath(j("x/Us", "ers/alice/a.txt"))).toBe("<redacted path #1>");
+    expect(redactPath(j("y/Us", "ers/bob/b.txt"))).toBe("<redacted path #2>");
+    expect(redactPath(j("x/Us", "ers/alice/a.txt"))).toBe("<redacted path #1>");
   });
 });
