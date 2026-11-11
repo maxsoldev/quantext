@@ -22,7 +22,7 @@ secrets to a secret scanner, and they can contain API keys. Neither must reach t
   (`scanText`, `localDenylist`), so the fixture tooling (build step 2) reuses them. Output names the file, the line
   and the rule, never the matched value; a path that matches is printed
   redacted. `--history` (`pnpm scan:history`, part of `pnpm check`) scans every
-  line that any commit added, so data that a later commit removed still fails the check.
+  line that a commit on HEAD or a remote-tracking branch added (not stashes or other local refs), so data that a later commit removed still fails the check.
 
 ## Consequences
 

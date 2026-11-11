@@ -2,7 +2,8 @@
  * Fail when the repo contains personal data (see lib/personal-data.ts).
  * Usage: scan-personal-data.ts [--history] [repo root].
  * Default: tracked and untracked files that git does not ignore, and their paths. --history: every line that any
- * commit on any ref added. Also looks for this checkout's git email and this machine's host name, read at run time.
+ * commit on HEAD or a remote-tracking branch added. Also looks for this checkout's git email and this machine's
+ * host name, read at run time.
  */
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -27,9 +28,12 @@ const findings: string[] = [];
 let scope: string;
 
 if (history) {
-  const log = git("log", "-p", "--all", "--no-color", "--no-ext-diff", "--no-textconv", "--format=commit %H");
+  // HEAD and remote-tracking branches: what is or was shared. Not stashes or other local refs.
+  const hasHead = spawnSync("git", ["rev-parse", "--verify", "-q", "HEAD"], { cwd: root }).status === 0;
+  const refs = hasHead ? ["HEAD", "--remotes"] : ["--remotes"];
+  const log = git("log", "-p", ...refs, "--no-color", "--no-ext-diff", "--no-textconv", "--format=commit %H");
   for (const f of scanPatch(log, { deny })) findings.push(`${f.commit} ${redactPath(f.path, { deny })}  ${f.kind}`);
-  scope = `history of ${git("rev-list", "--all", "--count").trim()} commits`;
+  scope = `history of ${git("rev-list", ...refs, "--count").trim()} commits`;
 } else {
   const listing = git("ls-files", "-z", "--cached", "--others", "--exclude-standard");
   const paths = listing.split("\0").filter((path) => path !== "" && existsSync(join(root, path)));

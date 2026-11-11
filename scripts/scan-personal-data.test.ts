@@ -94,3 +94,23 @@ test("with --history, prints matching paths redacted", () => {
   expect(history.stderr).toMatch(/^[0-9a-f]{7} notes\/<redacted>\.txt {2}email$/m);
   expect(history.stderr).not.toContain("dave");
 });
+
+test("with --history, scans HEAD and remote-tracking branches, not other local refs", () => {
+  runOn({ "README.md": "clean\n" });
+  const git = (...args: string[]) =>
+    spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...args], { cwd: root });
+  git("add", "-A");
+  git("commit", "-qm", "clean");
+  git("checkout", "-qb", "scratch");
+  writeFileSync(join(root, "README.md"), j("cwd /Us", "ers/alice\n"));
+  git("commit", "-qam", "local only");
+  git("update-ref", "refs/wip/x", "HEAD");
+  git("checkout", "-q", "-");
+  git("branch", "-qD", "scratch");
+  expect(spawnSync(process.execPath, [script, "--history", root]).status).toBe(0);
+});
+
+test("with --history, passes on a repo with no commits yet", () => {
+  runOn({});
+  expect(spawnSync(process.execPath, [script, "--history", root]).status).toBe(0);
+});
