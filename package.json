@@ -9,10 +9,12 @@
   "scripts": {
     "lint": "biome ci .",
     "format": "biome check --write .",
-    "typecheck": "pnpm -r typecheck",
-    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json && pnpm -r typecheck",
+    "test": "vitest run",
     "test:bun": "bun test",
-    "check": "pnpm lint && pnpm typecheck && pnpm test"
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm layers",
+    "layers": "node scripts/check-layers.ts",
+    "check:bun": "pnpm lint && pnpm typecheck && pnpm test:bun && bun scripts/check-layers.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",
