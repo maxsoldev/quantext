@@ -66,19 +66,22 @@ kept running after the session ended, and `$.http.fetch` reached it. Interactive
 ## Layers
 
 ```
- surfaces     viewer (web)   mod (Claude Code plugin)   CLI (qx)   agents (SQL, skill, MCP later)
-                  │                 │                     │              │
- api          HTTP JSON + SSE (shared TypeScript types) ◄─┴──────────────┘
-                  │
- query        sessions · calls · context at call N · diffs · views
-                  │
- store        SQLite (WAL), versioned schema, migrations          ◄── one writer: the engine
-                  │
- ingest       watcher + incremental reader (byte offset per file, restart if a file shrinks)
-                  │
- core         domain model ── context rebuild ── token attribution ── pricing (data)
-                  │
- adapters     claude-code (JSONL + api-request* rows)   codex (later)   ...
+ surfaces   viewer (web) ──┐    mod (Claude Code plugin) ──┐    agents (SQL, skill, MCP later) ──┐
+                           └──────────── HTTP ─────────────┤                                     │ qx …
+                                                           ▼                                     ▼
+ cli        qx · the composition root: wires store + ingest + api (`qx serve`); its commands read through query
+               │                       │                        │
+               ▼                       ▼                        ▼
+ api        HTTP JSON + SSE ──────► query    sessions · calls · context at call N · diffs · views
+                                       │
+                                       ▼
+ ingest     watcher + reader ─────► store    SQLite (WAL), versioned schema, migrations; ingest is the one writer
+               │
+               ▼
+ adapters   claude-code (JSONL + api-request* rows) · codex (later) · …
+
+ core       shared kernel, used by every layer: context rebuild · token attribution · pricing (data)
+ shared     domain and API types, types only, used by every package
 ```
 
 | Layer | Responsibility | Depends on |
