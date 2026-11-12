@@ -42,6 +42,8 @@ export interface WorldOptions {
   noEngine?: boolean;
   /** Leave HOME unset. */
   noHome?: boolean;
+  /** What a failed `sh` start writes to stderr; the start then exits 1. */
+  shFails?: string;
 }
 
 /** Sets up the world and returns what the mod did in it. */
@@ -51,6 +53,7 @@ export function world(on: On, options: WorldOptions = {}) {
   const files = { ...options.files };
   const seen = toasts(on);
   const argvs: string[][] = [];
+  const cwds: (string | undefined)[] = [];
   const fetched: string[] = [];
   let http = options.http ?? {};
   let root = "";
@@ -76,8 +79,11 @@ export function world(on: On, options: WorldOptions = {}) {
   on("process.run", (_$, e) => {
     const argv = [...e.argv];
     argvs.push(argv);
+    cwds.push(e.init?.cwd);
     const [cmd = "", arg] = argv;
     if (cmd === "uname") return { value: ran(`${options.os ?? "Darwin"}\n`) };
+    if (cmd === "sh" && options.shFails !== undefined)
+      return { value: { ...ran(""), exitCode: 1, stderr: options.shFails } };
     if (cmd === "sh") {
       // the engine writes engine.json once it listens
       files[`${DATA}/engine.json`] = engineFile();
@@ -95,5 +101,5 @@ export function world(on: On, options: WorldOptions = {}) {
   const settle = async () => {
     for (let i = 0; i < 60; i++) await clock.advance(250);
   };
-  return { clock, toasts: seen, argvs, fetched, settle, root: () => root };
+  return { clock, toasts: seen, argvs, cwds, fetched, settle, root: () => root };
 }
