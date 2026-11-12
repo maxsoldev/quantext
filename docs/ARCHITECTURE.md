@@ -45,7 +45,7 @@ agents (SQL, CLI, later MCP). Nothing leaves the machine.
 
 The engine:
 
-- keeps **one instance per machine** (a lock file in `~/.quantext/`, plus the port);
+- keeps **one instance per machine** (an OS file lock in `~/.quantext/`, plus the port; ADR 22);
 - **exits after an idle period** with no viewer connected (setting: `live ingest: while viewer open | always`);
 - writes its database and log to **`~/.quantext/`**, not to the plugin's data folder, because uninstalling a plugin
   deletes that folder.
@@ -94,7 +94,7 @@ kept running after the session ended, and `$.http.fetch` reached it. Interactive
 | **providers** | What one model provider defines: its content blocks (tool use, tool reference, deferred tools, thinking), the token estimate of each (Anthropic's image formula), its price list and price modifiers. Pure: no I/O, no built-ins, no packages | core |
 | **core** | Logic over the domain types defined in shared, the same for every harness and provider: split each call's input into blocks with tokens (exact deltas, then reconciled estimates); the estimator and pricing interfaces; cost by cache part. Pure: no I/O, no built-ins, no packages | shared (types only) |
 | **ingest** | Find files, read new bytes, call the adapter, write each batch in one transaction; watch files for live updates and tell which Calls were added | providers, adapters, core, store |
-| **store** | Schema, migrations, writes, behind a driver interface (`node:sqlite`, `bun:sqlite`). WAL mode, so readers never block the writer. Rows are kept per log; content is stored once by Block hash. CallBlock runs have an interval index on (log, session, lane, first call, last call) so that "the blocks of call N" is a range lookup, not a scan (`docs/schema.md`, ADR 19) | core |
+| **store** | Schema, migrations, writes, behind a driver interface (`node:sqlite`, `bun:sqlite`). WAL mode, so readers never block the writer. Rows are kept per log, with the adapter version that wrote them; content and media are stored once by hash. CallBlock runs are keyed by (log, session, lane, first call, position), so that "the blocks of call N" is a range lookup, not a scan (`docs/schema.md`, ADR 19, 20) | core |
 | **query** | Read API: sessions, calls, context at call N, change from N-1, block lifetime cost. SQL views for agents | core, store |
 | **api** | HTTP JSON + SSE events ("call added"), plus the viewer's static files. Request and response types live in a shared package | core, query |
 | **cli** | The `qx` command and the composition root: wires store, ingest and api together (`qx serve`). No business logic | every layer below |
@@ -136,7 +136,9 @@ Claude Code appends JSONL ─► engine watcher ─► adapter (new bytes) ─�
 
 Ingest reads each log (a main transcript and its subagent transcripts) with one parser. It reads new bytes from
 the byte offset of each file, in batches of complete lines (a line still being written waits for its newline),
-and writes each batch's delta, the parser snapshot and the new offsets in one transaction. A file that is
+and writes each batch's delta, the parser snapshot and the new offsets in one transaction; a stop signal ends a
+pass after its batch, and the next pass goes on from there. The parsers of recently read logs stay warm between
+passes. A file that is
 replaced (new inode), cut below its offset, or rewritten (fingerprint) makes ingest delete the log's rows in one
 transaction and read it again from the start. The watcher uses `fs.watch` (recursive) and polls where it cannot
 watch; it gathers changes for a short window, reads the logs they belong to, and reports the Calls each write
