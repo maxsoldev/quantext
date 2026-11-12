@@ -11,6 +11,12 @@ updates:
       default-days: 1
     versioning-strategy: increase # keep exact pins (saveExact)
     open-pull-requests-limit: 5
+    ignore:
+      # rolldown is pinned to the version Vite resolves (scripts/dependencies.test.ts); it moves with Vite.
+      - dependency-name: rolldown
+      # The Node types follow the lowest Node we support (engines: >= 22.18), not the newest Node.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       production:
         dependency-type: production
