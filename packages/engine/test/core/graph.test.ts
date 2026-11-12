@@ -33,9 +33,9 @@ describe("blocksAtCall", () => {
 
 describe("mergeDelta", () => {
   test("adds new entities, replaces updated ones by id, and sums the report counts", () => {
-    const one: SessionDelta = { ...emptyGraph(), callBlocks: [run("x", 0, 0)] };
+    const one: SessionDelta = { ...emptyGraph(), callBlocks: [run("x", 0, 0)], records: [] };
     one.report.unknownRecords.push({ kind: "k", count: 1 });
-    const two: SessionDelta = { ...emptyGraph(), callBlocks: [run("x", 0, 0, 3), run("y", 1, 0)] };
+    const two: SessionDelta = { ...emptyGraph(), callBlocks: [run("x", 0, 0, 3), run("y", 1, 0)], records: [] };
     two.report.unknownRecords.push({ kind: "k", count: 2 }, { kind: "j", count: 1 });
     two.report.unreadable.push({ at: "main:2", reason: "r" });
     const graph = mergeDelta(mergeDelta(emptyGraph(), one), two);

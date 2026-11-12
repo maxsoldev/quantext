@@ -6,6 +6,7 @@ import type {
   Call,
   CallIssue,
   Compaction,
+  ContentLookup,
   IngestReport,
   Session,
   SessionDelta,
@@ -21,17 +22,23 @@ import { createClassifier, textHash, toolSource } from "./classify.ts";
 import type { JsonObject } from "./json.ts";
 import { arr, num, obj, str } from "./json.ts";
 import { laneOf, splitCall } from "./lane.ts";
+import { Content, NO_LOOKUP } from "./lookup.ts";
 import { paramsOf, sameUsage, setUsage, usageOf } from "./mapping.ts";
 import { get, put } from "./records.ts";
 import type { Row } from "./rows.ts";
 import { countUnknown, readLine } from "./rows.ts";
-import type { CallSpec, ParserState, TranscriptState } from "./state.ts";
+import type { CallSpec, Lane, ParserState, TranscriptState, UsageSum } from "./state.ts";
 import { emptyState } from "./state.ts";
 import { addAssistantRow, addBlob, addUserRow, blocksOf, resolve } from "./wire.ts";
 
 export interface ParseOptions {
   /** Splits a total over several new Blocks; the default estimates Anthropic content by characters and image size. */
   estimator?: Estimator;
+  /**
+   * What the caller kept from earlier deltas (records, blocks, calls, runs). Needed when the parser is restored
+   * from a snapshot: the snapshot holds only the open frontier, not the content of the session so far.
+   */
+  lookup?: ContentLookup;
 }
 
 export interface ClaudeCodeParser {
@@ -61,8 +68,9 @@ export function createClaudeCodeParser(
 ): ClaudeCodeParser {
   const estimator = options.estimator ?? estimateBlock;
   let changes = new Changes();
+  const store = new Content(state, options.lookup ?? NO_LOOKUP, (record) => changes.records.set(record.key, record));
   const classifier: Classifier = createClassifier(
-    state,
+    store,
     (block, unknownType) => {
       changes.blocks.push(block);
       if (unknownType !== undefined) countUnknown(changes.report, `content block ${unknownType}`);
@@ -75,7 +83,7 @@ export function createClaudeCodeParser(
     mergeReport(state.report, changes.report);
     return changes.delta(state);
   };
-  const handler = (name: string) => new Rows(state, classifier, () => changes, name);
+  const handler = (name: string) => new Rows(store, classifier, () => changes, name, estimator);
   return {
     push: (text, transcript = "main") =>
       read(() => {
@@ -93,14 +101,14 @@ export function createClaudeCodeParser(
         t.buffer = "";
         if (line !== "") handler(transcript).line(line);
       }),
-    snapshot: () => structuredClone(state),
+    snapshot: () => frontier(state),
   };
 }
 
 function transcriptOf(state: ParserState, name: string): TranscriptState {
   return (
     get(state.transcripts, name) ??
-    put(state.transcripts, name, { buffer: "", lines: 0, userRun: [], callsSinceCost: [] })
+    put(state.transcripts, name, { buffer: "", lines: 0, userRun: [], usageSinceCost: {} })
   );
 }
 
@@ -116,17 +124,21 @@ function mergeReport(total: IngestReport, delta: IngestReport): void {
 /** The handlers of the rows of one transcript. */
 class Rows {
   private readonly t: TranscriptState;
+  private readonly store: Content;
   private readonly state: ParserState;
   private readonly classifier: Classifier;
   private readonly changes: () => Changes;
   private readonly name: string;
+  private readonly estimator: Estimator;
 
-  constructor(state: ParserState, classifier: Classifier, changes: () => Changes, name: string) {
-    this.state = state;
+  constructor(store: Content, classifier: Classifier, changes: () => Changes, name: string, estimator: Estimator) {
+    this.store = store;
+    this.state = store.state;
     this.classifier = classifier;
     this.changes = changes;
     this.name = name;
-    this.t = transcriptOf(state, name);
+    this.estimator = estimator;
+    this.t = transcriptOf(store.state, name);
   }
 
   line(text: string): void {
@@ -165,10 +177,10 @@ class Rows {
   /** Check the waiting calls again, oldest first; a call whose request is now complete waits for, or gets, its split. */
   private recheck(): void {
     const ids = Object.keys(this.state.waiting)
-      .flatMap((id) => get(this.state.calls, id) ?? [])
+      .flatMap((id) => this.store.call(id) ?? [])
       .sort((a, b) => a.index - b.index);
     for (const call of ids) {
-      const spec = get(this.state.specs, call.id);
+      const spec = this.store.spec(call.id);
       const transcript = get(this.state.waiting, call.id) ?? this.name;
       if (spec === undefined || this.missing(spec, transcriptOf(this.state, transcript)).length > 0) continue;
       delete this.state.waiting[call.id];
@@ -192,7 +204,8 @@ class Rows {
       });
       return;
     }
-    splitCall({ state: this.state, classifier: this.classifier, changes: this.changes() }, call, spec, usage);
+    const ctx = { store: this.store, classifier: this.classifier, changes: this.changes(), estimator: this.estimator };
+    splitCall(ctx, call, spec, usage);
   }
 
   private handle(row: Row): void {
@@ -201,13 +214,13 @@ class Rows {
     const message = obj(data.message);
     switch (row.type) {
       case "api-request-blob":
-        addBlob(this.state, data);
+        addBlob(this.store, data);
         break;
       case "api-request-shape": {
         const hash = str(data.shapeHash);
         const shape = obj(data.shape);
         if (hash !== undefined && shape !== undefined) {
-          put(this.state.shapes, hash, { system: arr(shape.system) ?? [], tools: arr(shape.tools) ?? [] });
+          this.store.putShape(hash, { system: arr(shape.system) ?? [], tools: arr(shape.tools) ?? [] });
         }
         break;
       }
@@ -278,7 +291,7 @@ class Rows {
         ? []
         : [path.filter((p): p is string | number => typeof p === "string" || typeof p === "number")];
     });
-    put(this.state.specs, id, spec);
+    this.store.putSpec(id, spec);
 
     const call = this.newCall(session.id, id, str(data.timestamp) ?? "", model, lane);
     call.params = paramsOf(params);
@@ -291,8 +304,7 @@ class Rows {
     } else {
       this.wait(id);
     }
-    this.t.callsSinceCost.push(id);
-    this.t.openCompaction?.calls.push(id);
+    this.t.lastCallId = id;
   }
 
   private newCall(sessionId: string, id: string, ts: string, model: string, lane: string): Call {
@@ -319,43 +331,48 @@ class Rows {
   /** What of a request is not in the log: its base, its shape, the messages of its tail. */
   private missing(spec: CallSpec, transcript: TranscriptState = this.t): string[] {
     const missing: string[] = [];
-    const base = spec.baseId === undefined ? undefined : get(this.state.specs, spec.baseId);
+    const base = spec.baseId === undefined ? undefined : this.store.spec(spec.baseId);
     if (spec.baseId !== undefined && base === undefined) missing.push(`base call ${spec.baseId} is not in the log`);
     if (spec.keep > (base?.length ?? 0)) missing.push(`keep ${spec.keep} is more than the base call's messages`);
     if (
       spec.baseId !== undefined &&
-      (get(this.state.calls, spec.baseId)?.issues ?? []).some((i) => i.kind === "unresolved-request")
+      (this.store.call(spec.baseId)?.issues ?? []).some((i) => i.kind === "unresolved-request")
     ) {
       missing.push(`base call ${spec.baseId} is incomplete`);
     }
-    if (spec.shapeHash === undefined || get(this.state.shapes, spec.shapeHash) === undefined) {
+    if (spec.shapeHash === undefined || this.store.shape(spec.shapeHash) === undefined) {
       missing.push(`shape ${spec.shapeHash ?? "(none)"} is not in the log`);
     }
     for (const hash of spec.tail) {
-      if (resolve(this.state, transcript, hash) === undefined) missing.push(`message ${hash} is not in the log`);
+      if (resolve(this.store, transcript, hash) === undefined) missing.push(`message ${hash} is not in the log`);
     }
     return missing;
   }
 
   private assistant(row: Row, message: JsonObject, session: Session | undefined): void {
-    addAssistantRow(this.state, this.t, message);
+    const messageHash = addAssistantRow(this.store, this.t, message);
     const messageId = str(message.id) ?? "";
     const requestRef = str(row.data.requestRef);
     if (session !== undefined) this.toolUses(row, message, messageId, requestRef ?? "", session.id);
     const raw = obj(message.usage);
-    const call = requestRef === undefined ? undefined : get(this.state.calls, requestRef);
+    const call = requestRef === undefined ? undefined : this.store.call(requestRef);
     if (call === undefined || raw === undefined) return;
     const usage = usageOf(raw);
+    const known = get(this.state.responses, call.id);
+    if (known?.messageId === messageId && messageHash !== undefined) known.hash = messageHash;
     if (call.usage !== undefined) {
       if (!sameUsage(call.usage, usage)) this.usageChanged(call, usage, raw);
       return;
     }
     setUsage(call, usage, raw);
+    addUsage(this.t.usageSinceCost, call, usage);
+    if (this.t.openCompaction !== undefined) addUsage(this.t.openCompaction.logged, call, usage);
     const response: ParserState["responses"][string] = { messageId, outputTokens: usage.outputTokens };
+    if (messageHash !== undefined) response.hash = messageHash;
     if (usage.reasoningOutputTokens !== undefined) response.reasoningTokens = usage.reasoningOutputTokens;
     put(this.state.responses, call.id, response);
     const pending = get(this.state.pending, call.id);
-    const spec = get(this.state.specs, call.id);
+    const spec = this.store.spec(call.id);
     if (pending !== undefined && spec !== undefined) {
       delete this.state.pending[call.id];
       this.split(call, spec, usage);
@@ -377,7 +394,7 @@ class Rows {
       const block = obj(raw);
       if (block?.type !== "tool_use") continue;
       const id = str(block.id) ?? "";
-      if (get(this.state.toolCalls, id) !== undefined) continue;
+      if (this.store.toolCall(id) !== undefined) continue;
       const name = str(block.name) ?? "";
       const input = block.input ?? null;
       const ids = [...(get(this.state.messageToolUses, messageId) ?? []), id];
@@ -396,7 +413,7 @@ class Rows {
       };
       put(this.state.toolCalls, id, toolCall);
       for (const sibling of ids) {
-        const t = get(this.state.toolCalls, sibling);
+        const t = this.store.toolCall(sibling);
         if (t === undefined) continue;
         t.parallel = ids.length;
         this.changes().toolCalls.add(sibling);
@@ -406,11 +423,11 @@ class Rows {
   }
 
   private user(row: Row, message: JsonObject, session: Session | undefined): void {
-    addUserRow(this.state, this.t, message);
+    addUserRow(this.store, this.t, message);
     const data = row.data;
     const texts = blocksOf(message.content).flatMap((b) => str(obj(b)?.text) ?? []);
     if (data.isCompactSummary === true) for (const text of texts) put(this.state.summaries, textHash(text), 1);
-    const source = get(this.state.toolCalls, str(data.sourceToolUseID) ?? "");
+    const source = this.store.toolCall(str(data.sourceToolUseID) ?? "");
     const skill = str(obj(source?.input)?.skill);
     if (data.isMeta === true && source?.name === "Skill" && skill !== undefined) {
       for (const text of texts) put(this.state.skills, textHash(text), skill);
@@ -419,7 +436,7 @@ class Rows {
     for (const raw of blocksOf(message.content)) {
       const block = obj(raw);
       const id = str(block?.tool_use_id);
-      const toolCall = id === undefined || block?.type !== "tool_result" ? undefined : get(this.state.toolCalls, id);
+      const toolCall = id === undefined || block?.type !== "tool_result" ? undefined : this.store.toolCall(id);
       if (toolCall === undefined || id === undefined) continue;
       toolCall.isError = block?.is_error === true;
       const started = get(this.state.toolUseTimes, id);
@@ -440,13 +457,13 @@ class Rows {
   private linkChildren(): void {
     for (const [transcript, toolUseId] of Object.entries(this.state.metaToolUse)) {
       const agent = get(this.state.transcriptAgent, transcript);
-      const parent = get(this.state.toolCalls, toolUseId)?.sessionId;
+      const parent = this.store.toolCall(toolUseId)?.sessionId;
       if (agent !== undefined && parent !== undefined) this.link(toolUseId, `${parent}:agent-${agent}`);
     }
   }
 
   private link(toolUseId: string, childSessionId: string): void {
-    const toolCall = get(this.state.toolCalls, toolUseId);
+    const toolCall = this.store.toolCall(toolUseId);
     if (toolCall === undefined || toolCall.childSessionId === childSessionId) return;
     toolCall.childSessionId = childSessionId;
     this.changes().toolCalls.add(toolUseId);
@@ -462,8 +479,7 @@ class Rows {
     const after = num(meta?.postTokens);
     if (before !== undefined) compaction.beforeTokens = before;
     if (after !== undefined) compaction.afterTokens = after;
-    const last = this.t.callsSinceCost.at(-1) ?? lastCallOf(this.state, session.id);
-    if (last !== undefined) compaction.beforeCallId = last;
+    if (this.t.lastCallId !== undefined) compaction.beforeCallId = this.t.lastCallId;
     const summary = this.newCall(session.id, `${id}:summary`, ts, "", "compaction");
     summary.issues.push({
       kind: "unresolved-request",
@@ -474,20 +490,20 @@ class Rows {
     this.changes().compactions.add(id);
     const open: NonNullable<TranscriptState["openCompaction"]> = {
       summaryCallId: summary.id,
-      calls: [...this.t.callsSinceCost],
+      logged: structuredClone(this.t.usageSinceCost),
     };
     if (this.t.costTotals !== undefined) open.before = this.t.costTotals;
     if (before !== undefined) open.preTokens = before;
     this.t.openCompaction = open;
   }
 
-  /** A running total: the summarising Call of an open compaction gets the change, minus the Calls logged since. */
+  /** A running total: the summarising Call of an open compaction gets the change, less the Calls logged since. */
   private costState(data: JsonObject): void {
     const totals = obj(data.modelUsage) ?? {};
     const open = this.t.openCompaction;
     if (open !== undefined && open.before !== undefined) {
-      const call = get(this.state.calls, open.summaryCallId);
-      const derived = derivedUsage(this.state, open.before, totals, open.calls);
+      const call = this.store.call(open.summaryCallId);
+      const derived = derivedUsage(open.before, totals, open.logged);
       if (call !== undefined && derived !== undefined) {
         call.model = derived.model;
         const canonical = canonicalModel(derived.model);
@@ -503,13 +519,8 @@ class Rows {
     }
     delete this.t.openCompaction;
     this.t.costTotals = totals;
-    this.t.callsSinceCost = [];
+    this.t.usageSinceCost = {};
   }
-}
-
-function lastCallOf(state: ParserState, sessionId: string): string | undefined {
-  const index = (get(state.nextIndex, sessionId) ?? 0) - 1;
-  return Object.values(state.calls).find((c) => c.sessionId === sessionId && c.index === index)?.id;
 }
 
 const COUNTERS = {
@@ -521,26 +532,107 @@ const COUNTERS = {
   outputTokens: "outputTokens",
 } as const;
 
+/** Add a Call's Usage to running sums per model, by the names of `cost-state`'s counters. */
+function addUsage(sums: Record<string, UsageSum>, call: Call, usage: Usage): void {
+  const model = call.canonicalModel ?? call.model;
+  const sum = get(sums, model) ?? put(sums, model, {});
+  for (const [field, key] of Object.entries(COUNTERS) as [keyof typeof COUNTERS, string][]) {
+    sum[key] = (sum[key] ?? 0) + (usage[field] ?? 0);
+  }
+}
+
 /**
  * The usage of a summarising Call: the change of the running totals of the one model whose totals changed more
  * than its logged Calls account for. A counter missing on either side stays unknown (a time-to-live split), not 0.
  */
-function derivedUsage(state: ParserState, before: JsonObject, after: JsonObject, calls: readonly string[]) {
-  const logged = calls.flatMap((id) => get(state.calls, id) ?? []);
+function derivedUsage(before: JsonObject, after: JsonObject, logged: Record<string, UsageSum>) {
   const changed = Object.keys(after).flatMap((model) => {
     const a = obj(after[model]) ?? {};
     const b = obj(before[model]) ?? {};
+    const sum = get(logged, canonicalModel(model) ?? model) ?? {};
     const usage: Usage = { basis: "derived", inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 };
     for (const [field, key] of Object.entries(COUNTERS) as [keyof typeof COUNTERS, string][]) {
       if (a[key] === undefined || b[key] === undefined) continue;
-      let value = (num(a[key]) ?? 0) - (num(b[key]) ?? 0);
-      for (const call of logged) {
-        if (call.canonicalModel === canonicalModel(model) && call.usage !== undefined) value -= call.usage[field] ?? 0;
-      }
-      usage[field] = value;
+      usage[field] = (num(a[key]) ?? 0) - (num(b[key]) ?? 0) - (sum[key] ?? 0);
     }
     const any = (Object.keys(COUNTERS) as (keyof typeof COUNTERS)[]).some((field) => (usage[field] ?? 0) !== 0);
     return any ? [{ model: model.replace(/\[[^\]]*\]$/, ""), usage }] : [];
   });
   return changed.length === 1 ? changed[0] : undefined;
+}
+
+/**
+ * The snapshot: only the open frontier. Content of the session so far (messages, shapes, requests, Blocks, closed
+ * Calls and ToolCalls, lane layouts) stays with the caller, who gives it back through the ContentLookup.
+ */
+function frontier(state: ParserState): ParserState {
+  const lanes = Object.values(state.lanes);
+  const compactions = Object.values(state.transcripts).flatMap((t) => t.openCompaction?.summaryCallId ?? []);
+  const calls = new Set([
+    ...Object.keys(state.pending),
+    ...Object.keys(state.waiting),
+    ...lanes.flatMap((l) => l.lastCallId ?? []),
+    ...compactions,
+  ]);
+  const toolCalls = new Set(
+    Object.values(state.toolCalls).flatMap((t) => (t.resultBlockHash === undefined ? [t.id] : [])),
+  );
+  const assistantIds = new Set(Object.values(state.transcripts).flatMap((t) => t.lastAssistantId ?? []));
+  const pick = <T>(record: Record<string, T>, keys: Set<string>) => {
+    const out: Record<string, T> = {};
+    for (const key of keys) {
+      const value = get(record, key);
+      if (value !== undefined) put(out, key, value);
+    }
+    return out;
+  };
+  return structuredClone({
+    ...state,
+    messages: {},
+    shapes: {},
+    seenBlocks: {},
+    groupSizes: {},
+    toolSources: {},
+    compactions: {},
+    report: { unknownRecords: [], unreadable: [] },
+    specs: pick(state.specs, calls),
+    calls: pick(state.calls, calls),
+    responses: pick(state.responses, calls),
+    toolCalls: pick(state.toolCalls, toolCalls),
+    toolUseTimes: pick(state.toolUseTimes, toolCalls),
+    messageToolUses: pick(state.messageToolUses, assistantIds),
+    assistant: pick(state.assistant, assistantIds),
+    lanes: Object.fromEntries(lanes.map((lane) => [`${lane.sessionId}|${lane.key}`, coldLane(lane)])),
+  });
+}
+
+/** A lane without its layout: rebuilt from the caller's open runs when it is next used. */
+function coldLane(lane: Lane): Lane {
+  const cold: Lane = {
+    key: lane.key,
+    sessionId: lane.sessionId,
+    cold: true,
+    shapeCount: lane.shapeCount,
+    messages: [],
+    messageEnds: [],
+    blocks: [],
+    sections: [],
+    messageOf: [],
+    contentOf: [],
+    tokens: [],
+    basis: [],
+    group: [],
+    estimates: [],
+    prefix: [0],
+    lone: [0],
+    runs: [],
+    reasoning: [],
+    groupCount: {},
+    partial: {},
+    deferred: [],
+  };
+  if (lane.lastIndex !== undefined) cold.lastIndex = lane.lastIndex;
+  if (lane.lastCallId !== undefined) cold.lastCallId = lane.lastCallId;
+  if (lane.shapeKey !== undefined) cold.shapeKey = lane.shapeKey;
+  return cold;
 }

@@ -1,5 +1,5 @@
 /** Collect what one read adds or changes, and turn it into a SessionDelta. */
-import type { Block, CallBlock, IngestReport, SessionDelta } from "@quantext/shared";
+import type { AdapterRecord, Block, CallBlock, IngestReport, SessionDelta } from "@quantext/shared";
 import { get } from "./records.ts";
 import type { ParserState } from "./state.ts";
 
@@ -10,6 +10,8 @@ export class Changes {
   readonly compactions = new Set<string>();
   readonly blocks: Block[] = [];
   readonly runs = new Map<string, CallBlock>();
+  /** Records by key: a later write of the same key in one read replaces the earlier. */
+  readonly records = new Map<string, AdapterRecord>();
   readonly report: IngestReport = { unknownRecords: [], unreadable: [] };
 
   run(run: CallBlock): void {
@@ -31,6 +33,7 @@ export class Changes {
       toolCalls: pick(state.toolCalls, this.toolCalls),
       compactions: pick(state.compactions, this.compactions),
       report: this.report,
+      records: [...this.records.values()],
     });
   }
 }

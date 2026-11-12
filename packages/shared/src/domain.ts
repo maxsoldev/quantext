@@ -243,9 +243,31 @@ export interface IngestReport {
 
 /**
  * What one read of new input added or changed: new and updated entities (each in full, by id), and the report's
- * new counts. Merging every delta in order gives the SessionGraph.
+ * new counts. Merging every delta in order gives the SessionGraph. `records` are the adapter's own data (in Claude
+ * Code: messages, shapes, requests) that the caller keeps and gives back through a ContentLookup.
  */
-export type SessionDelta = SessionGraph;
+export interface SessionDelta extends SessionGraph {
+  records: AdapterRecord[];
+}
+
+/** A piece of an adapter's own data, by key. A later record with the same key replaces the earlier one. */
+export interface AdapterRecord {
+  key: string;
+  value: JsonValue;
+}
+
+/**
+ * What an adapter may ask its caller for, when its snapshot no longer holds it: what the caller kept from earlier
+ * deltas. The store implements it in build step 5; each answer must reflect every delta applied so far.
+ */
+export interface ContentLookup {
+  record(key: string): JsonValue | undefined;
+  block(hash: string): Block | undefined;
+  call(id: string): Call | undefined;
+  toolCall(id: string): ToolCall | undefined;
+  /** The runs of a lane that are still open (no `lastCall`): the input of the lane's latest split Call. */
+  openRuns(sessionId: string, lane: string): CallBlock[];
+}
 
 /** Everything an adapter found in one Session and its subagent Sessions. */
 export interface SessionGraph {

@@ -7,45 +7,53 @@
 import { sha256Sorted } from "./hash.ts";
 import type { Json, JsonObject } from "./json.ts";
 import { arr, obj, str } from "./json.ts";
+import type { Content } from "./lookup.ts";
 import { get, put } from "./records.ts";
-import type { ParserState, TranscriptState, WireMessage } from "./state.ts";
+import type { TranscriptState, WireMessage } from "./state.ts";
 
 export function wireHash(role: string, content: Json): string {
   return sha256Sorted({ role, content });
 }
 
-export function addBlob(state: ParserState, data: JsonObject): void {
+export function addBlob(store: Content, data: JsonObject): void {
   const hash = str(data.hash);
   const message = obj(data.message);
   if (hash === undefined || message === undefined) return;
-  put(state.messages, hash, { role: str(message.role) ?? "", content: blocksOf(message.content) });
+  store.putMessage(hash, { role: str(message.role) ?? "", content: blocksOf(message.content) });
 }
 
-export function addUserRow(state: ParserState, transcript: TranscriptState, message: JsonObject): void {
+export function addUserRow(store: Content, transcript: TranscriptState, message: JsonObject): void {
   const content = blocksOf(message.content);
   const role = str(message.role) ?? "user";
-  put(state.messages, wireHash(role, message.content ?? null), { role, content });
-  if (typeof message.content === "string") put(state.messages, wireHash(role, content), { role, content });
+  store.putMessage(wireHash(role, message.content ?? null), { role, content });
+  if (typeof message.content === "string") store.putMessage(wireHash(role, content), { role, content });
   transcript.userRun.push(content);
 }
 
-export function addAssistantRow(state: ParserState, transcript: TranscriptState, message: JsonObject): void {
+/** Add one row of an assistant message; returns the hash of the message so far. */
+export function addAssistantRow(store: Content, transcript: TranscriptState, message: JsonObject): string | undefined {
   transcript.userRun = [];
   const id = str(message.id);
-  if (id === undefined) return;
-  const content = [...(get(state.assistant, id) ?? []), ...(arr(message.content) ?? [])];
-  put(state.assistant, id, content);
-  put(state.messages, wireHash("assistant", content), { role: "assistant", content });
+  if (id === undefined) return undefined;
+  const content = [...(get(store.state.assistant, id) ?? []), ...(arr(message.content) ?? [])];
+  if (transcript.lastAssistantId !== undefined && transcript.lastAssistantId !== id) {
+    delete store.state.assistant[transcript.lastAssistantId]; // its rows are done: only its hash is needed now
+  }
+  transcript.lastAssistantId = id;
+  put(store.state.assistant, id, content);
+  const hash = wireHash("assistant", content);
+  store.putMessage(hash, { role: "assistant", content });
+  return hash;
 }
 
 /** The message a tail hash names; joins the transcript's current run of user rows when nothing else matches. */
-export function resolve(state: ParserState, transcript: TranscriptState, hash: string): WireMessage | undefined {
-  const known = get(state.messages, hash);
+export function resolve(store: Content, transcript: TranscriptState, hash: string): WireMessage | undefined {
+  const known = store.message(hash);
   if (known !== undefined) return known;
   const run = transcript.userRun;
   for (let start = 0; start < run.length - 1; start++) {
     const content = run.slice(start).flat();
-    if (wireHash("user", content) === hash) return put(state.messages, hash, { role: "user", content });
+    if (wireHash("user", content) === hash) return store.putMessage(hash, { role: "user", content });
   }
   return undefined;
 }

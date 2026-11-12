@@ -4,6 +4,8 @@ import type { ClaudeCodeTranscripts } from "../../../src/adapters/claude-code/in
 import { createClaudeCodeParser, parseClaudeCodeSession } from "../../../src/adapters/claude-code/index.ts";
 import { emptyGraph, mergeDelta } from "../../../src/core/graph.ts";
 import { scenarios, transcriptsOf } from "../../fixtures.ts";
+import { MemoryStore } from "./memory-store.ts";
+import { syntheticSession } from "./synthetic.ts";
 
 /** A small deterministic random number generator, so a failing chunking can be found again. */
 function random(seed: number): () => number {
@@ -69,19 +71,33 @@ describe.each(scenarios())("incremental parse of $version/$name", ({ name }) => 
     expect(normal(readInChunks(input, seed))).toEqual(whole);
   });
 
-  test("a parser restored from a JSON snapshot in the middle goes on to the same graph", () => {
-    const half = input.main.length >> 1;
-    const first = createClaudeCodeParser();
-    let graph = mergeDelta(emptyGraph(), first.push(input.main.slice(0, half)));
-    const second = createClaudeCodeParser(JSON.parse(JSON.stringify(first.snapshot())));
-    graph = mergeDelta(graph, second.push(input.main.slice(half)));
-    graph = mergeDelta(graph, second.flush());
-    input.subagents.forEach((agent, i) => {
-      if (agent.meta !== undefined) graph = mergeDelta(graph, second.pushMeta(`subagent-${i}`, agent.meta));
-      graph = mergeDelta(graph, second.push(agent.text, `subagent-${i}`));
-    });
-    expect(normal(graph)).toEqual(whole);
-  });
+  test.each([1, 2, 3])(
+    "restored from JSON snapshots at random points (seed %i), it goes on to the same graph",
+    (seed) => {
+      const next = random(seed);
+      const store = new MemoryStore();
+      let parser = createClaudeCodeParser(undefined, { lookup: store });
+      const maybeRestore = () => {
+        if (next() < 0.3)
+          parser = createClaudeCodeParser(JSON.parse(JSON.stringify(parser.snapshot())), { lookup: store });
+      };
+      for (const piece of chunks(input.main, next)) {
+        store.apply(parser.push(piece));
+        maybeRestore();
+      }
+      store.apply(parser.flush());
+      input.subagents.forEach((agent, i) => {
+        const name = `subagent-${i}`;
+        if (agent.meta !== undefined) store.apply(parser.pushMeta(name, agent.meta));
+        for (const piece of chunks(agent.text, next)) {
+          store.apply(parser.push(piece, name));
+          maybeRestore();
+        }
+        store.apply(parser.flush(name));
+      });
+      expect(normal(store.graph())).toEqual(whole);
+    },
+  );
 });
 
 describe("a growing transcript", () => {
@@ -156,5 +172,28 @@ describe("rows that come late", () => {
       (l) => l.includes('"type":"api-request"'),
     );
     expect(normal(parseClaudeCodeSession({ main: late, subagents: [] }))).toEqual(whole);
+  });
+});
+
+describe("the snapshot", () => {
+  test.each([500, 2000, 5000])("of a %i-call session holds only the open frontier: under 200 kB", (calls) => {
+    const store = new MemoryStore();
+    const parser = createClaudeCodeParser(undefined, { lookup: store });
+    store.apply(parser.push(syntheticSession(calls)));
+    expect(JSON.stringify(parser.snapshot()).length).toBeLessThan(200_000);
+  });
+
+  test("of a long session restores and goes on with the next call as if never stopped", () => {
+    const text = syntheticSession(600).split("\n");
+    const cut = text.findIndex((l, i) => i > 900 && l.includes('"type":"api-request"'));
+    const whole = new MemoryStore();
+    const one = createClaudeCodeParser(undefined, { lookup: whole });
+    whole.apply(one.push(`${text.join("\n")}`));
+    const store = new MemoryStore();
+    const first = createClaudeCodeParser(undefined, { lookup: store });
+    store.apply(first.push(`${text.slice(0, cut).join("\n")}\n`));
+    const second = createClaudeCodeParser(JSON.parse(JSON.stringify(first.snapshot())), { lookup: store });
+    store.apply(second.push(text.slice(cut).join("\n")));
+    expect(normal(store.graph())).toEqual(normal(whole.graph()));
   });
 });

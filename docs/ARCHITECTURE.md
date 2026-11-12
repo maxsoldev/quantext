@@ -122,8 +122,9 @@ the mod sandbox accepts no other imports besides relative paths.
 | `Compaction` | compaction | session, before / after tokens, trigger |
 
 Lifetime cost of a block, "context at call N", and "what changed at call N" are all queries over `CallBlock` runs
-(ADR 17). Adapters parse incrementally: each read of new bytes gives a delta of new and updated entities, and the
-adapter's state is plain JSON that ingest can persist.
+(ADR 17). Adapters parse incrementally: each read of new bytes gives a delta of new and updated entities and adapter
+records, and the adapter's snapshot is a small JSON frontier that ingest persists; older content comes back through
+a `ContentLookup` over the store (ADR 18).
 
 ## Live data flow
 
