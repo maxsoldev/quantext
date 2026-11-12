@@ -4,7 +4,7 @@ test("a ? next to a key term opens the glossary at it, and Show me points at it 
   page,
   engine,
 }) => {
-  await page.goto(`${await engine.sessionUrl("basic-tools")}?call=3`);
+  await page.goto(`${await engine.sessionUrl("basic-tools")}?call=4`);
   await page.getByRole("button", { name: "What is system prompt and tool schemas?" }).click();
   const glossary = page.getByTestId("glossary");
   await expect(glossary).toBeVisible();

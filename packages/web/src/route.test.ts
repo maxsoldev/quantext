@@ -14,7 +14,13 @@ describe("routes", () => {
 
   test("a Session page names its key and, when set, the Call", () => {
     expect(parseRoute("/s/3/abc-1", "")).toEqual({ page: "session", key: { log: 3, id: "abc-1" } });
-    expect(parseRoute("/s/3/abc-1", "?call=12")).toEqual({ page: "session", key: { log: 3, id: "abc-1" }, call: 12 });
+    expect(parseRoute("/s/3/abc-1", "?call=12")).toEqual({ page: "session", key: { log: 3, id: "abc-1" }, call: 11 });
+  });
+
+  test("the URL has the Call's number as the UI shows it (1-based); the route has the API's index", () => {
+    expect(hrefOf({ page: "session", key: { log: 1, id: "a" }, call: 0 })).toBe("/s/1/a?call=1");
+    expect(parseRoute("/s/1/a", "?call=1")).toMatchObject({ call: 0 });
+    expect(parseRoute("/s/1/a", "?call=0")).toEqual({ page: "session", key: { log: 1, id: "a" } });
   });
 
   test("a Session's tool calls and compactions are pages of their own; tool calls keep their sort", () => {

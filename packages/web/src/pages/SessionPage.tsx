@@ -1,11 +1,11 @@
 /**
  * One Session: its numbers, the timeline of one lane, a scrubber over its Calls, and the context of the selected
- * Call. The selected Call is in the URL (`?call=<index>`); with none, the page follows the lane's latest Call.
+ * Call. The selected Call is in the URL (`?call=<number>`, 1-based; see `callNumber`); with none, the page follows the lane's latest Call.
  */
 import type { CallContext, ContextDiff, SessionKey, SessionSummary } from "@quantext/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client.ts";
-import { laneView, mainLane } from "../chart/lane.ts";
+import { laneNames, laneView, mainLane } from "../chart/lane.ts";
 import { TimelineChart } from "../chart/TimelineChart.tsx";
 import { Compactions } from "../compaction/Compactions.tsx";
 import { ContextAt } from "../context/ContextAt.tsx";
@@ -15,6 +15,7 @@ import { count, duration, percent, projectName, shortModel, usd, when } from "..
 import { useLiveVersion } from "../live/hooks.ts";
 import { Link, navigate } from "../nav.tsx";
 import type { Route } from "../route.ts";
+import { callNumber } from "../route.ts";
 import { Term } from "../teach/Term.tsx";
 import { ToolCalls } from "../tools/ToolCalls.tsx";
 import { Tokens } from "../ui/Num.tsx";
@@ -43,6 +44,7 @@ export function SessionPage({ route }: { route: SessionRoute }) {
     () => (data.value && chosen ? laneView(data.value.timeline, data.value.breaks, chosen) : undefined),
     [data.value, chosen],
   );
+  const names = useMemo(() => laneNames(data.value?.detail.lanes ?? []), [data.value]);
   const last = view ? view.calls.length - 1 : 0;
   const place = view && route.call !== undefined ? (view.at(route.call) ?? view.nearest(route.call)) : last;
   const callIndex = view?.calls[place]?.index;
@@ -175,9 +177,9 @@ export function SessionPage({ route }: { route: SessionRoute }) {
                             type="button"
                             aria-pressed={l.lane === chosen}
                             onClick={() => setLane(l.lane)}
-                            data-tip="A lane is the calls that build on each other's context: one model, one purpose. Side queries run in their own lane."
+                            data-tip={`${l.model ? shortModel(l.model) : "Model not in the log"}, ${count(l.calls, "call")}.\nA lane is the calls that build on each other's context: one model, one purpose. Side queries run in their own lane.`}
                           >
-                            {l.model ? shortModel(l.model) : "Unknown model"} <span className="num">({l.calls})</span>
+                            {names.get(l.lane) ?? l.lane} <span className="num">({l.calls})</span>
                           </button>
                         ))}
                     </fieldset>
@@ -207,7 +209,13 @@ export function SessionPage({ route }: { route: SessionRoute }) {
             <ContextAt sessionKey={key} call={callIndex} ctx={call.ctx} openHash={route.block} onOpened={clearBlock} />
           )}
           {view && view.calls.length > 0 && (
-            <Scrubber place={place} last={last} index={callIndex ?? 0} onChange={select} />
+            <Scrubber
+              place={place}
+              last={last}
+              index={callIndex ?? 0}
+              lane={chosen ? names.get(chosen) : undefined}
+              onChange={select}
+            />
           )}
         </>
       )}
@@ -371,11 +379,13 @@ function Scrubber({
   place,
   last,
   index,
+  lane,
   onChange,
 }: {
   place: number;
   last: number;
   index: number;
+  lane: string | undefined;
   onChange: (p: number) => void;
 }) {
   return (
@@ -390,18 +400,15 @@ function Scrubber({
         value={place}
         onChange={(e) => onChange(Number(e.target.value))}
         aria-label="Call"
-        aria-valuetext={`Call ${index}, ${place + 1} of ${last + 1} in this lane`}
+        aria-valuetext={`Call ${callNumber(index)}${lane ? `, in the ${lane} lane` : ""}`}
         data-testid="scrubber"
       />
       <button type="button" onClick={() => onChange(place + 1)} disabled={place >= last} aria-label="Next call">
         →
       </button>
       <span className="scrubber-pos" data-testid="call-position">
-        Call <b className="num">{index}</b>
-        <span className="muted num">
-          {" "}
-          ({place + 1} of {last + 1})
-        </span>
+        Call <b className="num">{callNumber(index)}</b>
+        {lane && <span className="muted"> in {lane}</span>}
       </span>
       <span className="muted keys">
         <kbd>←</kbd> <kbd>→</kbd> step, <kbd>Shift</kbd> 10, <kbd>Home</kbd> <kbd>End</kbd>

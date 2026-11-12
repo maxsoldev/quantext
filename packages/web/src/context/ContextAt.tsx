@@ -6,6 +6,7 @@
 import type { CallContext, ContextBlock, SessionKey } from "@quantext/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { percent, shortModel, tokens, usd, when } from "../format/format.ts";
+import { callNumber } from "../route.ts";
 import { Term } from "../teach/Term.tsx";
 import { Tokens } from "../ui/Num.tsx";
 import type { Load } from "../ui/useLoad.ts";
@@ -48,11 +49,11 @@ export function ContextAt({
   if (ctx.state === "error" && !c) {
     return (
       <p className="error" role="alert">
-        The context of call {call} could not be read: {ctx.error.message}
+        The context of call {callNumber(call)} could not be read: {ctx.error.message}
       </p>
     );
   }
-  if (!c) return <section className="card context-card muted">Reading the context of call {call}…</section>;
+  if (!c) return <section className="card context-card muted">Reading the context of call {callNumber(call)}…</section>;
   const stale = c.call.index !== call;
   return (
     <section
@@ -92,7 +93,7 @@ function ContextHead({ ctx }: { ctx: CallContext }) {
       <div className="context-title">
         <h2 id="context-title">
           <Term id="context-window">
-            Context at call <span className="num">{ctx.call.index}</span>
+            Context at call <span className="num">{callNumber(ctx.call.index)}</span>
           </Term>
         </h2>
         <p className="muted">

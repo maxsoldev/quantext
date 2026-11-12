@@ -10,6 +10,7 @@ import { CATEGORY_LABEL } from "../context/categories.ts";
 import { KIND_LABEL } from "../context/kinds.ts";
 import { sourceLabel } from "../context/model.ts";
 import { count, duration, shortModel, tokens } from "../format/format.ts";
+import { callNumber } from "../route.ts";
 import { BREAK_REASONS } from "../teach/cacheBreaks.ts";
 import { Term } from "../teach/Term.tsx";
 import { Tokens } from "../ui/Num.tsx";
@@ -53,11 +54,11 @@ export function DiffCard({
     <section className="card diff-card" id="what-changed" aria-labelledby="diff-title" data-testid="diff">
       <div className="diff-head">
         <h2 id="diff-title">
-          What changed at call <span className="num">{d?.call ?? ctx?.call.index ?? ""}</span>
+          What changed at call <span className="num">{callNumber(d?.call ?? ctx?.call.index ?? 0)}</span>
         </h2>
         {d?.previous !== undefined && ctx && prev && (
           <p className="muted">
-            against call {d.previous}
+            against call {callNumber(d.previous)}
             {d.modelSwitch ? `, which ran on ${shortModel(prev.call.model)}` : ""},{" "}
             {duration(Math.max(0, Date.parse(ctx.call.ts) - Date.parse(prev.call.ts)))} before
           </p>
@@ -100,13 +101,13 @@ function BreakNav({
       {s.counts.map(([reason, n]) => `${n} ${BREAK_REASONS[reason].title.toLowerCase()}`).join(", ")}.{" "}
       {s.previous && (
         <button type="button" className="link" onClick={() => onGoTo((s.previous as CacheBreak).index)}>
-          Previous: call {s.previous.index}
+          Previous: call {callNumber(s.previous.index)}
         </button>
       )}
       {s.previous && s.next && " "}
       {s.next && (
         <button type="button" className="link" onClick={() => onGoTo((s.next as CacheBreak).index)}>
-          Next: call {s.next.index}
+          Next: call {callNumber(s.next.index)}
         </button>
       )}
     </p>
@@ -120,8 +121,11 @@ function BreakNote({ b }: { b: CacheBreak }) {
       <p className="break-title">
         <span className="break-icon" aria-hidden="true" />
         <b>Cache break: {r.title}.</b> The cache read fell from{" "}
-        <Tokens n={b.previous.cacheReadTokens} note={`Call ${b.previous.index}'s usage: cache read tokens.`} /> to{" "}
-        <Tokens n={b.cacheReadTokens} note="This call's usage: cache read tokens." /> tokens, and{" "}
+        <Tokens
+          n={b.previous.cacheReadTokens}
+          note={`Call ${callNumber(b.previous.index)}'s usage: cache read tokens.`}
+        />{" "}
+        to <Tokens n={b.cacheReadTokens} note="This call's usage: cache read tokens." /> tokens, and{" "}
         <Tokens n={b.cacheWriteTokens} note="This call's usage: cache write tokens." /> tokens were written to the cache
         {b.gapSeconds >= 60 ? `, ${duration(b.gapSeconds * 1000)} after the call before` : ""}.
       </p>
@@ -177,8 +181,12 @@ function Lede({ d, view, ctx }: { d: ContextDiff; view: DiffView; ctx: CallConte
 function Strips({ d, view }: { d: ContextDiff; view: DiffView }) {
   return (
     <div className="diff-strips">
-      <StripRow label={`Call ${d.previous}`} strip={view.before} testId="strip-before" />
-      <StripRow label={`Call ${d.call}`} strip={view.now} testId="strip-now" />
+      <StripRow
+        label={d.previous === undefined ? "Before" : `Call ${callNumber(d.previous)}`}
+        strip={view.before}
+        testId="strip-before"
+      />
+      <StripRow label={`Call ${callNumber(d.call)}`} strip={view.now} testId="strip-now" />
       <ul className="legend" aria-label="What the strips show">
         <li>
           <span className="swatch diff-kept" aria-hidden="true" />

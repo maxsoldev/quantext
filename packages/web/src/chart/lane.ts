@@ -1,5 +1,6 @@
 /** One lane of a Session's timeline: its Calls in order, and the markers placed by a Call's place in the lane. */
 import type { CacheBreak, LaneSummary, TimelineCall } from "@quantext/shared";
+import { shortModel } from "../format/format.ts";
 
 export interface LaneView {
   lane: string;
@@ -16,6 +17,36 @@ export interface LaneView {
 /** The lane with the most Calls: the main loop. */
 export function mainLane(lanes: readonly LaneSummary[]): string | undefined {
   return [...lanes].sort((a, b) => b.calls - a.calls)[0]?.lane;
+}
+
+/** The harness's query sources of the main loop: interactive, and `claude -p` / the Agent SDK. */
+const MAIN_SOURCES = new Set(["repl_main_thread", "sdk"]);
+
+/** A lane's job, from its key (`<model>|<query source>`, or `compaction` for the summarising Calls). */
+function jobOf(l: LaneSummary, main: string | undefined): string {
+  if (l.lane === "compaction") return "Compaction summary";
+  const source = l.lane.slice(l.lane.lastIndexOf("|") + 1);
+  if (MAIN_SOURCES.has(source) || l.lane === main) return "Main";
+  if (source === "compact") return "Compaction summary";
+  const agent = /^agent:(?:[^:]*:)?(.+)$/.exec(source)?.[1];
+  if (agent) return `Subagent ${agent}`;
+  if (source === "") return "Side calls";
+  const words = source.replace(/[_-]+/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** Lane key → its name in the UI, by job; a name two lanes share gets each lane's model. */
+export function laneNames(lanes: readonly LaneSummary[]): Map<string, string> {
+  const main = mainLane(lanes);
+  const jobs = lanes.map((l) => [l, jobOf(l, main)] as const);
+  const seen = new Map<string, number>();
+  for (const [, job] of jobs) seen.set(job, (seen.get(job) ?? 0) + 1);
+  return new Map(
+    jobs.map(([l, job]) => [
+      l.lane,
+      (seen.get(job) ?? 0) > 1 ? `${job} (${l.model ? shortModel(l.model) : "unknown model"})` : job,
+    ]),
+  );
 }
 
 export function laneView(timeline: readonly TimelineCall[], breaks: readonly CacheBreak[], lane: string): LaneView {

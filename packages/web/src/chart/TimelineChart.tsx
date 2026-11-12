@@ -10,6 +10,7 @@ import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CachePart } from "../context/categories.ts";
 import { CACHE_PARTS, CATEGORIES, CATEGORY_LABEL } from "../context/categories.ts";
 import { percent, tokens, usd, when } from "../format/format.ts";
+import { callNumber } from "../route.ts";
 import { BREAK_REASONS } from "../teach/cacheBreaks.ts";
 import type { LaneView } from "./lane.ts";
 import type { Band, Stack } from "./shape.ts";
@@ -120,7 +121,7 @@ export function TimelineChart({
           x={xOf(selected) + (band.mode === "columns" ? (band.step - band.width) / 2 : 0)}
           w={Math.max(2, band.width)}
           h={topH + RAIL_H + BOTTOM_H}
-          label={`Call ${view.calls[selected]?.index ?? ""}`}
+          label={`Call ${callNumber(view.calls[selected]?.index ?? 0)}`}
           minX={M.left + 40}
           maxX={M.left + plotW - 40}
           selected
@@ -204,13 +205,13 @@ const Layers = memo(function Layers({
             key={`b${b.index}`}
             className="break-mark"
             d={`M${cx - 6},${y}h12l-6,10z`}
-            data-tip={`Cache break at call ${b.index}: ${tokens(b.dropTokens)} fewer tokens read from the cache than call ${b.previous.index}.\n${BREAK_REASONS[b.reason].short}\nClick to see what changed.`}
+            data-tip={`Cache break at call ${callNumber(b.index)}: ${tokens(b.dropTokens)} fewer tokens read from the cache than call ${callNumber(b.previous.index)}.\n${BREAK_REASONS[b.reason].short}\nClick to see what changed.`}
           />
         );
       })}
       {xTicks.map((p) => (
         <text key={p} className="tick" x={xOf(p) + band.step / 2} y={bottomY0 + BOTTOM_H + 20} textAnchor="middle">
-          {view.calls[p]?.index}
+          {callNumber(view.calls[p]?.index ?? 0)}
         </text>
       ))}
       <line className="baseline" x1={M.left} x2={M.left + plotW} y1={yTop(0)} y2={yTop(0)} />
@@ -359,7 +360,7 @@ function CallTip({ call, x, width }: { call: TimelineCall; x: number; width: num
   return (
     <div ref={box} className="chart-tip" role="status" data-testid="chart-tip">
       <div className="chart-tip-head">
-        <b>Call {call.index}</b>
+        <b>Call {callNumber(call.index)}</b>
         <span className="muted">{when(call.ts)}</span>
       </div>
       <div className="chart-tip-total">

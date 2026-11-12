@@ -1,6 +1,6 @@
 import type { CacheBreak, TimelineCall } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
-import { laneView, mainLane } from "./lane.ts";
+import { laneNames, laneView, mainLane } from "./lane.ts";
 
 const call = (index: number, lane: string, extra: Partial<TimelineCall> = {}): TimelineCall => ({
   index,
@@ -62,5 +62,34 @@ describe("the lane a chart shows", () => {
     expect(v.nearest(4)).toBe(0);
     expect(v.nearest(5)).toBe(1);
     expect(v.nearest(99)).toBe(1);
+  });
+});
+
+describe("lane names", () => {
+  const lane = (key: string, model: string, calls: number) => ({ lane: key, model, calls, firstCall: 0, lastCall: 0 });
+
+  test("name a lane by its job: the main loop, the compaction summaries, a subagent, a side query", () => {
+    const names = laneNames([
+      lane("eu.anthropic.claude-opus-5-5|repl_main_thread", "eu.anthropic.claude-opus-5-5", 600),
+      lane("compaction", "", 2),
+      lane("claude-haiku-4-5|agent:builtin:Explore", "claude-haiku-4-5", 9),
+      lane("claude-haiku-4-5|generate_session_title", "claude-haiku-4-5", 1),
+      lane("claude-haiku-4-5|", "claude-haiku-4-5", 3),
+    ]);
+    expect([...names.values()]).toEqual([
+      "Main",
+      "Compaction summary",
+      "Subagent Explore",
+      "Generate session title",
+      "Side calls",
+    ]);
+  });
+
+  test("the lane with the most calls is the main loop, and a name that repeats gets its model", () => {
+    const names = laneNames([
+      lane("claude-opus-5-5|sdk", "claude-opus-5-5", 20),
+      lane("claude-sonnet-4-5|sdk", "claude-sonnet-4-5", 4),
+    ]);
+    expect([...names.values()]).toEqual(["Main (opus-5-5)", "Main (sonnet-4-5)"]);
   });
 });

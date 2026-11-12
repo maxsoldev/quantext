@@ -10,6 +10,7 @@ import { api } from "../api/client.ts";
 import { count, duration, percent, shortModel, tokens, usd } from "../format/format.ts";
 import { Link, navigate } from "../nav.tsx";
 import type { Route, ToolSort } from "../route.ts";
+import { callNumber } from "../route.ts";
 import { Term } from "../teach/Term.tsx";
 import { JsonView } from "../ui/JsonView.tsx";
 import { Tokens } from "../ui/Num.tsx";
@@ -307,7 +308,7 @@ function ToolPanel({
           <h3 id="tool-title">{c.name}</h3>
           <p className="content tool-what">{inputSummary(c.name, c.input, cwd)}</p>
           <p className="muted">
-            Called in call {c.callIndex ?? "unknown"}
+            Called in call {c.callIndex === undefined ? "unknown" : callNumber(c.callIndex)}
             {c.durationMs !== undefined && `, ran ${duration(c.durationMs)}`}
             {c.parallel > 1 && `, one of ${c.parallel} tool calls in parallel`}
             {c.isError && ", returned an error"}
@@ -321,14 +322,14 @@ function ToolPanel({
         {c.callIndex !== undefined && (
           <li>
             <Link to={{ page: "session", key: route.key, call: c.callIndex }}>
-              Open call {c.callIndex}, which called it
+              Open call {callNumber(c.callIndex)}, which called it
             </Link>
           </li>
         )}
         {c.resultBlockHash && first !== undefined && (
           <li>
             <Link to={{ page: "session", key: route.key, call: first, block: c.resultBlockHash }}>
-              Open its output in the context of call {first}
+              Open its output in the context of call {callNumber(first)}
             </Link>
           </li>
         )}

@@ -15,7 +15,7 @@ test("a compaction shows what was removed and kept, the summary, and the derived
   await expect(card).toContainText("derived");
   await expect(card.locator(".basis-derived").first()).toBeVisible();
   await card.getByRole("link", { name: /Context after/ }).click();
-  await expect(page).toHaveURL(/call=4/);
+  await expect(page).toHaveURL(/call=5/);
   await expect(page.getByTestId("break-note")).toContainText("Compaction");
 });
 
