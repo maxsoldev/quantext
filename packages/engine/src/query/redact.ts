@@ -63,12 +63,20 @@ export function createRedactor(options: RedactorOptions = {}): Redactor {
     options.host !== undefined && options.host.length >= 3 ? options.host.replace(/\.local$/i, "") : undefined;
   const hostPattern =
     host === undefined ? undefined : new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(host)}(?![\\p{L}\\p{N}])`, "giu");
+  const machineNames = [user, host].filter((n): n is string => n !== undefined && n.length >= 3).map(escapeRegExp);
+  /** Host names made from the user's or the machine's name: `<name>-mbp`, `<name>s-MacBook-Pro`, `*<name>*.local`. */
+  const machinePatterns = machineNames.flatMap((n) => [
+    new RegExp(`(?<![\\p{L}\\p{N}_-])[\\p{L}\\p{N}_-]*${n}[\\p{L}\\p{N}_-]*\\.local(?![\\p{L}\\p{N}])`, "giu"),
+    new RegExp(`(?<![\\p{L}\\p{N}])${n}-mbp(?![\\p{L}\\p{N}])`, "giu"),
+    new RegExp(`(?<![\\p{L}\\p{N}])${n}'?s?-macbook[\\p{L}\\p{N}_-]*`, "giu"),
+  ]);
   const redact = ((text: string, root?: string) => {
     let out = decodePercent(text);
     if (paths && root !== undefined && root !== "") out = relative(out, trimSeparators(root));
     for (const project of hidden) out = hide(out, project);
     if (!paths) return out;
     out = out.replace(EMAIL, "<email>");
+    for (const pattern of machinePatterns) out = out.replace(pattern, "<host>");
     if (hostPattern !== undefined) out = out.replace(hostPattern, "<host>");
     if (home !== undefined) {
       for (const form of forms(home)) out = out.replace(new RegExp(`${escapeRegExp(form)}${END}`, "gu"), "~");
@@ -140,10 +148,13 @@ function encode(path: string): string {
 
 /**
  * Encoded separators and text decoded, so that the patterns see plain paths: percent-encoded runs (also encoded
- * twice, `%252F`), JSON-escaped slashes (`\/`) and HTML character references (`&#x2F;`, `&#47;`).
+ * twice, `%252F`), JSON-escaped slashes (`\/`, `\u002F`, also escaped again: `\\u002F`; and `\u005C`) and HTML
+ * character references (`&#x2F;`, `&#47;`).
  */
 function decodePercent(text: string): string {
   let out = text
+    .replace(/\\{1,2}u002f/gi, "/")
+    .replace(/\\{1,2}u005c/gi, "\\")
     .replace(/\\\//g, "/")
     .replace(/&#x([0-9a-f]{1,6});/gi, (ref, hex: string) => character(Number.parseInt(hex, 16), ref))
     .replace(/&#(\d{1,7});/g, (ref, dec: string) => character(Number(dec), ref));

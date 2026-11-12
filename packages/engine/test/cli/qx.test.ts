@@ -146,7 +146,7 @@ describe("qx", () => {
     const data = await ingested();
     // Passes the text check, but names the database's files: a pragma outside the schema ones is denied.
     const run = await qx("sql", ...data, "SELECT * FROM pragma_database_list");
-    expect(run.code).toBe(EXIT.failed);
+    expect(run.code).toBe(EXIT.usage);
     expect(run.err).toMatch(/not authorized/i);
   });
 

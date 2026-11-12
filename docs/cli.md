@@ -29,7 +29,7 @@ Every reading command opens the store read-only (no writer lock), so it also wor
 |---|---|
 | 0 | Done (`ingest`: also when some files could not be read; they are listed on stderr and in `qx report`) |
 | 1 | Failed: no store, a store of another schema version, the writer lock is held, a SQL error, a query over its time limit |
-| 2 | Wrong use: unknown command or option, a bad number, an ambiguous session, a statement that is not a single read, `sql` in demo mode |
+| 2 | Wrong use: unknown command or option, a bad number, an ambiguous session, a statement that is not a single read (by the text check or SQLite's authorizer), `sql` in demo mode |
 | 3 | Not found: no such session or call |
 
 ## JSON output
@@ -59,12 +59,12 @@ For showing sessions to an audience. Applied in the query layer, so the API and 
 - Every other project's path (as is, JSON-escaped, percent-encoded, as the harness's encoded folder name, and its
   folder name of 4 or more characters as a word, also next to `.`, `_`, `-`, in any case) becomes
   `<hidden project>` wherever it shows in visible text.
-- Encoded text is decoded first: percent-encoding (also twice), `\/`, HTML character references. Paths in the project are shown relative to it (`src/a.ts`, the project
+- Encoded text is decoded first: percent-encoding (also twice), `\/`, `\u002F` and `\u005C` (also escaped again), HTML character references. Paths in the project are shown relative to it (`src/a.ts`, the project
   itself as `.`), the project as its folder name; any home folder (macOS, Linux, Windows, with spaces or letters
   beyond ASCII, JSON-escaped or encoded, also `C--Users-<name>`) as `~`.
 - The user name, in any case, is hidden after `@ / \ - : ~` and before `@` (`git@github.com:<name>/…`,
   `~<name>`, `<name>@host`), not inside other words. E-mail addresses (but `git@`) become `<email>`, the
-  machine's name `<host>`. Errors on stderr are redacted the same way.
+  machine's name and host names made from it or the user name (`<name>-mbp`, `<name>s-MacBook-Pro`, `*<name>*.local`) `<host>`. Errors on stderr are redacted the same way.
 - Text is redacted in full before it is cut to a preview, so that a cut word cannot escape the patterns.
 - Responses carry `redacted: true` and `blurImages: true`: the viewer blurs images, which may show what text hides.
 - `qx sql` refuses to run in demo mode (exit 2): it reads the tables as they are.

@@ -31,9 +31,11 @@ try {
     db.close();
   }
 } catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
   reply = {
-    error: error instanceof Error ? error.message : String(error),
-    rejected: error instanceof SqlRejectedError,
+    error: message,
+    // SQLite's authorizer denied it: a rejected statement, like one the text check refuses.
+    rejected: error instanceof SqlRejectedError || /not authorized/i.test(message),
   };
 }
 process.stdout.write(JSON.stringify(reply));

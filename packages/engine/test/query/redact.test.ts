@@ -104,7 +104,24 @@ describe("demo mode: what the second review found", () => {
 
   test("masks e-mail addresses (not git@) and the machine's name", () => {
     expect(redact("by jane.doe@corp.example via git@github.com:x/y")).toBe("by <email> via git@github.com:x/y");
-    expect(redact("ssh ALICE-MBP.local and alice-mbp:22")).toBe("ssh <host>.local and <host>:22");
+    expect(redact("ssh ALICE-MBP.local and alice-mbp:22")).toBe("ssh <host> and <host>:22");
+  });
+});
+
+describe("demo mode: the last review", () => {
+  const redact = createRedactor({ home: alice, user: "alice", host: "studio" });
+
+  test("decodes \\u002F and \\u005C escapes, also escaped again inside JSON strings", () => {
+    expect(redact(j("\\u002FUs", "ers\\u002Falice\\u002fx"))).toBe("~/x");
+    expect(redact(j("C:\\u005CUs", "ers\\u005Ccarol\\u005Cy"))).toBe("~\\y");
+    expect(redact(j("\\\\u002FUs", "ers\\\\u002Falice\\\\u002Fz"))).toBe("~/z");
+  });
+
+  test("masks host names made from the user's or the machine's name", () => {
+    expect(redact("on alice-mbp, Alices-MacBook-Pro, alice-air.local and studio.local")).toBe(
+      "on <host>, <host>, <host> and <host>",
+    );
+    expect(redact("a macbook and a.local")).toBe("a macbook and a.local");
   });
 });
 
