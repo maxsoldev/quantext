@@ -66,7 +66,10 @@ export interface Ingest {
   ingestAll(run?: RunOptions): Promise<IngestSummary>;
   /** Read what is new in the logs of these files (a transcript or meta file, main or subagent). */
   ingestPaths(paths: readonly string[], run?: RunOptions): Promise<IngestSummary>;
-  /** Listen for Calls added or updated, after each write. Returns a function that stops listening. */
+  /**
+   * Listen for Calls added or updated, after each write. A listener that throws is reported in the summary's
+   * errors and does not stop ingest. Returns a function that stops listening.
+   */
   onCalls(listener: (event: CallsEvent) => void): () => void;
 }
 
@@ -84,12 +87,21 @@ export function createIngest(options: IngestOptions): Ingest {
     queue = next.catch(() => undefined); // the caller gets the failure; the queue goes on
     return next;
   };
-  const emit = (log: string, result: WriteResult) => {
+  /** Tell the listeners; one that throws is reported in the summary (once per pass), and the others still run. */
+  const emit = (log: string, result: WriteResult, summary: IngestSummary) => {
     for (const { sessionId, added, updated } of result.calls) {
       if (added.length === 0 && updated.length === 0) continue;
       const event = { log, sessionId, added, updated };
-      // A listener runs after the write, outside ingest: its failure does not stop ingest, and is not hidden.
-      for (const listener of listeners) queueMicrotask(() => listener(event));
+      for (const listener of listeners) {
+        try {
+          listener(event);
+        } catch (error) {
+          const failure = { path: log, error: `a Calls listener failed: ${describe(error)}` };
+          if (!summary.errors.some((e) => e.path === failure.path && e.error === failure.error)) {
+            summary.errors.push(failure);
+          }
+        }
+      }
     }
   };
   const pass = async (logs: LogFiles[], errors: PathError[], signal?: AbortSignal): Promise<IngestSummary> => {
@@ -108,7 +120,7 @@ export function createIngest(options: IngestOptions): Ingest {
           summary.stopped = true;
           break;
         }
-        await ingestLog(log, files, limits, summary, (result) => emit(files.main, result), signal);
+        await ingestLog(log, files, limits, summary, (result) => emit(files.main, result, summary), signal);
       } catch (error) {
         summary.errors.push({ path: files.main, error: `ingest failed: ${describe(error)}` });
         markFailed(log, files.main, describe(error));

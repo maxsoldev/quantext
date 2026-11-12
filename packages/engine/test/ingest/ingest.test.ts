@@ -371,6 +371,20 @@ describe("the transcript folder", () => {
 });
 
 describe("Calls events", () => {
+  test("a listener that throws is reported, and neither ingest nor the other listeners stop", async () => {
+    const s = await setup();
+    const files = copyScenario(s.root, "basic-tools");
+    s.ingest.onCalls(() => {
+      throw new Error("listener broke");
+    });
+    const after: CallsEvent[] = [];
+    s.ingest.onCalls((e) => after.push(e));
+    const summary = await s.ingest.ingestAll();
+    expect(summary.errors[0]).toEqual({ path: files.main, error: "a Calls listener failed: listener broke" });
+    expect(after.length).toBe(s.events.length);
+    expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
+  });
+
   test("name the Calls each read added and updated, by Session", async () => {
     const s = await setup();
     const files = copyScenario(s.root, "subagent");
