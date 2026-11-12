@@ -30,7 +30,7 @@ agents (SQL, CLI, later MCP). Nothing leaves the machine.
 
 | Part | Runs in | Can do | Cannot do |
 |---|---|---|---|
-| **Mod** | Claude Code's mod sandbox (no DOM, no Node; I/O only through `$`) | Read each call's `usage`, status line, toasts, commands, `/clear-tool-outputs`; `$.http.fetch` to the engine; start the engine with `$.process.run` | Open a server, use npm packages or Node built-ins, keep a child process alive (`$.process.spawn` dies with the session) |
+| **Mod** | Claude Code's mod sandbox (no DOM, no Node; I/O only through `$`) | Read each call's `usage`, status line, toasts, commands, `/clear-tool-outputs`, `/clear-tool-calls`, `/clear-tools`; `$.http.fetch` to the engine; start the engine with `$.process.run` | Open a server, use npm packages or Node built-ins, keep a child process alive (`$.process.spawn` dies with the session) |
 | **Engine** | A separate Node ≥ 22.18 or Bun process, started detached | Watch and parse transcripts, write the store, serve HTTP + SSE and the viewer's files | — |
 | **Viewer** | The browser | Read the engine's API | — |
 

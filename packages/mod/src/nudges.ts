@@ -28,5 +28,5 @@ export function cacheExpiryNudge(l: Live, u: TurnUsage, startedAt: number): stri
 /** The large-context nudge when `ctx` has reached the threshold and it was not shown since it was re-armed. */
 export function contextNudge(l: Live, ctx: number): string | undefined {
   if (l.bigCtxNudged || ctx < CONTEXT_NUDGE_TOKENS) return undefined;
-  return `quantext: context is ${tokens(ctx)} tokens. Consider /compact, /clear-tool-outputs or a new session.`;
+  return `quantext: context is ${tokens(ctx)} tokens. Consider /compact, /clear-tools or a new session.`;
 }
