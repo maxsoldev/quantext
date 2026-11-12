@@ -15,8 +15,8 @@ export interface RealConfig {
   claudeMd?: string;
   /** Parsed real `settings.json` (MCP servers, plugins, hooks). */
   settings?: unknown;
-  /** Parsed real `.claude.json` (MCP servers per user and per project). */
-  claudeJson?: unknown;
+  /** Parsed real `.claude.json` files, from the home and the config folder (MCP servers per user and project). */
+  claudeJsons?: readonly unknown[];
   skills?: readonly Named[];
   agents?: readonly Named[];
   commands?: readonly Named[];
@@ -63,10 +63,11 @@ export function canaryTerms(config: RealConfig): string[] {
     const text = line.replace(/^\s*(?:[-*+]|#+|\d+\.)\s+/, "").trim();
     if (text.length >= MIN_LINE) terms.push(text);
   }
-  const claudeJson = record(config.claudeJson);
-  terms.push(...Object.keys(record(claudeJson.mcpServers)));
-  for (const project of Object.values(record(claudeJson.projects))) {
-    terms.push(...Object.keys(record(record(project).mcpServers)));
+  for (const claudeJson of (config.claudeJsons ?? []).map(record)) {
+    terms.push(...Object.keys(record(claudeJson.mcpServers)));
+    for (const project of Object.values(record(claudeJson.projects))) {
+      terms.push(...Object.keys(record(record(project).mcpServers)));
+    }
   }
   const settings = record(config.settings);
   terms.push(...Object.keys(record(settings.mcpServers)));

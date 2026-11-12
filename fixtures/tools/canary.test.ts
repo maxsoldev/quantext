@@ -11,11 +11,11 @@ describe("canaryTerms", () => {
     ]);
   });
 
-  test("takes MCP server names from the user config and every project, plugin names, own marketplaces", () => {
-    const claudeJson = {
-      mcpServers: { "team-graph": {} },
-      projects: { "/x": { mcpServers: { "local-notes": {} } }, "/y": {} },
-    };
+  test("takes MCP server names from every .claude.json and project, plugin names, own marketplaces", () => {
+    const claudeJsons = [
+      { mcpServers: { "team-graph": {} }, projects: { "/x": { mcpServers: { "local-notes": {} } }, "/y": {} } },
+      { mcpServers: { "config-dir-server": {} } },
+    ];
     const settings = {
       mcpServers: { "work-wiki": {} },
       enabledPlugins: {
@@ -24,8 +24,8 @@ describe("canaryTerms", () => {
         "code-review@claude-plugins-official": true,
       },
     };
-    expect(canaryTerms({ claudeJson, settings }).sort()).toEqual(
-      ["acme-tools", "context7", "local-notes", "team-graph", "trace-hooks", "work-wiki"].sort(),
+    expect(canaryTerms({ claudeJsons, settings }).sort()).toEqual(
+      ["acme-tools", "config-dir-server", "context7", "local-notes", "team-graph", "trace-hooks", "work-wiki"].sort(),
     );
   });
 

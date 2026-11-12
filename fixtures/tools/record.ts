@@ -20,16 +20,16 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, hostname } from "node:os";
-import { basename, dirname, join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { localDenylist } from "../../scripts/lib/personal-data.ts";
-import type { Named, RealConfig } from "./canary.ts";
 import { canaryTerms } from "./canary.ts";
 import { FIXTURE_IDENTITY, writeDummyRepo } from "./dummy-repo.ts";
 import { checkClean, childEnv, secretValues } from "./isolation.ts";
 import type { CompactionSummary, Manifest, TranscriptSummary } from "./manifest.ts";
 import { compactionsOf, summariseTranscript } from "./manifest.ts";
 import { normaliseSession, replacementsFor } from "./normalise.ts";
+import { readRealConfig } from "./real-config.ts";
 import type { Scenario } from "./scenarios.ts";
 import { SCENARIOS } from "./scenarios.ts";
 
@@ -52,7 +52,14 @@ function main(): void {
   const settingsEnv = (readJson(join(realConfigDir, "settings.json")) as { env?: Record<string, string> })?.env ?? {};
   const deny = [
     ...localDenylist({ email: gitEmail(), hostname: hostname() }),
-    ...canaryTerms(readRealConfig(realConfigDir)),
+    ...canaryTerms(
+      readRealConfig({
+        configDir: realConfigDir,
+        home: homedir(),
+        cwd: process.cwd(),
+        extra: (process.env.QX_CANARY_TERMS ?? "").split(","),
+      }),
+    ),
     ...secretValues({ ...settingsEnv, ...process.env }),
   ];
   if (args.includes("--check")) {
@@ -202,31 +209,6 @@ function collectTranscripts(config: string): Record<string, string> {
   };
   walk(base);
   return files;
-}
-
-/** The parts of the real config that canary terms come from. Read only, at run time. */
-function readRealConfig(dir: string): RealConfig {
-  const text = (path: string) => (existsSync(path) && statSync(path).isFile() ? readFileSync(path, "utf8") : undefined);
-  const description = (markdown: string | undefined) => /^description:\s*(.+)$/m.exec(markdown ?? "")?.[1]?.trim();
-  const named = (sub: string, file: (name: string) => string): Named[] => {
-    const folder = join(dir, sub);
-    if (!existsSync(folder)) return [];
-    return readdirSync(folder).map((entry) => {
-      const name = basename(entry, ".md");
-      const found = description(text(join(folder, file(entry))));
-      return found === undefined ? { name } : { name, description: found };
-    });
-  };
-  const claudeMd = text(join(dir, "CLAUDE.md"));
-  return {
-    ...(claudeMd === undefined ? {} : { claudeMd }),
-    settings: readJson(join(dir, "settings.json")),
-    claudeJson: readJson(join(homedir(), ".claude.json")) ?? readJson(join(dir, ".claude.json")),
-    skills: named("skills", (entry) => join(entry, "SKILL.md")),
-    agents: named("agents", (entry) => entry),
-    commands: named("commands", (entry) => entry),
-    extra: [...(process.env.QX_CANARY_TERMS ?? "").split(","), homedir()],
-  };
 }
 
 function readJson(path: string): unknown {
