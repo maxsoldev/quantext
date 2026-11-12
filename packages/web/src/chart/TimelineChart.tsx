@@ -10,6 +10,7 @@ import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CachePart } from "../context/categories.ts";
 import { CACHE_PARTS, CATEGORIES, CATEGORY_LABEL } from "../context/categories.ts";
 import { percent, tokens, usd, when } from "../format/format.ts";
+import { BREAK_REASONS } from "../teach/cacheBreaks.ts";
 import type { LaneView } from "./lane.ts";
 import type { Band, Stack } from "./shape.ts";
 import { bandOf, niceTicks, stack, stepArea } from "./shape.ts";
@@ -27,14 +28,6 @@ type TopKey = ContextCategory | "unrebuilt";
 const TOP_KEYS: readonly TopKey[] = [...CATEGORIES.map((c) => c.key), "unrebuilt"];
 /** The input parts only: the bottom panel shows shares of the input, so output (not input) is in the tooltip. */
 const CACHE_KEYS: readonly CachePart[] = ["cacheRead", "cacheWrite", "input"];
-
-export const REASONS: Record<string, string> = {
-  compaction: "A compaction replaced the context, so the cached prefix no longer matches.",
-  "model-switch": "Another model: each model has its own cache.",
-  ttl: "The cache expired: more time passed since the previous call than the cache lives (5 min or 1 h).",
-  "prefix-change":
-    "Something early in the request changed (a tool list, the system prompt, an edited message), so the cache matched only up to there.",
-};
 
 export function inputTotal(c: TimelineCall): number {
   const u = c.usage;
@@ -68,10 +61,13 @@ export function TimelineChart({
   view,
   selected,
   onSelect,
+  onBreak,
 }: {
   view: LaneView;
   selected: number;
   onSelect: (place: number) => void;
+  /** A click on a cache-break mark: after `onSelect`, to show what changed. */
+  onBreak?: (place: number) => void;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(1200);
@@ -113,7 +109,9 @@ export function TimelineChart({
         onPointerLeave={() => setHover(null)}
         onClick={(e) => {
           const p = place(e);
-          if (p !== null) onSelect(p);
+          if (p === null) return;
+          onSelect(p);
+          if ((e.target as Element).closest(".break-mark")) onBreak?.(p);
         }}
         data-testid="timeline"
       >
@@ -194,7 +192,7 @@ const Layers = memo(function Layers({
             key={`b${b.index}`}
             className="break-mark"
             d={`M${cx - 6},${y}h12l-6,10z`}
-            data-tip={`Cache break at call ${b.index}: ${tokens(b.dropTokens)} fewer tokens read from the cache than call ${b.previous.index}.\n${REASONS[b.reason] ?? b.reason}`}
+            data-tip={`Cache break at call ${b.index}: ${tokens(b.dropTokens)} fewer tokens read from the cache than call ${b.previous.index}.\n${BREAK_REASONS[b.reason].short}\nClick to see what changed.`}
           />
         );
       })}

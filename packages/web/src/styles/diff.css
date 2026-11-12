@@ -1,0 +1,191 @@
+/* What changed at call N: the break note, two strips on one scale, the list of changed blocks. */
+.diff-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-4);
+}
+.diff-head h2 {
+  margin: 0;
+}
+.diff-head p {
+  margin: 0;
+}
+.diff-lede {
+  font-size: var(--t-lead);
+  max-width: 72ch;
+  margin: 0;
+}
+.diff-lede .tip-anchor {
+  font-weight: 700;
+}
+
+.break-note {
+  border-left: 4px solid var(--warning);
+  background: var(--surface-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: 0 var(--radius-s) var(--radius-s) 0;
+  max-width: 80ch;
+}
+.break-note p {
+  margin: 0 0 var(--space-2);
+}
+.break-note p:last-child {
+  margin-bottom: 0;
+}
+.break-title {
+  font-size: var(--t-lead);
+}
+.break-title .tip-anchor {
+  font-weight: 700;
+}
+.break-icon {
+  display: inline-block;
+  width: 14px;
+  height: 12px;
+  margin-right: var(--space-2);
+  background: var(--warning);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+.diff-strips {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.diff-row {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  align-items: center;
+  gap: var(--space-3);
+}
+.diff-label {
+  font-weight: 700;
+  white-space: nowrap;
+}
+.diff-strip {
+  position: relative;
+  height: 24px;
+  margin: 10px 0;
+}
+.diff-seg {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  min-width: 1px;
+  box-shadow: inset -2px 0 0 var(--surface);
+}
+.diff-kept,
+.swatch.diff-kept {
+  background: var(--rule-strong);
+}
+.diff-rewritten,
+.swatch.diff-rewritten {
+  background: repeating-linear-gradient(135deg, var(--rule-strong) 0 3px, var(--surface) 3px 6px);
+}
+.swatch.diff-changed {
+  background: linear-gradient(90deg, var(--cat-tool-outputs) 0 50%, var(--cat-tool-calls) 50% 100%);
+}
+.diff-moved {
+  outline: 2px dashed var(--ink);
+  outline-offset: -2px;
+}
+.swatch.diff-moved-swatch {
+  outline: 2px dashed var(--ink);
+  outline-offset: -2px;
+  background: var(--surface);
+}
+.diff-cached {
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  width: 3px;
+  margin-left: -1px;
+  background: var(--ink);
+}
+.swatch.diff-cached-swatch {
+  width: 3px;
+  background: var(--ink);
+  border-radius: 0;
+}
+.diff-first {
+  position: absolute;
+  top: -10px;
+  bottom: -10px;
+  border-left: 2px dotted var(--ink);
+}
+.diff-first span {
+  position: absolute;
+  top: -14px;
+  left: 4px;
+  font-size: var(--t-small);
+  font-weight: 700;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.diff-changes summary {
+  cursor: pointer;
+  font-weight: 700;
+  padding: var(--space-1) 0;
+}
+.change-list {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-s);
+}
+.change-list li + li {
+  border-top: 1px solid var(--rule);
+}
+.change-row {
+  display: grid;
+  grid-template-columns: 8.5rem 4.5rem 10px auto minmax(0, auto) minmax(0, 1fr) 4.5rem;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  padding: var(--space-2) var(--space-3);
+  min-height: 44px;
+}
+.change-row:hover {
+  background: var(--surface-2);
+}
+.change-row .source {
+  max-width: 16rem;
+}
+.change-tag {
+  font-size: var(--t-small);
+  font-weight: 700;
+  padding: 0 6px;
+  border-radius: var(--radius-s);
+  border: 1px solid currentcolor;
+  justify-self: start;
+  white-space: nowrap;
+}
+.change-removed {
+  color: var(--ink-2);
+  border-style: dashed;
+}
+.change-moved,
+.change-rewritten {
+  color: var(--ink-2);
+}
+.diff-breaks {
+  margin: 0;
+  color: var(--ink-2);
+}
+.diff-breaks [aria-current="true"] {
+  font-weight: 700;
+}
+.diff-strips .legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

@@ -7,8 +7,11 @@ import type {
   BlockDetail,
   CacheBreak,
   CallContext,
+  CompactionDetail,
+  ContextDiff,
   EngineStatus,
   Items,
+  MemoryDocumentView,
   Page,
   ProjectSummary,
   SessionDetail,
@@ -16,6 +19,8 @@ import type {
   SessionKey,
   SessionSummary,
   TimelineCall,
+  ToolCallSummary,
+  ToolOutput,
 } from "@quantext/shared";
 
 export type FetchFn = (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
@@ -40,6 +45,11 @@ export interface Api {
   timeline(key: SessionKey, signal?: AbortSignal): Promise<Items<TimelineCall>>;
   cacheBreaks(key: SessionKey, signal?: AbortSignal): Promise<Items<CacheBreak>>;
   context(key: SessionKey, call: number, signal?: AbortSignal): Promise<CallContext>;
+  diff(key: SessionKey, call: number, signal?: AbortSignal): Promise<ContextDiff>;
+  toolCalls(key: SessionKey, signal?: AbortSignal): Promise<Items<ToolCallSummary>>;
+  toolOutputs(key: SessionKey, signal?: AbortSignal): Promise<Items<ToolOutput>>;
+  compactions(key: SessionKey, signal?: AbortSignal): Promise<Items<CompactionDetail>>;
+  memory(project: string, signal?: AbortSignal): Promise<Items<MemoryDocumentView>>;
   block(log: number, hash: string, signal?: AbortSignal): Promise<BlockDetail>;
   mediaUrl(log: number, hash: string, media: string): string;
 }
@@ -61,6 +71,11 @@ export function createApi(fetchFn: FetchFn): Api {
     timeline: (key, signal) => get(`${sessionPath(key)}/timeline`, signal),
     cacheBreaks: (key, signal) => get(`${sessionPath(key)}/cache-breaks`, signal),
     context: (key, call, signal) => get(`${sessionPath(key)}/calls/${call}/context`, signal),
+    diff: (key, call, signal) => get(`${sessionPath(key)}/calls/${call}/diff`, signal),
+    toolCalls: (key, signal) => get(`${sessionPath(key)}/tool-calls`, signal),
+    toolOutputs: (key, signal) => get(`${sessionPath(key)}/tool-outputs?limit=10000`, signal),
+    compactions: (key, signal) => get(`${sessionPath(key)}/compactions`, signal),
+    memory: (project, signal) => get(`${BASE}/memory?project=${encodeURIComponent(project)}`, signal),
     block: (log, hash, signal) => get(`${BASE}/blocks/${log}/${encodeURIComponent(hash)}`, signal),
     mediaUrl: (log, hash, media) =>
       `${BASE}/blocks/${log}/${encodeURIComponent(hash)}/media/${encodeURIComponent(media)}`,

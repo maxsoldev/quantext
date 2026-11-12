@@ -5,10 +5,9 @@
  */
 import type { CallContext, ContextBlock, SessionKey } from "@quantext/shared";
 import { useMemo, useRef, useState } from "react";
-import { api } from "../api/client.ts";
 import { percent, shortModel, tokens, usd, when } from "../format/format.ts";
 import { Tokens } from "../ui/Num.tsx";
-import { useLoad } from "../ui/useLoad.ts";
+import type { Load } from "../ui/useLoad.ts";
 import { useWindow } from "../ui/useWindow.ts";
 import { BlockPanel } from "./BlockPanel.tsx";
 import { CATEGORIES, CATEGORY_LABEL } from "./categories.ts";
@@ -18,11 +17,8 @@ import { barSegments, hiddenPart, listRows, sourceLabel } from "./model.ts";
 
 const ROW = 48;
 
-export function ContextAt({ sessionKey, call, version }: { sessionKey: SessionKey; call: number; version: number }) {
-  const ctx = useLoad(
-    (signal) => api.context(sessionKey, call, signal),
-    [sessionKey.log, sessionKey.id, call, version],
-  );
+/** `ctx` is loaded by the page, which shares it with the diff card. */
+export function ContextAt({ sessionKey, call, ctx }: { sessionKey: SessionKey; call: number; ctx: Load<CallContext> }) {
   const [open, setOpen] = useState<ContextBlock | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const c = ctx.value;
@@ -350,7 +346,7 @@ function BlockRow({
           className={b.inCachedPrefix ? "tip-anchor cache-tag cached" : "tip-anchor cache-tag new"}
           data-tip={
             b.inCachedPrefix
-              ? "In the cached prefix: read from the provider's cache, at about 0.1× the input price."
+              ? "In the cached prefix: read from the provider's cache, at 0.05× to 0.1× of the input price (by model)."
               : "After the cached prefix: written to the cache or sent uncached, at the full price or more."
           }
         >

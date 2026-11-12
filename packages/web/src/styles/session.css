@@ -161,7 +161,7 @@
   fill: var(--warning);
   stroke: var(--surface);
   stroke-width: 2;
-  cursor: help;
+  cursor: pointer;
 }
 .cursor rect {
   fill: var(--ink);
