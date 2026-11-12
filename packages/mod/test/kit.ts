@@ -1,5 +1,5 @@
 /** What the tests stand in for beneath the mod: the footer, the model's calls, toasts, the clock. */
-import type { On, TurnUsage } from "claude-code";
+import type { CommandRunInput, On, TurnUsage } from "claude-code";
 import type { Engine } from "claude-code/testing";
 import { mock } from "claude-code/testing";
 
@@ -74,3 +74,11 @@ export function stepper(on: On, now = 1_000_000) {
   };
   return { step, clock };
 }
+
+/** A command as the person types it at the prompt. */
+export const command = (name: string, args = ""): CommandRunInput => ({
+  command: name,
+  args,
+  origin: { kind: "composer" },
+  presentation: { isFullscreen: false, columns: 120 },
+});
