@@ -128,6 +128,18 @@ describe("block kinds and sources", () => {
     expect(after.filter((b) => b.kind === "summary")).toHaveLength(1);
   });
 
+  test("a notice the harness writes is a reminder; the command the user typed stays a user text", () => {
+    const compaction = parseClaudeCodeSession(transcriptsOf("compaction"));
+    const texts = blocksOfCall(compaction, 4).filter((b) => b.kind === "user" || b.kind === "reminder");
+    const kindOf = (start: string) => texts.find((b) => b.text.startsWith(start))?.kind;
+    expect(kindOf("<local-command-caveat>")).toBe("reminder");
+    expect(kindOf("<local-command-stdout>")).toBe("reminder");
+    expect(kindOf("<command-name>/compact")).toBe("user");
+    expect(kindOf("Which two files")).toBe("user");
+    const mcp = parseClaudeCodeSession(transcriptsOf("mcp-deferred"));
+    expect(blocksOfCall(mcp, 2).find((b) => b.text === "Tool loaded.")?.kind).toBe("reminder");
+  });
+
   test("a Read of an image is a tool result that holds the image", () => {
     const image = parseClaudeCodeSession(transcriptsOf("image"));
     const result = blocksOfCall(image, 1).find((b) => b.kind === "tool-result");

@@ -192,6 +192,7 @@ function plainUserText(text: string, state: ParserState, fresh: boolean): Classi
   if (get(state.summaries, hash) !== undefined) return { kind: "summary", source: {} };
   const skill = get(state.skills, hash);
   if (skill !== undefined) return { kind: "reminder", source: { tool: "Skill", skill } };
+  if (isNotice(text)) return { kind: "reminder", source: {} };
   if (!text.startsWith("<system-reminder>")) return { kind: "user", source: {} };
   const call = AT_FILE_CALL.exec(text);
   if (call !== null) {
@@ -205,6 +206,18 @@ function plainUserText(text: string, state: ParserState, fresh: boolean): Classi
     return { kind: "reminder", source: last !== undefined && last.tool === result[1] ? last : toolSource(result[1]) };
   }
   return { kind: "reminder", source: {} };
+}
+
+/**
+ * A user-role text that Claude Code writes, not the user: a local command's caveat and output, an interrupt
+ * marker, the note after a tool search. The command the user typed (`<command-name>`) is not one.
+ */
+function isNotice(text: string): boolean {
+  return (
+    text === "Tool loaded." ||
+    text.startsWith("[Request interrupted by user") ||
+    /^<local-command-(caveat|stdout|stderr)>/.test(text)
+  );
 }
 
 /** The key under which the state remembers a text (summaries, skills). */
