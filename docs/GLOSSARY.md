@@ -76,7 +76,7 @@ _Avoid_: type (the provider's content block type is a different, finer thing)
 
 **Block source**:
 Where a Block's content came from, as far as the log tells: the tool, the file it read or wrote, the MCP server,
-the skill.
+the skill, the kind of context the harness attached.
 _Avoid_: origin, provenance
 
 **CallBlock**:

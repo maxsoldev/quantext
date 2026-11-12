@@ -25,6 +25,10 @@ time writing snapshots. The store (build step 5) keeps all of that content anywa
 ## Consequences
 
 - The snapshot of a growing synthetic session stays at about 4 kB from 500 to 5000 calls (test: under 200 kB).
+- On the real corpus (build step 5) snapshots are larger: up to about 462 kB, for a log with about 76 lanes and as
+  many subagent transcripts. A snapshot grows with the lanes and transcripts of a log (each keeps its latest
+  Call, its open assistant messages and its run of user rows), not with the length of the log. Open ToolCalls
+  are bounded to the newest 64, open assistant messages are kept by hash.
 - Tests implement the lookup over an in-memory store; a property test restores from JSON snapshots at random
   points of every fixture and gets the same graph as one read.
 - The store answers the lookup from its tables; it must apply each delta before the next read.

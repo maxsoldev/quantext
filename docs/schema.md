@@ -14,8 +14,7 @@ are in ADR 19 and ADR 20; the domain terms are in `GLOSSARY.md`. This file is th
   open run).
 - **JSON columns are text.** Read them with `json_each` and `->>`.
 - **Positions and indexes are 0-based.** `calls.idx` is the Call's position in its Session.
-- **Hashes are hex text**, so that they can be read and pasted. (Binary hashes would save about a third of the key
-  space; a later option.)
+- **Hashes are hex text**, so that they can be read and pasted (binary hashes: see "Later").
 - **Tables with a natural key have no rowid** (`WITHOUT ROWID`); only `blocks` and `media` keep one.
 
 ## Tables
@@ -78,7 +77,7 @@ version logs only usage, so its Calls are usage-only and have no Blocks; `partia
 | `cache_breakpoints` | JSON list of the positions that carry a cache breakpoint |
 | `cache_boundary_tokens`, `cache_boundary_position` | The Cached prefix: cache read tokens, and the number of leading Blocks wholly inside it |
 | `framing_tokens` | Input tokens after the last Block; the Call's runs plus these add up to its input total |
-| `issues` | JSON list of `{kind, detail}`, sorted by kind and detail: `no-request` (a usage-only Call), `missing-message` (a gap Block stands for a message), `unresolved-request`, `no-usage`, `unreconciled-tokens`, `no-price`, `price-assumption`, `estimate-clamped` |
+| `issues` | JSON list of `{kind, detail}`, sorted by kind and detail: `no-request` (a usage-only Call), `missing-message` (a gap Block stands for a message, or the message came after the Call was split), `derived-usage-invalid` (a summarising Call whose derived input is 0 or less: it has no usage), `unresolved-request`, `no-usage`, `unreconciled-tokens`, `no-price`, `price-assumption`, `estimate-clamped` |
 | `turn_duration_ms` | On the last Call of a turn: how long the turn took |
 
 ### `blocks`
@@ -95,7 +94,9 @@ its bytes are in `media`. A content block that no Call has used yet is only here
 
 The Blocks a log reported, with that log's classification: `(log, hash)`, `kind` (the Block kind, also `gap`:
 a stand-in for a message that is not in the log), and the Block source `tool`, `file_path`, `mcp_server`,
-`skill`. The display text of a Block is not stored: the engine derives it from the content.
+`skill`, `attachment` (the kind of context the harness attached, in its own words, when an attachment row
+rendered exactly this text: `file`, `skill_listing`, `session_context`, …). The display text of a Block is not
+stored: the engine derives it from the content.
 
 ### `call_blocks`
 
@@ -178,6 +179,18 @@ What could not be mapped or read, so that nothing is dropped in silence.
   did not follow (symbolic links).
 
 File errors are in `ingest_files.error`.
+
+## Later
+
+Options that are not needed yet, with what they would bring:
+
+- **Binary hashes** (BLOB of 32 bytes instead of 64 hex characters) would save about a third of the key space of
+  `blocks`, `log_blocks`, `call_blocks` and `messages`. Hex text stays while agents read hashes in `qx sql`.
+- **A lanes table with integer ids** (N5): `call_blocks` and `calls` repeat the lane key (`model|query source`)
+  and the session id in every row; an integer lane id would make their keys several times smaller.
+- **Peak memory of a full import on Bun** (N4): about 800–900 MB for the 1.2 GB real corpus (Node: about
+  750 MB). Ingest memory is bounded per batch; the rest is the runtime's heap growth. Watch it when the corpus
+  grows; a smaller `restoreBytes` lowers it at some cost in time.
 
 ## Changing the schema
 
