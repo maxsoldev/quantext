@@ -5,7 +5,7 @@
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { claudeCodeRecords } from "../../src/adapters/claude-code/index.ts";
+import { claudeCodeCodec } from "../../src/adapters/claude-code/index.ts";
 import { createIngest } from "../../src/ingest/index.ts";
 import { openStore } from "../../src/store/index.ts";
 import { syntheticSession } from "../adapters/claude-code/synthetic.ts";
@@ -52,7 +52,7 @@ test(`a ${CALLS}-call session ingests in under 5 s, and one more call in under 1
   const mb = (process.memoryUsage().heapUsed - heap) / 1e6;
   appendFileSync(main, `${lines.slice(cut).join("\n")}`);
   const more = await timed(() => ingest.ingestAll());
-  const graph = store.log(main, "claude-code", claudeCodeRecords).graph();
+  const graph = store.log(main, "claude-code", claudeCodeCodec).graph();
   console.log(
     `${CALLS}-call session (${whole.result.bytes} bytes): ${whole.ms.toFixed(0)} ms, heap +${mb.toFixed(0)} MB;` +
       ` one more call: ${more.ms.toFixed(0)} ms`,

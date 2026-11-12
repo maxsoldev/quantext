@@ -1,7 +1,7 @@
 /** The store: one SQLite database in the data folder, written by one engine at a time. */
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { RecordCodec, RequestLog } from "@quantext/shared";
+import type { RequestLog, StoreCodec } from "@quantext/shared";
 import type { SqlDriver } from "./driver.ts";
 import { openDriver } from "./driver.ts";
 import { acquireLock } from "./lock.ts";
@@ -41,7 +41,7 @@ export interface Store {
   /** The database, for reads by the query layer and tests. Writes go through the store's own methods. */
   readonly db: SqlDriver;
   /** The log of one main transcript (by path), created when new. `codec` maps the adapter's records to rows. */
-  log(path: string, harness: string, codec: RecordCodec): LogStore;
+  log(path: string, harness: string, codec: StoreCodec): LogStore;
   /** What could not be read, over all logs: the report rows, file errors, and lines still being written. */
   report(): StoreReport;
   /** The paths of every log in the store, oldest first. */

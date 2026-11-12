@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { claudeCodeRecords } from "../../src/adapters/claude-code/index.ts";
+import { claudeCodeCodec } from "../../src/adapters/claude-code/index.ts";
 import type { CallsEvent, ChangeSource, Ingest, IngestSummary } from "../../src/ingest/index.ts";
 import { createIngest, fsChanges, watchTranscripts } from "../../src/ingest/index.ts";
 import { openStore } from "../../src/store/index.ts";
@@ -88,7 +88,7 @@ describe("the watcher", () => {
     writeText(files.main, text);
     changes.fire(files.main);
     await watcher.flush();
-    const graph = normal(store.log(files.main, "claude-code", claudeCodeRecords).graph());
+    const graph = normal(store.log(files.main, "claude-code", claudeCodeCodec).graph());
     expect(graph).toEqual(expectedGraph(text));
     expect(events.flatMap((e) => e.added).length - before).toBeGreaterThan(0);
     expect(events.flatMap((e) => e.added).length).toBe(graph.calls.length);

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { claudeCodeRecords } from "../../src/adapters/claude-code/index.ts";
+import { claudeCodeCodec } from "../../src/adapters/claude-code/index.ts";
 import { createIngest } from "../../src/ingest/index.ts";
 import { openStore } from "../../src/store/index.ts";
 import { scenarios } from "../fixtures.ts";
@@ -30,7 +30,7 @@ test.skipIf(!available)(
     const read = await openStore({ dataDir: theirs });
     onCleanup(() => read.close());
     for (const main of logs) {
-      const graph = (s: typeof mine) => normal(s.log(main, "claude-code", claudeCodeRecords).graph());
+      const graph = (s: typeof mine) => normal(s.log(main, "claude-code", claudeCodeCodec).graph());
       expect(graph(read)).toEqual(graph(mine));
     }
   },

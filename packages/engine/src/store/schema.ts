@@ -9,6 +9,7 @@ CREATE TABLE logs (
   id INTEGER PRIMARY KEY,
   path TEXT NOT NULL UNIQUE,
   harness TEXT NOT NULL,
+  adapter_version INTEGER NOT NULL,
   snapshot TEXT
 ) STRICT;
 
@@ -23,7 +24,7 @@ CREATE TABLE ingest_files (
   byte_offset INTEGER NOT NULL DEFAULT 0,
   fingerprint TEXT,
   error TEXT
-) STRICT;
+) STRICT, WITHOUT ROWID;
 CREATE INDEX ingest_files_log ON ingest_files (log);
 
 CREATE TABLE sessions (
@@ -41,7 +42,7 @@ CREATE TABLE sessions (
   title_source TEXT,
   agent_name TEXT,
   PRIMARY KEY (log, id)
-) STRICT;
+) STRICT, WITHOUT ROWID;
 
 CREATE TABLE calls (
   log INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
@@ -83,23 +84,28 @@ CREATE TABLE calls (
   turn_duration_ms INTEGER,
   PRIMARY KEY (log, id),
   FOREIGN KEY (log, session_id) REFERENCES sessions (log, id)
-) STRICT;
+) STRICT, WITHOUT ROWID;
 CREATE INDEX calls_session ON calls (log, session_id, idx);
 
 CREATE TABLE blocks (
   hash TEXT PRIMARY KEY,
-  content TEXT NOT NULL,
-  kind TEXT,
-  tool TEXT,
-  file_path TEXT,
-  mcp_server TEXT,
-  skill TEXT,
-  text TEXT
+  content TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE media (
+  hash TEXT PRIMARY KEY,
+  media_type TEXT NOT NULL,
+  bytes BLOB NOT NULL
 ) STRICT;
 
 CREATE TABLE log_blocks (
   log INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
   hash TEXT NOT NULL REFERENCES blocks (hash),
+  kind TEXT NOT NULL,
+  tool TEXT,
+  file_path TEXT,
+  mcp_server TEXT,
+  skill TEXT,
   PRIMARY KEY (log, hash)
 ) STRICT, WITHOUT ROWID;
 
@@ -117,9 +123,8 @@ CREATE TABLE call_blocks (
   grp TEXT,
   first_call INTEGER NOT NULL,
   last_call INTEGER,
-  PRIMARY KEY (log, id)
-) STRICT;
-CREATE INDEX call_blocks_interval ON call_blocks (log, session_id, lane, first_call, last_call);
+  PRIMARY KEY (log, session_id, lane, first_call, position)
+) STRICT, WITHOUT ROWID;
 CREATE INDEX call_blocks_block ON call_blocks (block_hash);
 
 CREATE TABLE tool_calls (
@@ -128,7 +133,8 @@ CREATE TABLE tool_calls (
   session_id TEXT NOT NULL,
   call_id TEXT NOT NULL,
   name TEXT NOT NULL,
-  input TEXT NOT NULL,
+  input TEXT,
+  block_hash TEXT,
   tool TEXT,
   file_path TEXT,
   mcp_server TEXT,
@@ -139,7 +145,7 @@ CREATE TABLE tool_calls (
   parallel INTEGER NOT NULL,
   child_session_id TEXT,
   PRIMARY KEY (log, id)
-) STRICT;
+) STRICT, WITHOUT ROWID;
 CREATE INDEX tool_calls_call ON tool_calls (log, call_id);
 
 CREATE TABLE compactions (
@@ -153,7 +159,7 @@ CREATE TABLE compactions (
   before_call_id TEXT,
   summary_call_id TEXT,
   PRIMARY KEY (log, id)
-) STRICT;
+) STRICT, WITHOUT ROWID;
 
 CREATE TABLE messages (
   log INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
@@ -161,7 +167,7 @@ CREATE TABLE messages (
   role TEXT NOT NULL,
   blocks TEXT NOT NULL,
   PRIMARY KEY (log, key)
-) STRICT;
+) STRICT, WITHOUT ROWID;
 
 CREATE TABLE shapes (
   log INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
@@ -169,14 +175,14 @@ CREATE TABLE shapes (
   tools TEXT NOT NULL,
   system TEXT NOT NULL,
   PRIMARY KEY (log, key)
-) STRICT;
+) STRICT, WITHOUT ROWID;
 
 CREATE TABLE records (
   log INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
   key TEXT NOT NULL,
   value TEXT NOT NULL,
   PRIMARY KEY (log, key)
-) STRICT;
+) STRICT, WITHOUT ROWID;
 
 CREATE TABLE session_events (
   log INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
@@ -187,7 +193,7 @@ CREATE TABLE session_events (
   value TEXT NOT NULL,
   detail TEXT,
   PRIMARY KEY (log, id)
-) STRICT;
+) STRICT, WITHOUT ROWID;
 CREATE INDEX session_events_session ON session_events (log, session_id, ts);
 
 CREATE TABLE report_kinds (
@@ -197,7 +203,7 @@ CREATE TABLE report_kinds (
   count INTEGER NOT NULL,
   seq INTEGER NOT NULL,
   PRIMARY KEY (log, status, kind)
-) STRICT;
+) STRICT, WITHOUT ROWID;
 
 CREATE TABLE report_unreadable (
   log INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
@@ -205,7 +211,7 @@ CREATE TABLE report_unreadable (
   at TEXT NOT NULL,
   reason TEXT NOT NULL,
   PRIMARY KEY (log, seq)
-) STRICT;
+) STRICT, WITHOUT ROWID;
 `;
 
 /** Migration i (0-based) takes the schema from version i to version i + 1. */

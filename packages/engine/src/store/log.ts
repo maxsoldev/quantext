@@ -9,16 +9,14 @@ import type {
   ContentLookup,
   ContentPart,
   JsonValue,
-  RecordCodec,
   SessionDelta,
   SessionGraph,
+  StoreCodec,
   ToolCall,
 } from "@quantext/shared";
 import type { SqlDriver, SqlRow, SqlValue } from "./driver.ts";
 import {
-  BLOCK_COLUMNS,
   block,
-  blockRow,
   CALL_COLUMNS,
   COMPACTION_COLUMNS,
   call,
@@ -29,6 +27,8 @@ import {
   event,
   eventRow,
   json,
+  LOG_BLOCK_COLUMNS,
+  logBlockRow,
   RUN_COLUMNS,
   run,
   runRow,
@@ -89,18 +89,15 @@ export interface LogStore {
 
 const UPSERT_SESSION = upsertSql("sessions", SESSION_COLUMNS);
 const UPSERT_CALL = upsertSql("calls", CALL_COLUMNS);
-const UPSERT_RUN = upsertSql("call_blocks", RUN_COLUMNS);
+/** A run is one Block at one position from its first Call on: that is its key (its id is made of the same parts). */
+const UPSERT_RUN = upsertSql("call_blocks", RUN_COLUMNS, ["session_id", "lane", "first_call", "position"]);
 const UPSERT_TOOL_CALL = upsertSql("tool_calls", TOOL_CALL_COLUMNS);
 const UPSERT_COMPACTION = upsertSql("compactions", COMPACTION_COLUMNS);
 const UPSERT_EVENT = upsertSql("session_events", EVENT_COLUMNS);
-const UPSERT_MESSAGE = upsertSql("messages", ["key", "role", "blocks"], "key");
-const UPSERT_SHAPE = upsertSql("shapes", ["key", "tools", "system"], "key");
-const UPSERT_RECORD = upsertSql("records", ["key", "value"], "key");
-/** A classified Block fills in a row that so far held only content; the first classification stays. */
-const UPSERT_BLOCK = `INSERT INTO blocks (${BLOCK_COLUMNS.join(", ")}) VALUES (?${", ?".repeat(BLOCK_COLUMNS.length - 1)})
-  ON CONFLICT (hash) DO UPDATE SET ${BLOCK_COLUMNS.slice(2)
-    .map((c) => `${c} = excluded.${c}`)
-    .join(", ")} WHERE blocks.kind IS NULL`;
+const UPSERT_MESSAGE = upsertSql("messages", ["key", "role", "blocks"], ["key"]);
+const UPSERT_SHAPE = upsertSql("shapes", ["key", "tools", "system"], ["key"]);
+const UPSERT_RECORD = upsertSql("records", ["key", "value"], ["key"]);
+const UPSERT_LOG_BLOCK = upsertSql("log_blocks", LOG_BLOCK_COLUMNS, ["hash"]);
 const UPSERT_FILE = `INSERT INTO ingest_files
   (path, log, transcript, kind, file_id, size, mtime_ms, byte_offset, fingerprint, error)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -108,19 +105,39 @@ const UPSERT_FILE = `INSERT INTO ingest_files
     file_id = excluded.file_id, size = excluded.size, mtime_ms = excluded.mtime_ms,
     byte_offset = excluded.byte_offset, fingerprint = excluded.fingerprint, error = excluded.error`;
 
-export function openLog(db: SqlDriver, sql: Statements, path: string, harness: string, codec: RecordCodec): LogStore {
-  sql.get("INSERT INTO logs (path, harness) VALUES (?, ?) ON CONFLICT (path) DO NOTHING").run(path, harness);
-  const row = sql.get("SELECT id, harness FROM logs WHERE path = ?").get(path);
+export function openLog(db: SqlDriver, sql: Statements, path: string, harness: string, codec: StoreCodec): LogStore {
+  sql
+    .get("INSERT INTO logs (path, harness, adapter_version) VALUES (?, ?, ?) ON CONFLICT (path) DO NOTHING")
+    .run(path, harness, codec.version);
+  const row = sql.get("SELECT id, harness, adapter_version FROM logs WHERE path = ?").get(path);
   if (row === undefined) throw new Error(`log ${path} was not created`);
   if (row.harness !== harness) throw new Error(`log ${path} is a ${String(row.harness)} log, not ${harness}`);
   const id = Number(row.id);
+  const reset = () =>
+    db.transaction(() => {
+      sql.get("DELETE FROM logs WHERE id = ?").run(id);
+      sql
+        .get("INSERT INTO logs (id, path, harness, adapter_version) VALUES (?, ?, ?, ?)")
+        .run(id, path, harness, codec.version);
+    });
+  // Another adapter version read this log differently: empty it, so that ingest reads it again from the start.
+  if (Number(row.adapter_version) !== codec.version) reset();
   const one = (query: string, ...params: SqlValue[]) => sql.get(query).get(id, ...params);
   const all = (query: string, ...params: SqlValue[]) => sql.get(query).all(id, ...params);
 
+  const media = (hash: string): Uint8Array => {
+    const r = sql.get("SELECT bytes FROM media WHERE hash = ?").get(hash);
+    if (!(r?.bytes instanceof Uint8Array)) throw new Error(`the store has no media ${hash}`);
+    return r.bytes;
+  };
   const content = (hash: string): JsonValue => {
     const r = sql.get("SELECT content FROM blocks WHERE hash = ?").get(hash);
     if (r === undefined) throw new Error(`the store has no content for block ${hash}`);
-    return json(r.content);
+    return codec.unpackContent(json(r.content), media);
+  };
+  const blockOf = (r: SqlRow): Block => {
+    const c = content(String(r.hash));
+    return block(r, c, codec.text(c));
   };
   const parts = (hashes: SqlValue | undefined): ContentPart[] =>
     json<string[]>(hashes).map((hash) => ({ hash, content: content(hash) }));
@@ -135,11 +152,8 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
       return r === undefined ? undefined : codec.unpack({ kind: "value", key, value: json(r.value) });
     },
     block(hash): Block | undefined {
-      const r = one(
-        "SELECT b.* FROM log_blocks l JOIN blocks b ON b.hash = l.hash WHERE l.log = ? AND l.hash = ?",
-        hash,
-      );
-      return r === undefined ? undefined : block(r);
+      const r = one("SELECT * FROM log_blocks WHERE log = ? AND hash = ?", hash);
+      return r === undefined ? undefined : blockOf(r);
     },
     call(callId): Call | undefined {
       const r = one("SELECT * FROM calls WHERE log = ? AND id = ?", callId);
@@ -147,7 +161,7 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
     },
     toolCall(toolCallId): ToolCall | undefined {
       const r = one("SELECT * FROM tool_calls WHERE log = ? AND id = ?", toolCallId);
-      return r === undefined ? undefined : toolCall(r);
+      return r === undefined ? undefined : toolCall(r, content);
     },
     openRuns(sessionId, lane): CallBlock[] {
       return all(
@@ -158,12 +172,19 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
     },
   };
 
-  /** Insert content once: a hash already stored is not serialised again. */
-  const ensureContent = (list: readonly ContentPart[]): string => {
-    for (const part of list) {
-      if (sql.get("SELECT 1 FROM blocks WHERE hash = ?").get(part.hash) !== undefined) continue;
-      sql.get("INSERT INTO blocks (hash, content) VALUES (?, ?)").run(part.hash, JSON.stringify(part.content));
+  /** Insert content once (its media apart): a hash already stored is not serialised again. */
+  const putContent = (hash: string, value: JsonValue): void => {
+    if (sql.get("SELECT 1 FROM blocks WHERE hash = ?").get(hash) !== undefined) return;
+    const packed = codec.packContent(value);
+    for (const m of packed.media) {
+      sql
+        .get("INSERT INTO media (hash, media_type, bytes) VALUES (?, ?, ?) ON CONFLICT DO NOTHING")
+        .run(m.hash, m.mediaType, m.bytes);
     }
+    sql.get("INSERT INTO blocks (hash, content) VALUES (?, ?)").run(hash, JSON.stringify(packed.content));
+  };
+  const ensureContent = (list: readonly ContentPart[]): string => {
+    for (const part of list) putContent(part.hash, part.content);
     return JSON.stringify(list.map((p) => p.hash));
   };
 
@@ -179,10 +200,8 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
       }
     }
     for (const b of delta.blocks) {
-      const known = sql.get("SELECT kind FROM blocks WHERE hash = ?").get(b.hash);
-      if (known === undefined || known.kind === null)
-        sql.get(UPSERT_BLOCK).run(...blockRow(b, JSON.stringify(b.content)));
-      sql.get("INSERT INTO log_blocks (log, hash) VALUES (?, ?) ON CONFLICT DO NOTHING").run(id, b.hash);
+      putContent(b.hash, b.content);
+      sql.get(UPSERT_LOG_BLOCK).run(id, ...logBlockRow(b));
     }
     for (const s of delta.sessions) sql.get(UPSERT_SESSION).run(id, ...sessionRow(s));
     for (const c of delta.calls) {
@@ -194,7 +213,12 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
       else if (!entry.added.includes(c.id) && !entry.updated.includes(c.id)) entry.updated.push(c.id);
     }
     for (const r of delta.callBlocks) sql.get(UPSERT_RUN).run(id, ...runRow(r));
-    for (const t of delta.toolCalls) sql.get(UPSERT_TOOL_CALL).run(id, ...toolCallRow(t));
+    for (const t of delta.toolCalls) {
+      // The input is in the tool use Block (stored with its message): kept once, there.
+      const byBlock =
+        t.blockHash !== undefined && sql.get("SELECT 1 FROM blocks WHERE hash = ?").get(t.blockHash) !== undefined;
+      sql.get(UPSERT_TOOL_CALL).run(id, ...toolCallRow(t, byBlock));
+    }
     for (const c of delta.compactions) sql.get(UPSERT_COMPACTION).run(id, ...compactionRow(c));
     for (const e of delta.events) sql.get(UPSERT_EVENT).run(id, ...eventRow(e));
     const counts = [
@@ -256,28 +280,21 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
         return { calls: [...result].map(([sessionId, calls]) => ({ sessionId, ...calls })) };
       });
     },
-    reset() {
-      db.transaction(() => {
-        sql.get("DELETE FROM logs WHERE id = ?").run(id);
-        sql.get("INSERT INTO logs (id, path, harness) VALUES (?, ?, ?)").run(id, path, harness);
-      });
-    },
+    reset,
     graph(): SessionGraph {
-      const rows = (table: string) => all(`SELECT * FROM ${table} WHERE log = ? ORDER BY rowid`);
+      const rows = (table: string) => all(`SELECT * FROM ${table} WHERE log = ? ORDER BY id`);
       const kinds = (status: string) =>
         all("SELECT kind, count FROM report_kinds WHERE log = ? AND status = ? ORDER BY seq", status).map((r) => ({
           kind: String(r.kind),
           count: Number(r.count),
         }));
-      const blocks = all(
-        "SELECT b.* FROM log_blocks l JOIN blocks b ON b.hash = l.hash WHERE l.log = ? ORDER BY b.rowid",
-      );
+      const blocks = all("SELECT * FROM log_blocks WHERE log = ? ORDER BY hash");
       return {
         sessions: rows("sessions").map(session),
         calls: rows("calls").map(call),
-        blocks: blocks.map(block),
+        blocks: blocks.map(blockOf),
         callBlocks: rows("call_blocks").map(run),
-        toolCalls: rows("tool_calls").map(toolCall),
+        toolCalls: rows("tool_calls").map((r) => toolCall(r, content)),
         compactions: rows("compactions").map(compaction),
         events: rows("session_events").map(event),
         report: {

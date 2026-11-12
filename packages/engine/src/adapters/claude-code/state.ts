@@ -16,8 +16,11 @@ import type {
 import type { Estimate } from "../../core/estimate.ts";
 import type { Json, JsonObject } from "./json.ts";
 
+/** The format of ParserState: a snapshot of another version is refused. */
+export const STATE_VERSION = 2;
+
 export interface ParserState {
-  version: 1;
+  version: typeof STATE_VERSION;
   transcripts: Record<string, TranscriptState>;
   /** Every message a `tail` may name, by its hash. */
   messages: Record<string, WireMessage>;
@@ -148,7 +151,7 @@ export interface Lane {
 
 export function emptyState(): ParserState {
   return {
-    version: 1,
+    version: STATE_VERSION,
     transcripts: {},
     messages: {},
     assistant: {},

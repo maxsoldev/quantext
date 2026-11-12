@@ -20,7 +20,7 @@ import { estimateBlock } from "../../providers/anthropic/estimate.ts";
 import { canonicalModel } from "../../providers/anthropic/pricing.ts";
 import { Changes } from "./changes.ts";
 import type { Classifier } from "./classify.ts";
-import { createClassifier, textHash, toolSource } from "./classify.ts";
+import { blockHash, createClassifier, textHash, toolSource } from "./classify.ts";
 import type { Json, JsonObject } from "./json.ts";
 import { arr, num, obj, str } from "./json.ts";
 import { laneOf, splitCall } from "./lane.ts";
@@ -30,7 +30,7 @@ import { get, put } from "./records.ts";
 import type { Row } from "./rows.ts";
 import { countIgnored, countUnknown, readLine } from "./rows.ts";
 import type { CallSpec, Lane, ParserState, TranscriptState, UsageSum } from "./state.ts";
-import { emptyState } from "./state.ts";
+import { emptyState, STATE_VERSION } from "./state.ts";
 import { addAssistantRow, addBlob, addUserRow, blocksOf, resolve } from "./wire.ts";
 
 export interface ParseOptions {
@@ -70,6 +70,11 @@ export function createClaudeCodeParser(
   state: ParserState = emptyState(),
   options: ParseOptions = {},
 ): ClaudeCodeParser {
+  if (state.version !== STATE_VERSION) {
+    throw new Error(
+      `a parser snapshot version ${String(state.version)} cannot be restored (this parser: ${STATE_VERSION})`,
+    );
+  }
   const estimator = options.estimator ?? estimateBlock;
   let changes = new Changes();
   const store = new Content(state, options.lookup ?? NO_LOOKUP, (record) => changes.records.set(record.key, record));
@@ -606,6 +611,7 @@ class Rows {
         callId,
         name,
         input,
+        blockHash: blockHash("assistant", raw ?? null),
         source: toolSource(name, obj(input)),
         isError: false,
         parallel: 1,

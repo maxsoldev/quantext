@@ -20,8 +20,8 @@ export class Statements {
 }
 
 /** An insert of one row of a log's table that replaces the columns of the row with the same (log, key). */
-export function upsertSql(table: string, columns: readonly string[], key = "id"): string {
-  const updates = columns.filter((c) => c !== key).map((c) => `${c} = excluded.${c}`);
+export function upsertSql(table: string, columns: readonly string[], key: readonly string[] = ["id"]): string {
+  const updates = columns.filter((c) => !key.includes(c)).map((c) => `${c} = excluded.${c}`);
   return `INSERT INTO ${table} (log, ${columns.join(", ")}) VALUES (?${", ?".repeat(columns.length)})
-    ON CONFLICT (log, ${key}) DO UPDATE SET ${updates.join(", ")}`;
+    ON CONFLICT (log, ${key.join(", ")}) DO UPDATE SET ${updates.join(", ")}`;
 }

@@ -5,9 +5,9 @@
  */
 import type { FileHandle } from "node:fs/promises";
 import { open, readFile } from "node:fs/promises";
-import type { JsonValue } from "@quantext/shared";
+import type { JsonValue, StoreCodec } from "@quantext/shared";
 import type { ClaudeCodeParser, ParserState } from "../adapters/claude-code/index.ts";
-import { claudeCodeRecords, createClaudeCodeParser } from "../adapters/claude-code/index.ts";
+import { claudeCodeCodec, createClaudeCodeParser } from "../adapters/claude-code/index.ts";
 import type { FileMark, LogStore, Store, WriteResult } from "../store/index.ts";
 import type { LogFiles, PathError } from "./discover.ts";
 import { describe, discoverLogs, logFiles, logOf } from "./discover.ts";
@@ -36,6 +36,8 @@ export interface IngestOptions {
   store: Store;
   /** The Claude Code config folder (`~/.claude`, or `CLAUDE_CONFIG_DIR`): transcripts are under `projects/`. */
   root: string;
+  /** How the adapter's data maps to the store; the Claude Code codec by default. */
+  codec?: StoreCodec;
   /** About this many bytes are read, parsed and written per transaction. */
   batchBytes?: number;
   /**
@@ -84,6 +86,7 @@ export interface Ingest {
 
 export function createIngest(options: IngestOptions): Ingest {
   const { store, root } = options;
+  const codec = options.codec ?? claudeCodeCodec;
   const limits: Limits = {
     batchBytes: options.batchBytes ?? DEFAULT_BATCH_BYTES,
     restoreBytes: options.restoreBytes ?? DEFAULT_RESTORE_BYTES,
@@ -125,7 +128,7 @@ export function createIngest(options: IngestOptions): Ingest {
       stopped: false,
     };
     for (const files of logs) {
-      const log = store.log(files.main, HARNESS, claudeCodeRecords);
+      const log = store.log(files.main, HARNESS, codec);
       try {
         if (signal?.aborted) {
           summary.stopped = true;
