@@ -24,6 +24,17 @@ describe("a manual compaction", () => {
     ]);
   });
 
+  test("starts the layout of its lane again: the next Call keeps nothing from before the compaction", () => {
+    const next = graph.calls[4];
+    const runs = graph.callBlocks.filter(
+      (r) =>
+        r.lane === next?.lane && r.firstCall <= (next?.index ?? 0) && (r.lastCall ?? Infinity) >= (next?.index ?? 0),
+    );
+    expect(runs.length).toBeGreaterThan(0);
+    expect(runs.every((r) => r.firstCall === next?.index)).toBe(true);
+    expect(next?.issues).toEqual([]);
+  });
+
   test("has a summarising Call in log order, with usage derived from the running totals", () => {
     expect(graph.calls.map((c) => c.usage?.basis)).toEqual(["exact", "exact", "exact", "derived", "exact"]);
     expect(summary).toMatchObject({

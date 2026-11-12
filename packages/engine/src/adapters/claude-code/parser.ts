@@ -685,6 +685,10 @@ class Rows {
     if (before !== undefined) compaction.beforeTokens = before;
     if (after !== undefined) compaction.afterTokens = after;
     if (this.t.lastCallId !== undefined) compaction.beforeCallId = this.t.lastCallId;
+    // The context was replaced: the lane's next Call keeps nothing of the layout before (no kept prefix).
+    const last = this.t.lastCallId === undefined ? undefined : this.store.call(this.t.lastCallId);
+    const lane = last === undefined ? undefined : get(this.state.lanes, `${session.id}|${last.lane}`);
+    if (lane !== undefined) delete lane.shapeKey;
     const summary = this.newCall(session.id, `${id}:summary`, ts, "", "compaction");
     summary.issues.push({
       kind: "unresolved-request",
