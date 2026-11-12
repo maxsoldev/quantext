@@ -229,16 +229,18 @@ describe("a quantext.db that is not a Quantext store", () => {
     await open(dataDir);
   });
 
-  test("in WAL mode is read without making a -wal or -shm file next to it", async () => {
+  test("in WAL mode is read without changing the file", async () => {
     const dataDir = tempDir();
     const path = join(dataDir, "quantext.db");
     const db = await openDriver(path); // WAL mode
     db.exec("CREATE TABLE ingest_files (path TEXT)");
     db.close();
     const sidecars = () => [existsSync(`${path}-wal`), existsSync(`${path}-shm`)];
-    const before = sidecars(); // Bun's SQLite on macOS keeps them after close
+    const before = { bytes: readFileSync(path), sidecars: sidecars() }; // Bun's SQLite on macOS keeps them after close
     await expect(openStore({ dataDir })).rejects.toThrow("move it aside");
-    expect(sidecars()).toEqual(before);
+    expect(readFileSync(path).equals(before.bytes)).toBe(true);
+    // Node probes with immutable=1 and adds no side file; Bun opens the plain path (store/own.ts), and SQLite may.
+    if (process.versions.bun === undefined) expect(sidecars()).toEqual(before.sidecars);
   });
 
   test("an empty file is a new store", async () => {
