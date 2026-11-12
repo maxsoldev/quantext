@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!**/*.md", "!fixtures/claude-code"]
+    "includes": ["**", "!**/*.md", "!fixtures/claude-code", "!packages/mod/vendor"]
   },
   "formatter": {
     "indentStyle": "space",

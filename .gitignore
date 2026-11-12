@@ -4,3 +4,5 @@ coverage/
 .cache/
 *.log
 .DS_Store
+# Written by Claude Code when it loads the mod from a folder it hot-reloads.
+packages/mod/.claude-plugin/types/
