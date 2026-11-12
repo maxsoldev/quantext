@@ -3,6 +3,8 @@
  * port over a copy of half a fixture session, read /health and a Session, open the event stream, append the rest
  * of the session and wait for its `calls` event, run `qx sql` beside it, check that a second start reuses the
  * engine, then SIGTERM it: exit 0 and no engine.json. Usage: smoke-engine.ts [--runtime node|bun]...
+ * No egress: every process runs with the network tripwire (lib/egress-trap.ts) and with HTTP(S)_PROXY set to a
+ * local sink; the test fails if the trap logs an attempt or the sink sees a connection (SECURITY.md).
  */
 import assert from "node:assert/strict";
 import type { ChildProcess } from "node:child_process";
@@ -18,9 +20,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { request } from "node:http";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { parseArgs } from "node:util";
+import { trapEnv } from "./lib/egress-trap-env.ts";
 
 const repo = join(import.meta.dirname, "..");
 const ENGINE = join(repo, "packages", "engine", "dist", "engine.js");
@@ -48,6 +52,11 @@ async function smoke(runtime: string): Promise<void> {
   const half = Math.floor(lines.length / 2);
   writeFileSync(transcript, lines.slice(0, half).join(""));
   const args = ["serve", "--root", root, "--data-dir", dataDir, "--port", "0", "--live", "always"];
+  const egressLog = join(work, "egress.log");
+  writeFileSync(egressLog, "");
+  const sink = await proxySink();
+  const env = { ...process.env, ...noEgressEnv(runtime, egressLog, sink.url) };
+  const run = (rt: string, a: string[]) => start(rt, a, env);
   const engine = run(runtime, args);
   try {
     const file = await until(() => {
@@ -90,12 +99,16 @@ async function smoke(runtime: string): Promise<void> {
     assert.equal(exit.code, 0, exit.err);
     assert.ok(!existsSync(join(dataDir, "engine.json")), "engine.json is still there");
     assert.match(exit.out, /quantext engine stopping \(stopped\)/);
+
+    assert.equal(readFileSync(egressLog, "utf8"), "", "the network tripwire saw an outbound attempt");
+    assert.equal(sink.connections(), 0, "a process connected to the proxy sink");
   } catch (error) {
     engine.child.kill("SIGKILL");
     const exit = await engine.done;
     console.error(`engine stdout:\n${exit.out}\nengine stderr:\n${exit.err}`);
     throw error;
   } finally {
+    sink.close();
     rmSync(work, { recursive: true, force: true });
   }
 }
@@ -106,8 +119,37 @@ interface Exit {
   err: string;
 }
 
-function run(runtime: string, args: string[]): { child: ChildProcess; done: Promise<Exit> } {
-  const child = spawn(runtime, [ENGINE, ...args], { stdio: ["ignore", "pipe", "pipe"] });
+/**
+ * The tripwire preloaded into the runtime and its children, and every proxy variable pointed at the sink, so a
+ * client that honours them (Bun's fetch; Node's with NODE_USE_ENV_PROXY) reaches the sink, not the network.
+ */
+function noEgressEnv(runtime: string, log: string, proxy: string): NodeJS.ProcessEnv {
+  const proxies = Object.fromEntries(
+    ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"].flatMap((k) => [
+      [k, proxy],
+      [k.toLowerCase(), proxy],
+    ]),
+  );
+  const local = "127.0.0.1,localhost,::1";
+  const kind = basename(runtime).startsWith("bun") ? "bun" : "node";
+  return { ...trapEnv(log, kind), ...proxies, NO_PROXY: local, no_proxy: local, NODE_USE_ENV_PROXY: "1" };
+}
+
+/** A TCP server on loopback that only counts the connections made to it. */
+async function proxySink(): Promise<{ url: string; connections: () => number; close: () => void }> {
+  let count = 0;
+  const server = createServer((socket) => {
+    count++;
+    socket.destroy();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const port = typeof address === "object" && address !== null ? address.port : 0;
+  return { url: `http://127.0.0.1:${port}`, connections: () => count, close: () => server.close() };
+}
+
+function start(runtime: string, args: string[], env: NodeJS.ProcessEnv): { child: ChildProcess; done: Promise<Exit> } {
+  const child = spawn(runtime, [ENGINE, ...args], { stdio: ["ignore", "pipe", "pipe"], env });
   let out = "";
   let err = "";
   child.stdout?.on("data", (d: Buffer) => (out += d.toString("utf8")));
