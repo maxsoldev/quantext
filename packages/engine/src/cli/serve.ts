@@ -15,7 +15,7 @@ import { createIngest, watchTranscripts } from "../ingest/index.ts";
 import { createQuery, installViews } from "../query/index.ts";
 import type { SqlDriver, Store } from "../store/index.ts";
 import { openReader, openStore, StoreLockedError } from "../store/index.ts";
-import { engineUrl, readEngineFile, removeEngineFile, writeEngineFile } from "./engine-file.ts";
+import { engineUrl, printable, readEngineFile, removeEngineFile, writeEngineFile } from "./engine-file.ts";
 import { openUrl } from "./open-url.ts";
 import { probeHealth } from "./probe.ts";
 
@@ -59,14 +59,14 @@ export interface ServeHooks {
 type Running = { kind: "same"; file: EngineFile } | { kind: "other"; file: EngineFile; version: string };
 
 /** An engine that answers at the port `engine.json` names, with the pid it names. */
-async function running(dataDir: string, version: string): Promise<Running | undefined> {
-  const file = readEngineFile(dataDir);
+async function running(dataDir: string, version: string, warn: (m: string) => void): Promise<Running | undefined> {
+  const file = readEngineFile(dataDir, warn);
   if (file === undefined) return undefined;
   const health = await probeHealth(file.port);
   if (health === undefined || health.pid !== file.pid) return undefined; // stale: that engine is gone
   return health.version === version && health.apiVersion === API_VERSION
     ? { kind: "same", file }
-    : { kind: "other", file, version: health.version };
+    : { kind: "other", file, version: printable(health.version).slice(0, 64) };
 }
 
 /** Run the engine until it is stopped; returns the exit code. */
@@ -78,6 +78,7 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
       url,
     );
 
+  const warn = (message: string) => hooks.err(`qx: ${message}\n`);
   /** Another engine answers: reuse it (0), or say why not (1). */
   const reuse = (found: Running): number => {
     if (found.kind === "other") {
@@ -92,7 +93,7 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
     return 0;
   };
 
-  const before = await running(dataDir, version);
+  const before = await running(dataDir, version, warn);
   if (before !== undefined) return reuse(before);
 
   let store: Store;
@@ -103,7 +104,7 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
     // Another engine is starting, or `qx ingest` runs: wait a little for an engine to answer.
     const until = now() + (hooks.lockWaitMs ?? 5000);
     while (now() < until) {
-      const found = await running(dataDir, version);
+      const found = await running(dataDir, version, warn);
       if (found !== undefined) return reuse(found);
       await new Promise((r) => setTimeout(r, 100));
     }

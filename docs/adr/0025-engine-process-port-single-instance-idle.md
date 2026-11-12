@@ -17,7 +17,9 @@ an engine nobody uses must not stay.
 - **Port 4747** when it is free, else any free port. `--port` asks for one port and fails when it is taken. The
   port is in `engine.json`.
 - **`engine.json`** in the data folder: `apiVersion`, `version`, `pid`, `port`, `url`, `startedAt`; no token or
-  secret. Written whole (a temporary file, mode 0600, renamed) after the server listens, removed at a clean exit
+  secret. Another process could have written it, so a reader checks every field (port 1–65535, pid, version,
+  apiVersion), **ignores `url` and builds the URL from the port alone**, and prints nothing from it or from the
+  answering `/health` without replacing control characters. The mod must do the same. Written whole (a temporary file, mode 0600, renamed) after the server listens, removed at a clean exit
   only while it still names this process.
 - **A second start** reads `engine.json` and asks that port for `/health`. When the answer has the file's pid, the
   same `version` and the same `apiVersion`, it prints the URL (opens it with `--open`) and exits 0. Another

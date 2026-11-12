@@ -230,6 +230,31 @@ describe("qx serve", () => {
     );
   });
 
+  test("never prints or opens what another process wrote: the URL comes from the port, text is made printable", async () => {
+    const dataDir = tempDir("qx-data-");
+    let version = "0.0.0";
+    const fake = createServer((_req, res) => {
+      const health: Health = { apiVersion: 1, ok: true, version, pid: 4242, startedAt: "", demo: false };
+      res.end(JSON.stringify(health));
+    });
+    await new Promise<void>((r) => fake.listen(0, "127.0.0.1", r));
+    onCleanup(() => new Promise<void>((r) => fake.close(() => r())));
+    const address = fake.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+    const file = { apiVersion: 1, version: "0.0.0", pid: 4242, port, url: "-a Calculator", startedAt: "" };
+    writeFileSync(join(dataDir, "engine.json"), JSON.stringify(file));
+    const reuse = start(["--root", tempDir("qx-root-"), "--data-dir", dataDir, "--open"]);
+    expect(await reuse.done).toBe(EXIT.ok);
+    expect(reuse.opened).toEqual([`http://127.0.0.1:${port}/`]);
+    expect(reuse.out()).toBe(`quantext engine already runs at http://127.0.0.1:${port}/ (pid 4242)\n`);
+    version = "9\u001b]0;evil\u0007\u001b[2J";
+    const other = start(["--root", tempDir("qx-root-"), "--data-dir", dataDir]);
+    expect(await other.done).toBe(EXIT.failed);
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what must not be printed
+    expect(other.err()).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f]/);
+    expect(other.err()).toContain("an engine of version 9?]0;evil??[2J (pid 4242)");
+  });
+
   test("fails when the store is locked and no engine answers", async () => {
     const dataDir = tempDir("qx-data-");
     const store = await openStore({ dataDir });
