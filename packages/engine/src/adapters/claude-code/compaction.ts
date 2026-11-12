@@ -73,11 +73,10 @@ function summaryCall(
     issues: [{ kind: "unresolved-request", detail }],
   };
   const canonical = canonicalModel(derived.model);
-  if (canonical !== undefined) {
-    call.canonicalModel = canonical;
-    const cost = priceUsage(derived.usage, canonical);
-    if (cost !== undefined) call.cost = cost;
-  }
+  if (canonical !== undefined) call.canonicalModel = canonical;
+  const cost = canonical === undefined ? undefined : priceUsage(derived.usage, canonical);
+  if (cost !== undefined) call.cost = cost;
+  else call.issues.push({ kind: "no-price", detail: `no list price for model ${derived.model}` });
   if (previous?.shapeHash !== undefined) call.shapeHash = previous.shapeHash;
   const input = derived.usage.inputTokens + derived.usage.cacheReadTokens + derived.usage.cacheWriteTokens;
   if (before !== undefined && input < before) {

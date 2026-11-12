@@ -91,10 +91,11 @@ export interface Call {
 /**
  * A flag on a Call. `unresolved-request`: part of the request is not in the log, so the rebuilt input is
  * incomplete. `no-usage`: the log holds no Usage, so the Call has no exact total. `unreconciled-tokens`: the exact
- * change from the previous Call does not fit the new Blocks, so the whole total is split by estimate.
+ * change from the previous Call does not fit the new Blocks, so the whole total is split by estimate. `no-price`:
+ * there is no list price for the model, so the Call has no cost.
  */
 export interface CallIssue {
-  kind: "unresolved-request" | "no-usage" | "unreconciled-tokens";
+  kind: "unresolved-request" | "no-usage" | "unreconciled-tokens" | "no-price";
   detail: string;
 }
 
@@ -155,6 +156,8 @@ export interface CallBlock {
   basis?: TokenBasis;
   /** Inside the Cached prefix: the part of the input the provider read from its cache. */
   inCachedPrefix: boolean;
+  /** The Block's share of the Call's input cost in US dollars, by the cache part its tokens are in. */
+  costUsd?: number;
 }
 
 /** One use of a tool by the model. */

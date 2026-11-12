@@ -1,5 +1,5 @@
 /** Map `api-request` rows and the `assistant` rows of their responses to Calls with exact Usage and cost. */
-import type { Call, CallParams, Usage } from "@quantext/shared";
+import type { Call, CallIssue, CallParams, Usage } from "@quantext/shared";
 import { canonicalModel, priceUsage } from "../../core/pricing.ts";
 import type { JsonObject } from "./json.ts";
 import { arr, num, obj, str } from "./json.ts";
@@ -17,7 +17,7 @@ export function callsOf(rows: readonly Row[], sessionId: string, requests: Reado
       const model = str(params.model) ?? "";
       const ts = str(row.data.timestamp) ?? "";
       const missing = requests.get(id)?.missing ?? ["request was not rebuilt"];
-      const issues = missing.map((detail) => ({ kind: "unresolved-request" as const, detail }));
+      const issues: CallIssue[] = missing.map((detail) => ({ kind: "unresolved-request", detail }));
       const call: Call = { id, sessionId, index, ts, model, params: paramsOf(params), framingTokens: 0, issues };
       const canonical = canonicalModel(model);
       if (canonical !== undefined) call.canonicalModel = canonical;
@@ -27,6 +27,8 @@ export function callsOf(rows: readonly Row[], sessionId: string, requests: Reado
       if (usage !== undefined) call.usage = usage;
       const cost = usage && canonical ? priceUsage(usage, canonical) : undefined;
       if (cost !== undefined) call.cost = cost;
+      if (usage !== undefined && cost === undefined)
+        issues.push({ kind: "no-price", detail: `no list price for model ${model}` });
       return call;
     });
 }
