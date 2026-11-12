@@ -6,7 +6,17 @@
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import type { Socket } from "node:net";
-import type { EngineStatus, Health, IngestEvent, IngestStatus } from "@quantext/shared";
+import type {
+  BlockLifetime,
+  EngineStatus,
+  Health,
+  IngestEvent,
+  IngestStatus,
+  Items,
+  LifetimeOptions,
+  SessionKey,
+  ToolOutput,
+} from "@quantext/shared";
 import type { Query } from "../query/index.ts";
 import type { EventStream } from "./events.ts";
 import { createEventStream } from "./events.ts";
@@ -18,12 +28,20 @@ import { staticFiles } from "./static.ts";
 const API_VERSION = 1;
 const API_PREFIX = "/api/v1/";
 
+/** Runs a slow query method off the event loop (a worker thread with its own connection and the same options). */
+export interface Offload {
+  (method: "blockLifetimes", key: SessionKey, options: LifetimeOptions): Promise<Items<BlockLifetime>>;
+  (method: "toolOutputs", key: SessionKey, options: LifetimeOptions): Promise<Items<ToolOutput>>;
+}
+
 export interface ApiOptions {
   query: Query;
   /** What `/health` tells besides `ok` and `apiVersion`; `dataDir` is left out in demo mode. */
   info: Omit<Health, "ok" | "apiVersion">;
   /** The viewer's files. */
   staticDir: string;
+  /** Where the lifetime routes run; by default on `query`, in this thread. */
+  offload?: Offload;
   /** The ingest's status for `/api/v1/status`; by default live with nothing read. */
   ingestStatus?: () => IngestStatus;
   now?: () => number;
@@ -60,6 +78,10 @@ export function createApi(options: ApiOptions): Api {
   const now = options.now ?? Date.now;
   const onError = options.onError ?? ((error: unknown) => console.error("quantext: a request failed:", error));
   const maxConnections = options.maxConnections ?? 64;
+  const offload: Offload =
+    options.offload ??
+    (((method: "blockLifetimes" | "toolOutputs", key: SessionKey, o: LifetimeOptions) =>
+      Promise.resolve(query[method](key, o))) as Offload);
   const files = staticFiles(options.staticDir);
   const events: EventStream = createEventStream({ query, onError, ...options.events });
   const { dataDir, ...info } = options.info;
@@ -117,7 +139,7 @@ export function createApi(options: ApiOptions): Api {
     }
     if (api) {
       if (!url.pathname.startsWith(API_PREFIX)) throw new HttpError(404, "not-found", "no such route");
-      const reply = route(query, segments.slice(2), url.searchParams);
+      const reply = await route(query, segments.slice(2), url.searchParams, offload);
       if (reply.kind === "json") return sendJson(req, res, 200, reply.body);
       const inline = isInlineMedia(reply.mediaType);
       return sendBytes(

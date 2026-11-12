@@ -7,6 +7,7 @@ import type { SessionKey } from "@quantext/shared";
 import type { Query } from "../query/index.ts";
 import type { Params } from "./params.ts";
 import { badRequest, checkText, integer, notFound, queryParams } from "./params.ts";
+import type { Offload } from "./server.ts";
 
 export type Reply = { kind: "json"; body: unknown } | { kind: "media"; mediaType: string; bytes: Uint8Array };
 
@@ -26,7 +27,7 @@ interface Route {
   /** Literal segments, or `:name` for a parameter. */
   path: string[];
   params: string[];
-  run(query: Query, p: Record<string, string>, q: Params): Reply;
+  run(query: Query, p: Record<string, string>, q: Params, offload: Offload): Reply | Promise<Reply>;
 }
 
 const json = (body: unknown): Reply => ({ kind: "json", body });
@@ -124,12 +125,12 @@ const ROUTES: Route[] = [
   {
     path: [...SESSION, "tool-outputs"],
     params: ["sort", "limit"],
-    run: (query, p, q) => json(query.toolOutputs(session(query, p), lifetime(q))),
+    run: async (query, p, q, offload) => json(await offload("toolOutputs", session(query, p), lifetime(q))),
   },
   {
     path: [...SESSION, "blocks"],
     params: ["sort", "limit"],
-    run: (query, p, q) => json(query.blockLifetimes(session(query, p), lifetime(q))),
+    run: async (query, p, q, offload) => json(await offload("blockLifetimes", session(query, p), lifetime(q))),
   },
   { path: [...SESSION, "compactions"], params: [], run: (query, p) => json(query.compactions(session(query, p))) },
   { path: [...SESSION, "cache-breaks"], params: [], run: (query, p) => json(query.cacheBreaks(session(query, p))) },
@@ -164,7 +165,12 @@ const ROUTES: Route[] = [
 ];
 
 /** The reply for the decoded segments after `/api/v1/`; 404 for no route. */
-export function route(query: Query, segments: readonly string[], search: URLSearchParams): Reply {
+export function route(
+  query: Query,
+  segments: readonly string[],
+  search: URLSearchParams,
+  offload: Offload,
+): Reply | Promise<Reply> {
   for (const r of ROUTES) {
     if (r.path.length !== segments.length) continue;
     const p: Record<string, string> = {};
@@ -176,7 +182,7 @@ export function route(query: Query, segments: readonly string[], search: URLSear
       }
       return part === segment;
     });
-    if (match) return r.run(query, p, queryParams(search, r.params));
+    if (match) return r.run(query, p, queryParams(search, r.params), offload);
   }
   throw notFound("no such route");
 }

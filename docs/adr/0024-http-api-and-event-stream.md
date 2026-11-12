@@ -28,6 +28,10 @@ reconnects after sleep or a network change and must not miss a Call.
   `Access-Control-*`. Pages get `default-src 'self'` with no inline script and `frame-ancestors 'none'`; every
   other response `default-src 'none'; sandbox`. API: `no-store`. Files under `assets/`: immutable; others
   `no-cache`. Media: PNG, JPEG, GIF and WebP inline, anything else as an `attachment` download.
+- **Slow routes off the event loop.** `blocks` and `tool-outputs` price every Block over every Call of a Session
+  (about 0.8 s at 2,000 Calls); they run in a worker thread with its own read-only connection and the same query
+  options, so `/health` and the stream keep answering (guarded: p95 under 200 ms, also during a catch-up, whose
+  batches are sized to about 40 ms).
 - **Static files** come from one folder: only regular files whose real path (symbolic links resolved) is inside
   it, no dot files, no listing; a path with no extension that is no file is a viewer page (`index.html`).
 - **Event stream** (`GET /api/v1/events`, SSE). Each ingest event passes `Query.visibleEvent`, then goes into a

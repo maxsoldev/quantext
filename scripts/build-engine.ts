@@ -1,6 +1,7 @@
 /**
  * Bundle the engine with Rolldown (ADR 13) into `packages/engine/dist/`: `engine.js` (the `qx` command, with
- * `qx serve`), `sql-child.js` and `sql-watchdog.js` (the `qx sql` child and its watchdog thread), ESM with no
+ * `qx serve`), `sql-child.js` and `sql-watchdog.js` (the `qx sql` child and its watchdog thread),
+ * `query-worker.js` (the engine's thread for slow queries), ESM with no
  * imports but the runtimes' built-ins and their own driver chunks; and `web/`, the viewer's files. Fails if an
  * output imports anything else, so the bundle runs with no node_modules.
  */
@@ -16,6 +17,7 @@ const ENTRIES = {
   engine: "src/cli/qx.ts",
   "sql-child": "src/cli/sql-child.ts",
   "sql-watchdog": "src/cli/sql-watchdog.ts",
+  "query-worker": "src/cli/query-worker.ts",
 } as const;
 
 /** Built-ins stay imports: the store picks `node:sqlite` or `bun:sqlite` at run time (ADR 3). */

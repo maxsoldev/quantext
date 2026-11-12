@@ -66,6 +66,11 @@ async function smoke(runtime: string): Promise<void> {
       session: { calls: number };
     };
     assert.ok(detail.session.calls > 0);
+    // The lifetime routes run in the engine's query worker (dist/query-worker.js).
+    const blocks = JSON.parse(await get(file.port, `/api/v1/sessions/${session.log}/${session.id}/blocks?limit=3`)) as {
+      items: unknown[];
+    };
+    assert.equal(blocks.items.length, 3);
 
     const event = await sse(file.port, () => appendFileSync(transcript, lines.slice(half).join("")));
     assert.match(event, /^event: calls$/m);

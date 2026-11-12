@@ -18,6 +18,7 @@ import { openReader, openStore, StoreLockedError } from "../store/index.ts";
 import { engineUrl, printable, readEngineFile, removeEngineFile, writeEngineFile } from "./engine-file.ts";
 import { openUrl } from "./open-url.ts";
 import { probeHealth } from "./probe.ts";
+import { createQueryWorker } from "./query-worker-pool.ts";
 
 const API_VERSION = 1;
 /** The engine's port when it is free (ADR 25); else any free port, named in `engine.json`. */
@@ -118,6 +119,7 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
   let reader: SqlDriver | undefined;
   let api: Api | undefined;
   let watcher: Watcher | undefined;
+  let worker: { close(): Promise<void> } | undefined;
   let idle: ReturnType<typeof setInterval> | undefined;
   let catchUp: Promise<unknown> = Promise.resolve();
   try {
@@ -143,9 +145,18 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
       lastError = message;
       hooks.err(`qx: ${message}\n`);
     };
+    const slow = createQueryWorker({
+      dataDir,
+      home: options.home,
+      ...(options.demo === undefined ? {} : { demo: options.demo }),
+      ...(options.user === undefined ? {} : { user: options.user }),
+      ...(options.host === undefined ? {} : { host: options.host }),
+    });
+    worker = slow;
     const engineApi = createApi({
       query,
       now,
+      offload: slow.run,
       ingestStatus,
       staticDir: hooks.staticDir ?? defaultStaticDir(),
       info: { version, pid: process.pid, startedAt, demo: options.demo !== undefined, dataDir },
@@ -203,6 +214,7 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
     await catchUp.catch(() => undefined); // reported above
     await watcher?.stop();
     await api?.close();
+    await worker?.close();
     reader?.close();
     store.close();
     removeEngineFile(dataDir, process.pid);
