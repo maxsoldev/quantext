@@ -169,6 +169,7 @@ const ROUTES: Route[] = [
     },
   },
   { path: ["report"], params: [], run: (query) => json(query.ingestReport()) },
+  { path: ["projects"], params: [], run: (query) => json(query.listProjects()) },
 ];
 
 /** The reply for the decoded segments after `/api/v1/`; 404 for no route. */

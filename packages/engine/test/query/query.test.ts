@@ -345,6 +345,16 @@ describe("for the live viewer", () => {
     expect(image).toEqual([ID(3)]); // ingested last
   });
 
+  test("lists the projects with their main Sessions, latest first", async () => {
+    const q = await query(["basic-tools", "image", "subagent"]);
+    const sessions = q.listSessions().items;
+    const projects = q.listProjects();
+    expect(projects.apiVersion).toBe(1);
+    expect(projects.items).toEqual([
+      { project: "/fixture-0000000000000000/repo", sessions: sessions.length, ended: sessions[0]?.ended },
+    ]);
+  });
+
   test("gives the change cursor alone, as a page gives it", async () => {
     const q = await query(["basic-tools", "image"]);
     expect(q.changeCursor()).toBe(q.listSessions().cursor);

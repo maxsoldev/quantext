@@ -94,6 +94,15 @@ export interface SessionSummary extends SessionKey {
   subagents?: SessionSummary[];
 }
 
+/** A project with main Sessions in the store; `project` as `SessionSummary.project` shows it. */
+export interface ProjectSummary {
+  project: string;
+  /** Main Sessions (not subagents). */
+  sessions: number;
+  /** The latest end (or start) of one of them. */
+  ended?: string;
+}
+
 export interface SessionFilter {
   /** Only Sessions of this project (its path or its last folder name). */
   project?: string;

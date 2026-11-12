@@ -14,6 +14,7 @@ All are GET (or HEAD). `:log` and `:id` are a Session's key (`SessionKey`); `:n`
 | `/health` | | `Health`: `ok`, `version`, `apiVersion`, `pid`, `startedAt`, `demo`, `dataDir` (not in demo mode) |
 | `/api/v1/status` | | `EngineStatus`: `engine` (`version`, `pid`, `startedAt`, `demo`), `ingest` (`phase`: `catching-up`, `live`, `stopping`; `logsDone`, `logsTotal`, `bytesDone`, `bytesTotal` of the pass in progress or the last one, its `startedAt`, `lastError`: in demo mode only that one failed), `streams` |
 | `/api/v1/sessions` | `listSessions` | `project`, `search` (≤ 200), `sort` (`ended` `started` `cost` `calls`), `order` (`asc` `desc`), `changedSince`, `limit` (1–500, default 50), `offset` |
+| `/api/v1/projects` | `listProjects` | `Items<ProjectSummary>`: `project` (as Sessions show it; its folder name in demo mode), `sessions`, `ended`, latest first |
 | `/api/v1/session-keys` | `findSessions` | `id` (an id or its prefix) |
 | `/api/v1/sessions/:log/:id` | `getSession` | |
 | `/api/v1/sessions/:log/:id/calls` | `listCalls` | `lane`, `afterIndex`, `limit` (1–5000) |

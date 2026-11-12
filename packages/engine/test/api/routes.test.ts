@@ -43,6 +43,7 @@ describe("the JSON routes", () => {
       expect(reply.json().apiVersion).toBe(1);
     }
     expect((await get(port, "/api/v1/report")).json()).toEqual(JSON.parse(JSON.stringify(query.ingestReport())));
+    expect((await get(port, "/api/v1/projects")).json()).toEqual(JSON.parse(JSON.stringify(query.listProjects())));
     expect((await get(port, `/api/v1/session-keys?id=${ID(1)}`)).json()).toEqual({
       apiVersion: 1,
       items: [key],
