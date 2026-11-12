@@ -256,6 +256,27 @@ export interface AdapterRecord {
   value: JsonValue;
 }
 
+/** One content block of a stored record, by the hash of the Block it is: the store keeps its content once. */
+export interface ContentPart {
+  hash: string;
+  content: JsonValue;
+}
+
+/**
+ * An adapter record as the store keeps it. A message (Blob) and a Shape list their content blocks by Block hash, so
+ * the content of a long session is not stored again in every message that repeats it. Other records are values.
+ */
+export type StoredRecord =
+  | { kind: "message"; key: string; role: string; parts: ContentPart[] }
+  | { kind: "shape"; key: string; tools: ContentPart[]; system: ContentPart[] }
+  | { kind: "value"; key: string; value: JsonValue };
+
+/** How an adapter's records map to StoredRecords and back: `unpack(pack(r))` equals `r.value`. */
+export interface RecordCodec {
+  pack(record: AdapterRecord): StoredRecord;
+  unpack(stored: StoredRecord): JsonValue;
+}
+
 /**
  * What an adapter may ask its caller for, when its snapshot no longer holds it: what the caller kept from earlier
  * deltas. The store implements it in build step 5; each answer must reflect every delta applied so far.
