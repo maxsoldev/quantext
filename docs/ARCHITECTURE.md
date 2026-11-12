@@ -93,8 +93,8 @@ kept running after the session ended, and `$.http.fetch` reached it. Interactive
 | **adapters** | Turn one harness's files into domain events: session, call (request + usage), block, tool call, compaction; rebuild the request of each call (in Claude Code: `keep` + `tail` + blobs). Report unknown row types | core, providers |
 | **providers** | What one model provider defines: its content blocks (tool use, tool reference, deferred tools, thinking), the token estimate of each (Anthropic's image formula), its price list and price modifiers. Pure: no I/O, no built-ins, no packages | core |
 | **core** | Logic over the domain types defined in shared, the same for every harness and provider: split each call's input into blocks with tokens (exact deltas, then reconciled estimates); the estimator and pricing interfaces; cost by cache part. Pure: no I/O, no built-ins, no packages | shared (types only) |
-| **ingest** | Find files, read new bytes, call the adapter, write events in one transaction; watch files for live updates | providers, adapters, core, store |
-| **store** | Schema, migrations, writes, behind a driver interface (`node:sqlite`, `bun:sqlite`). WAL mode, so readers never block the writer. CallBlock runs need an interval index on (session, lane, first call, last call) so that "the blocks of call N" is a range lookup, not a scan | core |
+| **ingest** | Find files, read new bytes, call the adapter, write each batch in one transaction; watch files for live updates and tell which Calls were added | providers, adapters, core, store |
+| **store** | Schema, migrations, writes, behind a driver interface (`node:sqlite`, `bun:sqlite`). WAL mode, so readers never block the writer. Rows are kept per log; content is stored once by Block hash. CallBlock runs have an interval index on (log, session, lane, first call, last call) so that "the blocks of call N" is a range lookup, not a scan (`docs/schema.md`, ADR 19) | core |
 | **query** | Read API: sessions, calls, context at call N, change from N-1, block lifetime cost. SQL views for agents | core, store |
 | **api** | HTTP JSON + SSE events ("call added"), plus the viewer's static files. Request and response types live in a shared package | core, query |
 | **cli** | The `qx` command and the composition root: wires store, ingest and api together (`qx serve`). No business logic | every layer below |
@@ -134,6 +134,14 @@ Claude Code appends JSONL ─► engine watcher ─► adapter (new bytes) ─�
                                                        viewer updates · mod status line ◄┘
 ```
 
+Ingest reads each log (a main transcript and its subagent transcripts) with one parser. It reads new bytes from
+the byte offset of each file, in batches of complete lines (a line still being written waits for its newline),
+and writes each batch's delta, the parser snapshot and the new offsets in one transaction. A file that is
+replaced (new inode), cut below its offset, or rewritten (fingerprint) makes ingest delete the log's rows in one
+transaction and read it again from the start. The watcher uses `fs.watch` (recursive) and polls where it cannot
+watch; it gathers changes for a short window, reads the logs they belong to, and reports the Calls each write
+added, for the SSE event. Transcripts are only ever opened read-only.
+
 Hooks are not needed for ingest. When the engine is not running, nothing is ingested live; the next start catches
 up, because the reader keeps a byte offset per file.
 
@@ -148,7 +156,7 @@ packages/
   web/       live context viewer (React + Vite), built into the engine's static files
   mod/       Claude Code plugin; imports only types from shared
 fixtures/    session logs recorded on a dummy repo, one folder per harness version and scenario
-docs/        this file, schema docs, decision records (docs/adr/)
+docs/        this file, the store schema (schema.md), decision records (docs/adr/)
 ```
 
 The release is one plugin folder: the mod, `dist/engine.js` and the built viewer.
