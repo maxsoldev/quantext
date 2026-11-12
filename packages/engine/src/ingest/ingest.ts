@@ -30,7 +30,11 @@ interface Warm {
 interface Limits {
   batchBytes: number;
   restoreBytes: number;
+  maxLineBytes: number;
 }
+
+/** The longest line read; the parser reports a longer line as unreadable anyway (64 Mi characters). */
+export const DEFAULT_MAX_LINE_BYTES = 64 * 1024 * 1024;
 
 export interface IngestOptions {
   store: Store;
@@ -45,6 +49,8 @@ export interface IngestOptions {
    * file does not keep its whole content in memory. Each log's pass also starts from the snapshot.
    */
   restoreBytes?: number;
+  /** A line longer than this is skipped and reported, so that one huge line cannot fill memory. */
+  maxLineBytes?: number;
 }
 
 /** Calls that one write added or updated in one Session of a log (the main transcript's path). */
@@ -90,6 +96,7 @@ export function createIngest(options: IngestOptions): Ingest {
   const limits: Limits = {
     batchBytes: options.batchBytes ?? DEFAULT_BATCH_BYTES,
     restoreBytes: options.restoreBytes ?? DEFAULT_RESTORE_BYTES,
+    maxLineBytes: options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES,
   };
   const listeners = new Set<(event: CallsEvent) => void>();
   /** The parsers of the logs read last, oldest first: a live log is read on without a restore. */
@@ -259,9 +266,15 @@ async function ingestLog(
       let offset = old?.offset ?? 0;
       let print = old?.fingerprint;
       let read = false;
-      for await (const piece of completeLines(entry.handle, offset, stat.size, limits.batchBytes)) {
+      const pieces = completeLines(entry.handle, offset, stat.size, limits.batchBytes, limits.maxLineBytes);
+      for await (const piece of pieces) {
         if (signal?.aborted) break;
-        const delta = parserNow().push(piece.text, entry.transcript);
+        // A skipped line is an empty line to the parser (so later lines keep their numbers), and is reported.
+        const delta = parserNow().push("text" in piece ? piece.text : "\n", entry.transcript);
+        if ("skipped" in piece) {
+          const reason = `line is longer than ${limits.maxLineBytes} bytes; skipped`;
+          delta.report.unreadable.push({ at: `${entry.transcript}@${piece.start}`, reason });
+        }
         const bytes = piece.end - offset;
         summary.bytes += bytes;
         offset = piece.end;

@@ -357,6 +357,32 @@ describe("a partial last line", () => {
   });
 });
 
+describe("a line longer than the limit", () => {
+  test("is skipped and reported, and the lines after it are read with their own numbers", async () => {
+    const root = tempDir("qx-root-");
+    const store = await openStore({ dataDir: tempDir("qx-data-") });
+    onCleanup(() => store.close());
+    const ingest = createIngest({ store, root, batchBytes: 1024, maxLineBytes: 4096 });
+    const main = join(root, "projects", "-p", "00000000-0000-4000-8000-00000000abcd.jsonl");
+    const row = (i: number) => JSON.stringify({ type: "attachment", sessionId: "s", n: i });
+    const lines = [
+      ...Array.from({ length: 40 }, (_, i) => row(i)),
+      JSON.stringify({ type: "mode", sessionId: "s", text: "x".repeat(10_000) }),
+      ...Array.from({ length: 40 }, (_, i) => row(40 + i)),
+      "{not json",
+      "",
+    ];
+    writeText(main, lines.join("\n"));
+    await ingest.ingestAll();
+    const start = Buffer.byteLength(`${lines.slice(0, 40).join("\n")}\n`);
+    expect(store.report().unreadable).toEqual([
+      { log: main, at: `main@${start}`, reason: "line is longer than 4096 bytes; skipped" },
+      { log: main, at: "main:82", reason: expect.stringMatching(/^not JSON/) },
+    ]);
+    expect(graphOf(store, main).report.ignoredRecords).toEqual([{ kind: "attachment", count: 80 }]);
+  });
+});
+
 describe("subagents", () => {
   test("that appear after the main transcript was read are linked to it", async () => {
     const s = await setup();
