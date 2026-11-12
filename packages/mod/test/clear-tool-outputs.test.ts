@@ -1,6 +1,7 @@
 import type { SessionMessage } from "claude-code";
 import { expect, mock, test } from "claude-code/testing";
-import { clearToolOutputs, parseKeep } from "../src/clear-tool-outputs.ts";
+import { clearToolOutputs } from "../src/clear-tool-outputs.ts";
+import { parseKeep } from "../src/clear-tools.ts";
 import { command, toasts } from "./kit.ts";
 
 const CLEARED = "[Old tool result content cleared]";

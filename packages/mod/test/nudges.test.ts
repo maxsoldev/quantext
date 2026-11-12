@@ -58,7 +58,7 @@ test("crossing 200k context raises one nudge, re-armed after a compaction", asyn
   await measure($, 199_000);
   await measure($, 210_000);
   await measure($, 230_000);
-  expect(seen).toEqual(["quantext: context is 210k tokens. Consider /compact, /clear-tool-outputs or a new session."]);
+  expect(seen).toEqual(["quantext: context is 210k tokens. Consider /compact, /clear-tools or a new session."]);
   await compact($);
   await measure($, 205_000);
   expect(seen.length).toBe(2);
