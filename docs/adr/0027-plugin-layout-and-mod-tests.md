@@ -38,8 +38,11 @@ from `$.plugin.root`. The mod's tests need Claude Code's own test kit (`claude-c
   `claude plugin install quantext@quantext`. A folder marketplace is read in place, so a rebuild plus
   `/reload-plugins` updates the install.
 - **Engine start** (`/quantext view`, never on its own):
-  `$.process.run(["sh", "-c", 'umask 077; mkdir -p "$3" && nohup "$0" "$1" serve --live while-viewer >>"$2" 2>&1 </dev/null &', runtime, "<root>/engine/engine.js", "~/.quantext/engine.log", "~/.quantext"])`.
-  Paths are arguments, never part of the script. umask 077 keeps the data folder and the log private.
+  `$.process.run(["sh", "-c", 'umask 077; mkdir -p "$3" && chmod 700 "$3" && cd "$3" && nohup "$0" "$1" serve --live while-viewer >>"$2" 2>&1 </dev/null &', runtime, "<root>/engine/engine.js", "~/.quantext/engine.log", "~/.quantext"])`.
+  Paths are arguments, never part of the script. umask 077 and chmod 700 keep the data folder and the log private.
+  The probes and `sh` run with `cwd` `<root>/engine` and the script `cd`s into the data folder: the engine never
+  runs from the project folder, whose `bunfig.toml` or `.env` Bun would load. `node`, `bun` and `open` resolve
+  through PATH and the engine inherits Claude Code's environment: the same trust as the Bash tool.
 - **Mod tests and types.** `pnpm test:mod` runs `claude plugin validate` and `claude plugin test` on
   `packages/mod`; `pnpm check` includes it and says loudly when `claude` is not on PATH (it skips then).
   Vitest and Bun skip `packages/mod` (`vitest.config.ts`; `bun test` is given the other folders). The API's

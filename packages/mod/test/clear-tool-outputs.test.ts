@@ -122,3 +122,16 @@ test("any other compaction, and a subagent's, is left to Claude Code", async ($,
   } as never);
   expect(sub.messages).toEqual(summary);
 });
+
+test("a failed clear-tool-outputs skips the compaction rather than pay for a summary", async ($, on) => {
+  mock.clock(on, { now: 1_000_000 });
+  let summarised = false;
+  on("session.compact", () => {
+    summarised = true;
+    return { messages: [] };
+  });
+  const broken = { ...result("9", ""), toolResults: [{ tool_use_id: "9", isError: false }] }; // no text: it throws
+  const r = await $.session.compact({ trigger: "manual", instructions: "tool-outputs", messages: [broken] } as never);
+  expect(summarised).toBe(false);
+  expect(r).toEqual({ skip: "quantext: clearing tool outputs failed" });
+});

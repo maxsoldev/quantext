@@ -71,7 +71,7 @@ test("with no engine running it starts the bundled one detached with node, by ar
     [
       "sh",
       "-c",
-      'umask 077; mkdir -p "$3" && nohup "$0" "$1" serve --live while-viewer >>"$2" 2>&1 </dev/null &',
+      'umask 077; mkdir -p "$3" && chmod 700 "$3" && cd "$3" && nohup "$0" "$1" serve --live while-viewer >>"$2" 2>&1 </dev/null &',
       "node",
       `${root}/engine/engine.js`,
       `${DATA}/engine.log`,
@@ -81,6 +81,24 @@ test("with no engine running it starts the bundled one detached with node, by ar
     ["open", URL],
   ]);
   expect(w.toasts).toEqual(["quantext: starting the engine…", `quantext: the viewer is at ${URL}`]);
+});
+
+test("no command runs in the session's folder, so its bunfig.toml and .env reach nothing", async ($, on) => {
+  const w = world(on, { versions: { node: "v22.17.1", bun: "1.3.3" }, afterStart: { [HEALTH]: health() } });
+  await $.command.run(command("quantext", "view"));
+  await w.settle();
+  expect(w.argvs.map((a) => a[0])).toEqual(["node", "bun", "sh", "uname", "open"]);
+  expect(w.cwds).toEqual(Array(5).fill(`${w.root()}/engine`));
+});
+
+test("a failed start shows its stderr printable and cut short", async ($, on) => {
+  const w = world(on, { versions: { node: "v24.14.0" }, shFails: `\u001b[2Jno${"x".repeat(500)}` });
+  await $.command.run(command("quantext", "view"));
+  await w.settle();
+  const shown = w.toasts.at(-1) ?? "";
+  expect(shown).toContain("could not be started (?[2Jno");
+  expect(shown).not.toContain("\u001b");
+  expect(shown.length).toBeLessThan(300);
 });
 
 test("a node older than 22.18 is passed over for bun", async ($, on) => {
