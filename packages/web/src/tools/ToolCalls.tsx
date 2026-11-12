@@ -10,6 +10,7 @@ import { api } from "../api/client.ts";
 import { count, duration, percent, shortModel, tokens, usd } from "../format/format.ts";
 import { Link, navigate } from "../nav.tsx";
 import type { Route, ToolSort } from "../route.ts";
+import { Term } from "../teach/Term.tsx";
 import { JsonView } from "../ui/JsonView.tsx";
 import { Tokens } from "../ui/Num.tsx";
 import { useLoad } from "../ui/useLoad.ts";
@@ -83,7 +84,7 @@ export function ToolCalls({
             </button>
             {inputCost > 0 && <>, {percent(outputCost / inputCost)} of the session's input cost</>}. A tool's output
             stays in the context of every later call until a compaction removes it, so each call pays for it again,
-            mostly at the cache read price.
+            mostly at the cache read price: its <Term id="lifetime-cost">lifetime cost</Term>.
           </p>
         )}
       </div>

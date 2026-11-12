@@ -7,6 +7,7 @@ import { useEffect, useRef } from "react";
 import { api } from "../api/client.ts";
 import { tokens } from "../format/format.ts";
 import { navigate, useRoute } from "../nav.tsx";
+import { Term } from "../teach/Term.tsx";
 import { JsonView } from "../ui/JsonView.tsx";
 import { Tokens } from "../ui/Num.tsx";
 import { useLoad } from "../ui/useLoad.ts";
@@ -101,7 +102,7 @@ export function BlockPanel({
       {block.deferred && (
         <p className="explain">
           A deferred tool: its schema was not in the request's tool list. A tool search loaded it, so from that call on
-          it is sent in the messages.
+          it is sent in the messages. <Term id="deferred-tools" />
         </p>
       )}
       <div className="block-content">

@@ -15,6 +15,7 @@ import { duration, percent, projectName, shortModel, usd, when } from "../format
 import { useLiveVersion } from "../live/hooks.ts";
 import { Link, navigate } from "../nav.tsx";
 import type { Route } from "../route.ts";
+import { Term } from "../teach/Term.tsx";
 import { ToolCalls } from "../tools/ToolCalls.tsx";
 import { Tokens } from "../ui/Num.tsx";
 import { useLoad } from "../ui/useLoad.ts";
@@ -160,7 +161,9 @@ export function SessionPage({ route }: { route: SessionRoute }) {
                   <h2 id="timeline-title">Context per call</h2>
                   {detail.lanes.length > 1 && (
                     <fieldset className="lanes">
-                      <legend>Lane</legend>
+                      <legend>
+                        <Term id="lane">Lane</Term>
+                      </legend>
                       {[...detail.lanes]
                         .sort((a, b) => b.calls - a.calls)
                         .map((l) => (
@@ -237,12 +240,7 @@ function SessionTabs({ route, compactions }: { route: SessionRoute; compactions:
 function Subagents({ parent, items }: { parent: SessionKey; items: readonly SessionSummary[] }) {
   return (
     <p className="subagents" data-testid="subagents">
-      <span
-        className="tip-anchor-label"
-        data-tip="A subagent runs in its own context: its own system prompt, tools and task. Only its final answer comes back into this session."
-      >
-        {items.length === 1 ? "Subagent" : `${items.length} subagents`}:
-      </span>{" "}
+      <Term id="subagents">{items.length === 1 ? "Subagent" : `${items.length} subagents`}</Term>:{" "}
       {items.map((a, i) => (
         <span key={a.id}>
           {i > 0 && ", "}
@@ -326,6 +324,9 @@ function BillingLegend() {
           <span className="swatch break-swatch" aria-hidden="true" />
           Cache break
         </button>
+      </li>
+      <li>
+        <Term id="prompt-cache">Prompt cache</Term>
       </li>
       <li>
         <button

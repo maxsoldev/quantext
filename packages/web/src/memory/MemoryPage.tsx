@@ -8,6 +8,7 @@ import { ago, count, projectName, when } from "../format/format.ts";
 import { useLiveVersion } from "../live/hooks.ts";
 import { Link, navigate } from "../nav.tsx";
 import type { Route } from "../route.ts";
+import { Term } from "../teach/Term.tsx";
 import { useLoad } from "../ui/useLoad.ts";
 import { INDEX, indexEntries, memoryFiles } from "./model.ts";
 
@@ -29,7 +30,9 @@ export function MemoryPage({ route }: { route: MemoryRoute }) {
     <article className="memory-page" aria-labelledby="memory-title" data-testid="memory">
       <header className="session-head">
         <div className="session-name">
-          <h1 id="memory-title">Memory of {projectName(project)}</h1>
+          <h1 id="memory-title">
+            <Term id="memory">Memory of {projectName(project)}</Term>
+          </h1>
           <p className="muted">
             <Link to={{ page: "sessions", project }}>Sessions of this project</Link>
           </p>

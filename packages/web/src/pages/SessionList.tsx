@@ -11,6 +11,7 @@ import { ago, percent, projectName, shortModel, usd, when } from "../format/form
 import { useLiveVersion } from "../live/hooks.ts";
 import { Link, navigate } from "../nav.tsx";
 import type { Route, SortKey } from "../route.ts";
+import { ISSUE_WORDS } from "../teach/glossary.ts";
 import { Tokens } from "../ui/Num.tsx";
 import { SplitBar } from "../ui/SplitBar.tsx";
 import { useLoad } from "../ui/useLoad.ts";
@@ -345,7 +346,7 @@ function Row({ s, index, sort, now }: { s: SessionSummary; index: number; sort: 
           <button
             type="button"
             className="tip-anchor issues num"
-            data-tip={`Calls with issues, by kind:\n${issues.map(([k, n]) => `${k}: ${n}`).join("\n")}`}
+            data-tip={`Calls with issues, by kind:\n${issues.map(([k, n]) => `${ISSUE_WORDS[k as keyof typeof ISSUE_WORDS] ?? k}: ${n}`).join("\n")}`}
           >
             <span aria-hidden="true">!</span> {issueCount}
           </button>

@@ -7,6 +7,7 @@ import { api } from "../api/client.ts";
 import { CATEGORIES, CATEGORY_LABEL } from "../context/categories.ts";
 import { count, percent, tokens, when } from "../format/format.ts";
 import { Link } from "../nav.tsx";
+import { Term } from "../teach/Term.tsx";
 import { Tokens } from "../ui/Num.tsx";
 import { useLoad } from "../ui/useLoad.ts";
 import type { CompactionPart, CompactionSegment, CompactionView } from "./model.ts";
@@ -82,7 +83,9 @@ function CompactionCard({
   return (
     <section className="card compaction-card" aria-labelledby={`compaction-${n}`} data-testid="compaction">
       <div className="diff-head">
-        <h2 id={`compaction-${n}`}>Compaction {n}</h2>
+        <h2 id={`compaction-${n}`}>
+          <Term id="compaction">Compaction {n}</Term>
+        </h2>
         <p className="muted">
           {when(c.ts)},{" "}
           {c.trigger === "manual" ? "asked for (/compact)" : c.trigger === "auto" ? "automatic" : c.trigger}

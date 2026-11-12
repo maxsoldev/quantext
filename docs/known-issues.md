@@ -27,7 +27,6 @@ workaround), **low** (cosmetic, rare, or only a cost).
 | medium | viewer | No React error boundary: an error while rendering blanks the page. | An error boundary per page that shows the error and a link back to the session list. |
 | low | viewer | A stream opened with no cursor asks the pages to read again once it is ready, so each page reads its data twice on load. | Open the first stream with the cursor of the first `/api/v1/sessions` page, as `docs/api.md` suggests, and skip the refresh. |
 | low | viewer | The billing panel of the timeline shows the input's shares (cache read, cache write, uncached); output tokens are only in the tooltip. | A thin output strip under the panel, on its own scale, if teaching needs it. |
-| low | viewer | Issue kinds show as their API names (`estimate-clamped`, `unresolved-request`) in the session list's tooltip. | Words and an explanation per kind, with the glossary panel (step 8 part 2). |
 | low | viewer | The saved dark or light theme shows after the first paint (no inline script under the CSP), so a page can flash in the OS theme. | Accept, or keep the theme in a cookie the engine reads to set `data-theme` on `<html>`. |
 | low | viewer | Some Calls have an empty model id, so their lane shows as "Unknown model". | Find why the adapter gives no model for those Calls (side queries?) and name the lane by its purpose. |
 | low | viewer | The e2e tests run only in Chromium. | Add a WebKit project to `playwright.config.ts` (Safari has the Web Locks and BroadcastChannel APIs). |
