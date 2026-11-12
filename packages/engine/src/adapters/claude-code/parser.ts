@@ -849,6 +849,7 @@ function coldLane(lane: Lane): Lane {
     groupCount: {},
     partial: {},
     deferred: [],
+    gaps: lane.gaps, // positions stay valid: the layout is rebuilt from the same open runs
   };
   if (lane.lastIndex !== undefined) cold.lastIndex = lane.lastIndex;
   if (lane.lastCallId !== undefined) cold.lastCallId = lane.lastCallId;

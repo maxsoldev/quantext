@@ -17,7 +17,7 @@ import type { Estimate } from "../../core/estimate.ts";
 import type { Json, JsonObject } from "./json.ts";
 
 /** The format of ParserState: a snapshot of another version is refused. */
-export const STATE_VERSION = 2;
+export const STATE_VERSION = 3;
 
 export interface ParserState {
   version: typeof STATE_VERSION;
@@ -147,6 +147,8 @@ export interface Lane {
   partial: Record<string, 1>;
   /** Deferred tool schemas placed after a tool reference: position, tool name and schema hash. */
   deferred: { position: number; tool: string; hash: string }[];
+  /** Gap Blocks in the layout: position, the missing message's hash, and the Call that got the gap first. */
+  gaps: { position: number; message: string; callId: string }[];
 }
 
 export function emptyState(): ParserState {
