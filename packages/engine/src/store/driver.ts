@@ -49,11 +49,14 @@ export interface RawOptions {
   readOnly?: boolean;
 }
 
-/** Open (or create) a database file with the runtime's built-in SQLite, with no settings changed. */
+/**
+ * Open (or create) a database file with the runtime's built-in SQLite, with no settings changed. The SQLite module
+ * is imported here, at run time, so that the bundled engine (one file) never loads the other runtime's module.
+ */
 export async function openRaw(path: string, options: RawOptions = {}): Promise<RawDatabase> {
   return process.versions.bun === undefined
-    ? (await import("./node-driver.ts")).openNode(path, options)
-    : (await import("./bun-driver.ts")).openBun(path, options);
+    ? (await import("./node-driver.ts")).openNode(await import("node:sqlite"), path, options)
+    : (await import("./bun-driver.ts")).openBun(await import("bun:sqlite"), path, options);
 }
 
 /**
@@ -81,7 +84,9 @@ export async function openReadOnlyDriver(
 
 /** Whether `denyAllButReads` works on this runtime: its SQLite module has an authorizer. */
 export async function readsOnlyEnforced(): Promise<boolean> {
-  return process.versions.bun === undefined && (await import("./node-driver.ts")).hasAuthorizer();
+  return (
+    process.versions.bun === undefined && (await import("./node-driver.ts")).hasAuthorizer(await import("node:sqlite"))
+  );
 }
 
 /** Open (or create) the database file with the runtime's built-in SQLite: WAL, foreign keys, a busy timeout. */

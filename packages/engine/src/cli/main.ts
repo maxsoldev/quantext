@@ -219,7 +219,9 @@ const COMMANDS: Record<string, (c: Context) => number> = {
   },
 };
 
-const SQL_CHILD = fileURLToPath(new URL("./sql-child.ts", import.meta.url));
+/** In the repo the files are `.ts`; in the bundle (`dist/`), each entry is a `.js` file next to the engine. */
+const EXT = import.meta.url.endsWith(".ts") ? "ts" : "js";
+const SQL_CHILD = fileURLToPath(new URL(`./sql-child.${EXT}`, import.meta.url));
 export const DEFAULT_SQL_TIMEOUT_S = 30;
 
 /** `qx sql`: the statement runs in a child process, killed after the time limit. */

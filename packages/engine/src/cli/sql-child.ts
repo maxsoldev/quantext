@@ -10,7 +10,9 @@ import { installViews, runSql, SqlRejectedError } from "../query/index.ts";
 import { openReader } from "../store/index.ts";
 
 const limitMs = Number(process.argv[2] ?? 30_000);
-const watchdog = new Worker(new URL("./sql-watchdog.ts", import.meta.url), {
+/** `.ts` in the repo, `.js` in the bundle (`dist/sql-watchdog.js`). */
+const ext = import.meta.url.endsWith(".ts") ? "ts" : "js";
+const watchdog = new Worker(new URL(`./sql-watchdog.${ext}`, import.meta.url), {
   workerData: { parent: process.ppid, deadline: Date.now() + limitMs },
 });
 watchdog.unref();

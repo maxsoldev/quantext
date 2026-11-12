@@ -1,5 +1,5 @@
 /** The `node:sqlite` adapter of the SQL driver. */
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import type { RawDatabase, RawOptions, SqlRow, SqlValue } from "./driver.ts";
 
 /** SQLite's authorizer codes for reading (sqlite3.h): READ, SELECT, FUNCTION, RECURSIVE. */
@@ -23,11 +23,14 @@ type WithAuthorizer = {
   setAuthorizer?: (callback: ((action: number, name: string | null) => number) | null) => void;
 };
 
-export function hasAuthorizer(): boolean {
+/** The module is passed in, not imported, so that a bundle loads `node:sqlite` only on Node (`driver.ts`). */
+export type NodeSqlite = { DatabaseSync: typeof DatabaseSync };
+
+export function hasAuthorizer({ DatabaseSync }: NodeSqlite): boolean {
   return typeof (DatabaseSync.prototype as unknown as WithAuthorizer).setAuthorizer === "function";
 }
 
-export function openNode(path: string, options: RawOptions = {}): RawDatabase {
+export function openNode({ DatabaseSync }: NodeSqlite, path: string, options: RawOptions = {}): RawDatabase {
   const db = new DatabaseSync(path, options.readOnly === true ? { readOnly: true } : {});
   return {
     runtime: "node",
