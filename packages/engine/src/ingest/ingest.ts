@@ -6,7 +6,7 @@
 import type { FileHandle } from "node:fs/promises";
 import { open, readFile } from "node:fs/promises";
 import { sep } from "node:path";
-import type { JsonValue, StoreCodec } from "@quantext/shared";
+import type { CallsEvent, IngestEvent, JsonValue, StoreCodec } from "@quantext/shared";
 import type { ClaudeCodeParser, ParserState } from "../adapters/claude-code/index.ts";
 import { claudeCodeCodec, createClaudeCodeParser } from "../adapters/claude-code/index.ts";
 import type { FileMark, LogStore, Store, WriteResult } from "../store/index.ts";
@@ -55,20 +55,6 @@ export interface IngestOptions {
   maxLineBytes?: number;
 }
 
-/** Calls that one write added or updated in one Session of a log (the main transcript's path). */
-export interface CallsEvent {
-  log: string;
-  /** The log's id in the store: with `sessionId`, the Session's key in the query layer. */
-  logId: number;
-  /** The store's change cursor after this write: `listSessions({ changedSince })` goes on from it. */
-  cursor: number;
-  sessionId: string;
-  added: string[];
-  /** The index of each added Call, in the order of `added`. */
-  addedIndexes: number[];
-  updated: string[];
-}
-
 export interface IngestSummary {
   /** Logs looked at, files with new bytes, and the bytes read. */
   logs: number;
@@ -94,6 +80,11 @@ export interface Ingest {
   /** Read the projects' memory folders again (a memory document changed); returns what could not be read. */
   ingestMemory(): Promise<PathError[]>;
   /**
+   * Listen for every change event (Calls, memory, a log emptied), after its write; same rules as `onCalls`.
+   * Returns a function that stops listening.
+   */
+  onEvent(listener: (event: IngestEvent) => void): () => void;
+  /**
    * Listen for Calls added or updated, after each write. A listener that throws is reported in the summary's
    * errors and does not stop ingest. Returns a function that stops listening.
    */
@@ -108,7 +99,7 @@ export function createIngest(options: IngestOptions): Ingest {
     restoreBytes: options.restoreBytes ?? DEFAULT_RESTORE_BYTES,
     maxLineBytes: options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES,
   };
-  const listeners = new Set<(event: CallsEvent) => void>();
+  const listeners = new Set<(event: IngestEvent) => void>();
   /** The parsers of the logs read last, oldest first: a live log is read on without a restore. */
   const warmParsers = new Map<string, Warm>();
   let queue: Promise<unknown> = Promise.resolve();
@@ -118,12 +109,22 @@ export function createIngest(options: IngestOptions): Ingest {
     queue = next.catch(() => undefined); // the caller gets the failure; the queue goes on
     return next;
   };
-  /** Tell the listeners; one that throws is reported in the summary (once per pass), and the others still run. */
+  /** Tell the listeners; one that throws is reported in the errors (once per path), and the others still run. */
+  const tell = (event: IngestEvent, path: string, errors: PathError[]) => {
+    for (const listener of listeners) {
+      try {
+        listener(event);
+      } catch (error) {
+        const failure = { path, error: `a Calls listener failed: ${describe(error)}` };
+        if (!errors.some((e) => e.path === failure.path && e.error === failure.error)) errors.push(failure);
+      }
+    }
+  };
   const emit = (log: string, result: WriteResult, summary: IngestSummary) => {
     for (const { sessionId, added, addedIndexes, updated } of result.calls) {
       if (added.length === 0 && updated.length === 0) continue;
       const event: CallsEvent = {
-        log,
+        kind: "calls",
         logId: result.log,
         cursor: result.cursor,
         sessionId,
@@ -131,17 +132,13 @@ export function createIngest(options: IngestOptions): Ingest {
         addedIndexes,
         updated,
       };
-      for (const listener of listeners) {
-        try {
-          listener(event);
-        } catch (error) {
-          const failure = { path: log, error: `a Calls listener failed: ${describe(error)}` };
-          if (!summary.errors.some((e) => e.path === failure.path && e.error === failure.error)) {
-            summary.errors.push(failure);
-          }
-        }
-      }
+      tell(event, log, summary.errors);
     }
+  };
+  const memoryPass = async (errors: PathError[]): Promise<PathError[]> => {
+    const done = await ingestMemory(root, store);
+    if (done.changed !== undefined) tell({ kind: "memory", ...done.changed }, root, errors);
+    return done.errors;
   };
   const pass = async (logs: LogFiles[], errors: PathError[], signal?: AbortSignal): Promise<IngestSummary> => {
     const summary: IngestSummary = {
@@ -161,7 +158,12 @@ export function createIngest(options: IngestOptions): Ingest {
         }
         const warm = warmParsers.get(files.main) ?? { sinceRestore: 0 };
         warmParsers.delete(files.main); // a failed pass drops it: its parser may be ahead of the store
-        await ingestLog(log, files, limits, summary, (result) => emit(files.main, result, summary), signal, warm);
+        if (log.emptied !== undefined) {
+          tell({ kind: "log-removed", logId: log.id, ...log.emptied }, files.main, summary.errors);
+        }
+        const removed = (event: IngestEvent) => tell(event, files.main, summary.errors);
+        const emitted = (result: WriteResult) => emit(files.main, result, summary);
+        await ingestLog(log, files, limits, summary, emitted, signal, warm, removed);
         if (warm.parser !== undefined) warmParsers.set(files.main, warm);
         for (const old of warmParsers.keys()) {
           if (warmParsers.size <= MAX_WARM_LOGS) break;
@@ -178,7 +180,8 @@ export function createIngest(options: IngestOptions): Ingest {
     ingestAll: (run = {}) =>
       serial(async () => {
         const found = await discoverLogs(root);
-        const memory = await ingestMemory(root, store);
+        const listenerErrors: PathError[] = [];
+        const memory = [...(await memoryPass(listenerErrors)), ...listenerErrors];
         // A folder the scan could not read is reported once, not again for its memory folder.
         const within = (path: string) => found.errors.some((e) => path === e.path || path.startsWith(e.path + sep));
         const errors = [...found.errors, ...memory.filter((m) => !within(m.path))];
@@ -199,10 +202,21 @@ export function createIngest(options: IngestOptions): Ingest {
         }
         return pass(logs, errors, run.signal);
       }),
-    ingestMemory: () => serial(() => ingestMemory(root, store)),
-    onCalls(listener) {
+    ingestMemory: () =>
+      serial(async () => {
+        const errors: PathError[] = [];
+        return [...(await memoryPass(errors)), ...errors];
+      }),
+    onEvent(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    onCalls(listener) {
+      const calls = (event: IngestEvent) => {
+        if (event.kind === "calls") listener(event);
+      };
+      listeners.add(calls);
+      return () => listeners.delete(calls);
     },
   };
 }
@@ -224,6 +238,7 @@ async function ingestLog(
   emit: (result: WriteResult) => void,
   signal: AbortSignal | undefined,
   warm: Warm,
+  removed: (event: IngestEvent) => void,
 ): Promise<void> {
   const entries: Entry[] = [{ path: files.main, transcript: "main", kind: "transcript" }];
   for (const agent of files.subagents) {
@@ -234,7 +249,9 @@ async function ingestLog(
     for (const entry of entries) await openEntry(entry);
     let marks = new Map(log.files().map((m) => [m.path, m]));
     if (await anyReplaced(entries, marks)) {
-      log.reset();
+      const projects = log.projects();
+      const cursor = log.reset();
+      removed({ kind: "log-removed", logId: log.id, cursor, projects });
       marks = new Map();
       delete warm.parser;
       warm.sinceRestore = 0;

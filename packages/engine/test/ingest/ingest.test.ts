@@ -14,7 +14,7 @@ import {
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { claudeCodeCodec } from "../../src/adapters/claude-code/index.ts";
-import type { CallsEvent, Ingest } from "../../src/ingest/index.ts";
+import type { CallsEvent, Ingest, IngestEvent } from "../../src/ingest/index.ts";
 import { createIngest } from "../../src/ingest/index.ts";
 import type { LogStore, Store } from "../../src/store/index.ts";
 import { openStore } from "../../src/store/index.ts";
@@ -583,8 +583,27 @@ describe("Calls events", () => {
     const graph = graphOf(s.store, files.main);
     const sessions = new Set(s.events.map((e) => e.sessionId));
     expect(sessions).toEqual(new Set(graph.sessions.map((x) => x.id)));
-    expect(s.events.every((e) => e.log === files.main)).toBe(true);
+    expect(s.events.every((e) => e.logId === 1)).toBe(true);
     expect(new Set(s.events.flatMap((e) => e.added))).toEqual(new Set(graph.calls.map((c) => c.id)));
+  });
+
+  test("tell when a log was emptied to be read again, and when memory changed, with the cursor", async () => {
+    const s = await setup();
+    const files = copyScenario(s.root, "image");
+    const all: IngestEvent[] = [];
+    s.ingest.onEvent((e) => all.push(e));
+    await s.ingest.ingestAll();
+    const text = readFileSync(files.source);
+    writeText(files.main, text.subarray(0, text.indexOf("\n") + 1)); // cut below its read position: read again
+    writeText(join(s.root, "projects", "-fixture-image", "memory", "MEMORY.md"), "note\n");
+    await s.ingest.ingestAll();
+    const removed = all.find((e) => e.kind === "log-removed");
+    expect(removed).toMatchObject({ logId: 1, projects: ["/fixture-0000000000000000/repo"] });
+    const memory = all.find((e) => e.kind === "memory");
+    expect(memory).toMatchObject({ projectDirs: [join(s.root, "projects", "-fixture-image")] });
+    const cursors = all.map((e) => e.cursor);
+    expect(cursors).toEqual([...cursors].sort((a, b) => a - b));
+    expect(all.filter((e) => e.kind === "calls").length).toBe(s.events.length);
   });
 
   test("carry the store's log id, the Calls' indexes and the change cursor after their write", async () => {

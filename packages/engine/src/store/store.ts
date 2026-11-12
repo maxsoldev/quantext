@@ -40,8 +40,11 @@ export interface StoreReport {
 export interface MemoryStore {
   /** Every stored document's mark, by project folder and path. */
   marks(): MemoryMark[];
-  /** Store new and changed documents and delete removed ones, in one transaction. */
-  write(changes: { put: readonly MemoryDocument[]; remove: readonly Pick<MemoryMark, "projectDir" | "path">[] }): void;
+  /** Store new and changed documents and delete removed ones, in one transaction; returns the change cursor after. */
+  write(changes: {
+    put: readonly MemoryDocument[];
+    remove: readonly Pick<MemoryMark, "projectDir" | "path">[];
+  }): number;
 }
 
 export interface Store {
@@ -151,6 +154,8 @@ export async function openStore(options: OpenStoreOptions): Promise<Store> {
             for (const d of remove) {
               sql.get("DELETE FROM project_memory WHERE project_dir = ? AND path = ?").run(d.projectDir, d.path);
             }
+            sql.get("UPDATE change_cursor SET seq = seq + 1").run();
+            return Number(sql.get("SELECT seq FROM change_cursor").get()?.seq);
           }),
       },
       changeCursor: () => Number(sql.get("SELECT seq FROM change_cursor").get()?.seq ?? 0),

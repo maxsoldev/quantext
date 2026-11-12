@@ -20,6 +20,7 @@ import type {
   ContextCategory,
   ContextDiff,
   DemoOptions,
+  IngestEvent,
   Items,
   JsonValue,
   LaneSummary,
@@ -41,6 +42,7 @@ import type {
   TokenGroup,
   ToolCallSummary,
   ToolOutput,
+  VisibleEvent,
 } from "@quantext/shared";
 import { blockCosts } from "../core/pricing.ts";
 import type { SqlDriver, SqlRow, SqlValue } from "../store/index.ts";
@@ -115,6 +117,8 @@ export interface Query {
   /** The memory documents of a project (by its path, or its last folder name), by path. */
   projectMemory(project: string): Items<MemoryDocumentView>;
   ingestReport(): QueryReport;
+  /** A change event as this query's reader may see it: null for a hidden project, no local paths. */
+  visibleEvent(event: IngestEvent): VisibleEvent | null;
 }
 
 const SORTS: Record<NonNullable<SessionFilter["sort"]>, string> = {
@@ -587,6 +591,8 @@ export function createQuery(options: QueryOptions): Query {
 
   return {
     listSessions(filter = {}) {
+      // The cursor before the page: a write between them shows up again in the next changedSince, never lost.
+      const cursor = Number(q("SELECT seq FROM change_cursor").get()?.seq ?? 0);
       const params: SqlValue[] = [];
       const where = [
         "(parent_id IS NULL OR NOT EXISTS (SELECT 1 FROM sessions p WHERE p.log = v.log AND p.id = v.parent_id))",
@@ -625,7 +631,6 @@ export function createQuery(options: QueryOptions): Query {
       const issues = issuesOf([...new Set(rows.map((r) => Number(r.log)))]);
       const items = rows.map((r) => summary(r, issues));
       nest(items, subagentsOf(items));
-      const cursor = Number(q("SELECT seq FROM change_cursor").get()?.seq ?? 0);
       return { ...meta, total, offset, items, cursor };
     },
     findSessions(id) {
@@ -901,6 +906,31 @@ export function createQuery(options: QueryOptions): Query {
           size: Number(r.size),
         }));
       return { ...meta, items: hide(docs, root === null || root === undefined ? undefined : String(root)) };
+    },
+    visibleEvent(event) {
+      const shown = (project: string) => (redacting ? lastFolder(project) : project);
+      switch (event.kind) {
+        case "calls": {
+          const key = { log: event.logId, id: event.sessionId };
+          if (sessionProject(key) === undefined) return null;
+          const added = event.added.map((id, i) => ({ id, index: event.addedIndexes[i] ?? -1 }));
+          return { kind: "calls", cursor: event.cursor, session: key, added, updated: [...event.updated] };
+        }
+        case "log-removed":
+          return event.projects.some((p) => projectAllowed(p, allowed))
+            ? { kind: "log-removed", cursor: event.cursor, logId: event.logId }
+            : null;
+        case "memory": {
+          const dirs = new Set(event.projectDirs);
+          const projects = q("SELECT DISTINCT l.path, s.project FROM sessions s JOIN logs l ON l.id = s.log")
+            .all()
+            .filter((r) => r.project !== null && dirs.has(parentOf(String(r.path))))
+            .map((r) => String(r.project))
+            .filter((p) => projectAllowed(p, allowed));
+          const unique = [...new Set(projects)].sort();
+          return unique.length === 0 ? null : { kind: "memory", cursor: event.cursor, projects: unique.map(shown) };
+        }
+      }
     },
     ingestReport() {
       const visible = visibleLogs();
