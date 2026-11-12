@@ -183,6 +183,8 @@ describe("demo mode", () => {
       added: [{ id: "c", index: 3 }],
       updated: [],
     });
+    expect(q.hasSession(shop)).toBe(true);
+    expect(hidden !== undefined && q.hasSession(hidden)).toBe(false);
     expect(q.visibleEvent(calls(hidden?.log ?? 0, hidden?.id ?? ""))).toBeNull();
     const removed = (projects: string[]): IngestEvent => ({ kind: "log-removed", logId: 1, cursor: 9, projects });
     expect(q.visibleEvent(removed([PROJECTS.resume]))).toBeNull();

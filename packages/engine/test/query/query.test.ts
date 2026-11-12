@@ -345,6 +345,19 @@ describe("for the live viewer", () => {
     expect(image).toEqual([ID(3)]); // ingested last
   });
 
+  test("gives the change cursor alone, as a page gives it", async () => {
+    const q = await query(["basic-tools", "image"]);
+    expect(q.changeCursor()).toBe(q.listSessions().cursor);
+  });
+
+  test("tells whether a Session exists, by its key", async () => {
+    const q = await query(["basic-tools"]);
+    const k = key(q, 1);
+    expect(q.hasSession(k)).toBe(true);
+    expect(q.hasSession({ ...k, log: k.log + 1 })).toBe(false);
+    expect(q.hasSession({ ...k, id: "nope" })).toBe(false);
+  });
+
   test("keeps the provider's own data out of the stable types, behind raw", async () => {
     const q = await query(["effort"]);
     const s = key(q, 7);
