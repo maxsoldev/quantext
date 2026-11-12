@@ -168,3 +168,32 @@ describe("demo mode", () => {
     expect((await get(port, `/api/v1/session-keys?id=${id}`)).json()).toEqual({ apiVersion: 1, items: [] });
   });
 });
+
+describe("/api/v1/status", () => {
+  const status = {
+    phase: "catching-up" as const,
+    logsDone: 2,
+    logsTotal: 7,
+    bytesDone: 10,
+    bytesTotal: 99,
+    startedAt: "2026-11-12T00:00:01.000Z",
+    lastError: "projects/x.jsonl: EACCES",
+  };
+
+  test("tells the engine, its ingest and its streams", async () => {
+    const { port } = await engine(["basic-tools"], { ingestStatus: () => status });
+    expect((await get(port, "/api/v1/status")).json()).toEqual({
+      apiVersion: 1,
+      engine: { version: "0.0.0-test", pid: process.pid, startedAt: "2026-11-12T00:00:00.000Z", demo: false },
+      ingest: status,
+      streams: 0,
+    });
+  });
+
+  test("in demo mode, only that a read failed", async () => {
+    const info = { version: "0.0.0-test", pid: 1, startedAt: "2026-11-12T00:00:00.000Z", demo: true };
+    const { port } = await engine(["basic-tools"], { info, ingestStatus: () => status });
+    const reply = (await get(port, "/api/v1/status")).json<{ ingest: { lastError: string } }>();
+    expect(reply.ingest.lastError).toBe("a read failed (hidden in demo mode)");
+  });
+});

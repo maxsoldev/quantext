@@ -5,7 +5,7 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
-import type { EngineFile, Health } from "@quantext/shared";
+import type { EngineFile, EngineStatus, Health } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
 import type { CliIo } from "../../src/cli/index.ts";
 import { EXIT, main } from "../../src/cli/index.ts";
@@ -143,6 +143,15 @@ describe("qx serve", () => {
       if (calls === 0) await new Promise((r) => setTimeout(r, 20));
     }
     expect(calls).toBeGreaterThan(0);
+    let status = (await get(file.port, "/api/v1/status")).json<EngineStatus>();
+    for (let i = 0; i < 200 && status.ingest.phase !== "live"; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      status = (await get(file.port, "/api/v1/status")).json<EngineStatus>();
+    }
+    expect(status).toMatchObject({ engine: { version: "0.0.0", pid: process.pid, demo: false }, streams: 0 });
+    const { ingest } = status;
+    expect(ingest).toMatchObject({ phase: "live", logsDone: ingest.logsTotal });
+    expect(ingest.bytesDone).toBe(ingest.bytesTotal);
     const frame = await sse(file.port, /^id: .*\nevent: calls\n/m, appendRest);
     expect(frame).toContain(`"id":"${ID}"`);
     run.stop();

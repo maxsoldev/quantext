@@ -6,7 +6,7 @@
  */
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { DemoOptions, EngineFile } from "@quantext/shared";
+import type { DemoOptions, EngineFile, IngestStatus } from "@quantext/shared";
 import { claudeCodeCodec } from "../adapters/claude-code/index.ts";
 import type { Api } from "../api/index.ts";
 import { createApi } from "../api/index.ts";
@@ -131,15 +131,33 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
       ...(options.host === undefined ? {} : { host: options.host }),
     });
     const ingest = createIngest({ store, root: options.root });
+    let phase: IngestStatus["phase"] = "catching-up";
+    let lastError: string | undefined;
+    const ingestStatus = (): IngestStatus => ({
+      phase,
+      ...(ingest.progress() ?? { logsDone: 0, logsTotal: 0, bytesDone: 0, bytesTotal: 0, startedAt }),
+      ...(lastError === undefined ? {} : { lastError }),
+    });
+    /** Report a failed read on stderr and in the status. */
+    const failed = (message: string) => {
+      lastError = message;
+      hooks.err(`qx: ${message}\n`);
+    };
     const engineApi = createApi({
       query,
       now,
+      ingestStatus,
       staticDir: hooks.staticDir ?? defaultStaticDir(),
       info: { version, pid: process.pid, startedAt, demo: options.demo !== undefined, dataDir },
       onError: (e) => hooks.err(`qx: ${e instanceof Error ? e.message : String(e)}\n`),
     });
     api = engineApi;
     ingest.onEvent((event) => engineApi.publish(event));
+    ingest.onProgress(() => engineApi.publishIngest(ingestStatus()));
+    const enter = (next: IngestStatus["phase"]) => {
+      phase = next;
+      engineApi.publishIngest(ingestStatus());
+    };
     const port = await listen(engineApi, options.port, hooks.defaultPort ?? DEFAULT_PORT);
     const url = engineUrl(port);
     writeEngineFile(dataDir, { apiVersion: API_VERSION, version, pid: process.pid, port, url, startedAt });
@@ -164,17 +182,19 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
 
     // Catch up, then watch; a stop ends the pass after its batch, and the next start goes on from there.
     catchUp = ingest.ingestAll({ signal: stopping.signal }).then((summary) => {
-      for (const e of summary.errors) hooks.err(`qx: ${e.path}: ${e.error}\n`);
+      for (const e of summary.errors) failed(`${e.path}: ${e.error}`);
       if (!stopping.signal.aborted) {
+        enter("live");
         watcher = watchTranscripts({
           ingest,
           root: options.root,
-          onError: (e) => hooks.err(`qx: live ingest failed: ${e instanceof Error ? e.message : String(e)}\n`),
+          onError: (e) => failed(`live ingest failed: ${e instanceof Error ? e.message : String(e)}`),
         });
       }
     });
-    catchUp.catch((e: unknown) => hooks.err(`qx: ingest failed: ${e instanceof Error ? e.message : String(e)}\n`));
+    catchUp.catch((e: unknown) => failed(`ingest failed: ${e instanceof Error ? e.message : String(e)}`));
     const why = await stopped;
+    enter("stopping");
     hooks.out(`quantext engine stopping (${why})\n`);
     return 0;
   } finally {

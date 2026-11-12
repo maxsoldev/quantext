@@ -6,7 +6,7 @@
  * The replay is written in parts, each after the last one drained, so a long replay never trips that limit.
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { IngestEvent, SseReady, SseResync, VisibleEvent } from "@quantext/shared";
+import type { IngestEvent, IngestStatus, SseIngest, SseReady, SseResync, VisibleEvent } from "@quantext/shared";
 import type { Query } from "../query/index.ts";
 import { securityHeaders } from "./http.ts";
 import { badRequest } from "./params.ts";
@@ -25,6 +25,8 @@ export interface EventStreamOptions {
   maxClients?: number;
   /** A client whose replay does not drain in this time is dropped (default 30 s). */
   drainTimeoutMs?: number;
+  /** The ingest status goes out at most this often; the latest one last (default 1 s). */
+  ingestEveryMs?: number;
   /** Gets a failure to pass an event on; its clients are closed so that they reconnect and resync. */
   onError?: (error: unknown) => void;
 }
@@ -32,6 +34,8 @@ export interface EventStreamOptions {
 export interface EventStream {
   /** Pass an ingest event on to the clients that may see it. */
   publish(event: IngestEvent): void;
+  /** Send the ingest status to every live client, throttled (`ingestEveryMs`); it is not replayed. */
+  publishIngest(status: IngestStatus): void;
   /** Serve one client: replay from `cursor` (Last-Event-ID or `?cursor=`), then live events. */
   connect(req: IncomingMessage, res: ServerResponse, cursor: string | undefined): void;
   clients(): number;
@@ -138,6 +142,17 @@ export function createEventStream(options: EventStreamOptions): EventStream {
     `id: ${id}\nevent: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
   const eventFrame = (k: Kept) => frame(k.event.kind, `${k.c}.${k.o}`, k.event);
 
+  const ingestEveryMs = options.ingestEveryMs ?? 1000;
+  let ingestSentAt = Number.NEGATIVE_INFINITY;
+  let ingestWaiting: IngestStatus | undefined;
+  let ingestTimer: ReturnType<typeof setTimeout> | undefined;
+  const sendIngest = (status: IngestStatus) => {
+    ingestSentAt = performance.now();
+    const body: SseIngest = { apiVersion: API_VERSION, ...status };
+    const text = `event: ingest\ndata: ${JSON.stringify(body)}\n\n`;
+    for (const [res, state] of clients) if (state.live) write(res, text);
+  };
+
   const heartbeat = setInterval(() => {
     for (const [res, state] of clients) if (state.live) write(res, ": ping\n\n");
   }, heartbeatMs);
@@ -168,6 +183,24 @@ export function createEventStream(options: EventStreamOptions): EventStream {
       }
       const text = eventFrame(kept);
       for (const [res, state] of clients) if (state.live) write(res, text);
+    },
+    publishIngest(status) {
+      const wait = ingestSentAt + ingestEveryMs - performance.now();
+      if (wait <= 0 && ingestTimer === undefined) {
+        sendIngest(status);
+        return;
+      }
+      ingestWaiting = status;
+      ingestTimer ??= setTimeout(
+        () => {
+          ingestTimer = undefined;
+          const latest = ingestWaiting;
+          ingestWaiting = undefined;
+          if (latest !== undefined) sendIngest(latest);
+        },
+        Math.max(0, wait),
+      );
+      ingestTimer.unref();
     },
     connect(req, res, cursorText) {
       const from = cursorText === undefined ? undefined : parseCursor(cursorText);
@@ -214,6 +247,7 @@ export function createEventStream(options: EventStreamOptions): EventStream {
     clients: () => clients.size,
     close() {
       clearInterval(heartbeat);
+      clearTimeout(ingestTimer);
       for (const res of clients.keys()) res.end();
       clients.clear();
     },

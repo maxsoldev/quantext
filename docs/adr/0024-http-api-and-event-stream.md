@@ -37,7 +37,8 @@ reconnects after sleep or a network change and must not miss a Call.
   cursor is from before this engine, or larger than the store's), it gets `resync` with `since`, and reads
   `/api/v1/sessions?changedSince=<since>` again. The replay is written in parts, each after the last drained (a
   client that does not drain in 30 s is dropped). A comment every 15 s keeps the stream; a live client whose unsent
-  bytes pass 1 MiB is dropped, so memory never grows with a slow client. At most 16 streams (503). If an event
+  bytes pass 1 MiB is dropped, so memory never grows with a slow client. At most 16 streams (503). The ingest status (`/api/v1/status`) goes out as `ingest`, with
+  no id, at most once a second. If an event
   cannot be checked, every stream is closed and the gap is marked, so that clients resync.
 
 Considered: a framework (Fastify, Hono): more surface and dependencies for no feature we need. An event log table

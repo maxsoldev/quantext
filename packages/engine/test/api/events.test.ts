@@ -188,6 +188,27 @@ describe("the event stream", () => {
     kept.close();
   });
 
+  test("sends the ingest status at most once per interval, the latest last, with no id", async () => {
+    const { port, api } = await setup({ events: { ingestEveryMs: 200 } });
+    const stream = await open(port);
+    await stream.until(ready);
+    const status = (bytesDone: number) => ({
+      phase: "catching-up" as const,
+      logsDone: 0,
+      logsTotal: 1,
+      bytesDone,
+      bytesTotal: 100,
+      startedAt: "2026-11-12T00:00:00.000Z",
+    });
+    for (let i = 1; i <= 5; i++) api.publishIngest(status(i));
+    await stream.until((f) => f.event === "ingest" && data<{ bytesDone: number }>(f).bytesDone === 5);
+    const sent = stream.frames.filter((f) => f.event === "ingest");
+    expect(sent.map((f) => data<{ bytesDone: number }>(f).bytesDone)).toEqual([1, 5]);
+    expect(sent.every((f) => f.id === undefined)).toBe(true);
+    expect(data(sent[1] as Frame)).toEqual({ apiVersion: 1, ...status(5) });
+    stream.close();
+  });
+
   test("sends a heartbeat comment", async () => {
     const { port } = await setup({ events: { heartbeatMs: 20 } });
     const stream = await open(port);

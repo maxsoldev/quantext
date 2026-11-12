@@ -6,7 +6,7 @@
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 import type { Socket } from "node:net";
-import type { Health, IngestEvent } from "@quantext/shared";
+import type { EngineStatus, Health, IngestEvent, IngestStatus } from "@quantext/shared";
 import type { Query } from "../query/index.ts";
 import type { EventStream } from "./events.ts";
 import { createEventStream } from "./events.ts";
@@ -24,6 +24,8 @@ export interface ApiOptions {
   info: Omit<Health, "ok" | "apiVersion">;
   /** The viewer's files. */
   staticDir: string;
+  /** The ingest's status for `/api/v1/status`; by default live with nothing read. */
+  ingestStatus?: () => IngestStatus;
   now?: () => number;
   /**
    * Open sockets at once; more are closed at once (default 64). Bun's node:http shows a socket only once it sent
@@ -45,6 +47,8 @@ export interface Api {
   listen(port: number): Promise<number>;
   /** Pass an ingest event on to the event streams. */
   publish(event: IngestEvent): void;
+  /** Send the ingest status to the event streams (at most once a second). */
+  publishIngest(status: IngestStatus): void;
   /** Event streams open now, and when the last request ended or the last stream closed (`now()` time). */
   activity(): { streams: number; lastActive: number };
   /** End the event streams, close every socket, stop listening. */
@@ -65,6 +69,25 @@ export function createApi(options: ApiOptions): Api {
     ...info,
     ...(info.demo || dataDir === undefined ? {} : { dataDir }),
   };
+  const ingestStatus =
+    options.ingestStatus ??
+    ((): IngestStatus => ({
+      phase: "live",
+      logsDone: 0,
+      logsTotal: 0,
+      bytesDone: 0,
+      bytesTotal: 0,
+      startedAt: info.startedAt,
+    }));
+  /** Demo mode shows that a read failed, not its path or message. */
+  const shown = (s: IngestStatus): IngestStatus =>
+    info.demo && s.lastError !== undefined ? { ...s, lastError: "a read failed (hidden in demo mode)" } : s;
+  const status = (): EngineStatus => ({
+    apiVersion: API_VERSION,
+    engine: { version: info.version, pid: info.pid, startedAt: info.startedAt, demo: info.demo },
+    ingest: shown(ingestStatus()),
+    streams: events.clients(),
+  });
   let port = 0;
   let lastActive = now();
   const sockets = new Set<Socket>();
@@ -77,6 +100,10 @@ export function createApi(options: ApiOptions): Api {
     const url = parseUrl(raw, port);
     const segments = decodeSegments(url.pathname);
     if (url.pathname === "/health") return sendJson(req, res, 200, health);
+    if (url.pathname === "/api/v1/status") {
+      if ([...url.searchParams.keys()].length > 0) throw badRequest("status takes no parameters");
+      return sendJson(req, res, 200, status());
+    }
     if (url.pathname === "/api/v1/events") {
       if (req.method !== "GET") throw new HttpError(405, "method-not-allowed", "the event stream is GET only");
       const header = req.headers["last-event-id"];
@@ -161,6 +188,7 @@ export function createApi(options: ApiOptions): Api {
       });
     },
     publish: (event) => events.publish(event),
+    publishIngest: (s) => events.publishIngest(shown(s)),
     activity: () => ({ streams: events.clients(), lastActive }),
     close() {
       events.close();
