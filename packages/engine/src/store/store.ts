@@ -1,13 +1,13 @@
 /** The store: one SQLite database in the data folder, written by one engine at a time. */
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { RequestLog, StoreCodec } from "@quantext/shared";
+import type { MemoryDocument, MemoryMark, RequestLog, StoreCodec } from "@quantext/shared";
 import type { SqlDriver } from "./driver.ts";
-import { openDriver } from "./driver.ts";
+import { openDriver, openReadOnlyDriver } from "./driver.ts";
 import { acquireLock } from "./lock.ts";
 import type { LogStore } from "./log.ts";
 import { openLog } from "./log.ts";
-import { migrate } from "./schema.ts";
+import { migrate, SCHEMA_VERSION } from "./schema.ts";
 import { Statements } from "./statements.ts";
 
 /** The default data folder, `~/.quantext`: outside the plugin folder, which an uninstall deletes. */
@@ -37,6 +37,13 @@ export interface StoreReport {
   requestLogs: { requestLog: RequestLog; sessions: number }[];
 }
 
+export interface MemoryStore {
+  /** Every stored document's mark, by project folder and path. */
+  marks(): MemoryMark[];
+  /** Store new and changed documents and delete removed ones, in one transaction. */
+  write(changes: { put: readonly MemoryDocument[]; remove: readonly Pick<MemoryMark, "projectDir" | "path">[] }): void;
+}
+
 export interface Store {
   readonly path: string;
   readonly schemaVersion: number;
@@ -48,6 +55,8 @@ export interface Store {
   report(): StoreReport;
   /** Replace what the last full scan of the transcript folder found it could not read or did not follow. */
   setScanIssues(issues: readonly { path: string; issue: string }[]): void;
+  /** The project memory documents ingest has read, by project folder and path. */
+  readonly memory: MemoryStore;
   /** The paths of every log in the store, oldest first. */
   logs(): string[];
   close(): void;
@@ -115,6 +124,33 @@ export async function openStore(options: OpenStoreOptions): Promise<Store> {
           }
         });
       },
+      memory: {
+        marks: () =>
+          sql
+            .get("SELECT project_dir, path, mtime_ms, size FROM project_memory ORDER BY project_dir, path")
+            .all()
+            .map((r) => ({
+              projectDir: String(r.project_dir),
+              path: String(r.path),
+              mtimeMs: Number(r.mtime_ms),
+              size: Number(r.size),
+            })),
+        write: ({ put, remove }) =>
+          opened.transaction(() => {
+            for (const d of put) {
+              sql
+                .get(
+                  `INSERT INTO project_memory (project_dir, path, content, mtime_ms, size) VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT (project_dir, path) DO UPDATE SET content = excluded.content,
+                     mtime_ms = excluded.mtime_ms, size = excluded.size`,
+                )
+                .run(d.projectDir, d.path, d.content, d.mtimeMs, d.size);
+            }
+            for (const d of remove) {
+              sql.get("DELETE FROM project_memory WHERE project_dir = ? AND path = ?").run(d.projectDir, d.path);
+            }
+          }),
+      },
       logs: () =>
         sql
           .get("SELECT path FROM logs ORDER BY id")
@@ -130,4 +166,27 @@ export async function openStore(options: OpenStoreOptions): Promise<Store> {
     lock.release();
     throw error;
   }
+}
+
+export interface OpenReaderOptions {
+  /** Runs on the connection before it becomes read-only: for temporary views. */
+  setup?: (db: SqlDriver) => void;
+}
+
+/**
+ * Open the store of a data folder read-only, with no writer lock: for the query layer and `qx sql`, also while an
+ * engine writes. The file is opened read-only and `query_only` is set, so no statement can change it.
+ */
+export async function openReader(dataDir: string, options: OpenReaderOptions = {}): Promise<SqlDriver> {
+  const path = join(dataDir, "quantext.db");
+  if (!existsSync(path)) throw new Error(`there is no store in ${dataDir}: run \`qx ingest\` first`);
+  return openReadOnlyDriver(path, (db) => {
+    const version = Number(db.prepare("SELECT version FROM schema_version").get()?.version ?? 0);
+    if (version !== SCHEMA_VERSION) {
+      throw new Error(
+        `the store's schema version is ${version}, this engine reads ${SCHEMA_VERSION}: run \`qx ingest\` to migrate it`,
+      );
+    }
+    options.setup?.(db);
+  });
 }

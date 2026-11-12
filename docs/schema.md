@@ -1,4 +1,4 @@
-# Store schema (version 1)
+# Store schema (version 2)
 
 The engine keeps everything in one SQLite database, `~/.quantext/quantext.db` (WAL mode). Only the engine writes
 it, under the writer lock `~/.quantext/writer.lock` (an OS file lock, ADR 22). The decisions behind this schema
@@ -80,6 +80,9 @@ version logs only usage, so its Calls are usage-only and have no Blocks; `partia
 | `issues` | JSON list of `{kind, detail}`, sorted by kind and detail: `no-request` (a usage-only Call), `missing-message` (a gap Block stands for a message, or the message came after the Call was split), `derived-usage-invalid` (a summarising Call whose derived input is 0 or less: it has no usage), `unresolved-request`, `no-usage`, `unreconciled-tokens`, `no-price`, `price-assumption`, `estimate-clamped` |
 | `turn_duration_ms` | On the last Call of a turn: how long the turn took |
 
+The index `calls_lane` holds the Calls of each lane in order, with the columns that price a Block per Call
+(usage, cache boundary, cost by part): `v_block_lifetime_cost` reads only it for each Call of a run.
+
 ### `blocks`
 
 One row per unique content block, for all logs: `hash` (the Block hash) and `content` (the content block as sent
@@ -157,6 +160,13 @@ the latest row before it), `kind`, `value` and `detail` (JSON):
 | `continued-in` | the Session it went on in | |
 | `forked-from` | the Session whose context it started from | `contextLength`, `parentLastUuid` |
 
+### `project_memory`
+
+The notes the harness keeps for a project across Sessions (in Claude Code: `<root>/projects/<project folder>/memory/*.md`,
+`MEMORY.md` among them), read only, by ingest: `project_dir` (the harness's folder for the project, which holds its
+logs: a log belongs to it when `logs.path` is in it), `path` (in the memory folder, `/` separators), `content`,
+`mtime_ms`, `size` (bytes). A changed file (size or mtime) is read again; a removed one is deleted.
+
 ### `messages`, `shapes`, `records`
 
 The adapter's own data, kept so that a parser restored from its snapshot can look it up (ADR 18). Not for
@@ -191,6 +201,11 @@ Options that are not needed yet, with what they would bring:
 - **Peak memory of a full import on Bun** (N4): about 800–900 MB for the 1.2 GB real corpus (Node: about
   750 MB). Ingest memory is bounded per batch; the rest is the runtime's heap growth. Watch it when the corpus
   grows; a smaller `restoreBytes` lowers it at some cost in time.
+
+## Versions
+
+- **1**: the tables above, except `project_memory`.
+- **2**: `project_memory`; the index `calls_lane`.
 
 ## Changing the schema
 

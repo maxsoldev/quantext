@@ -4,5 +4,5 @@ export { openDriver } from "./driver.ts";
 export { StoreLockedError } from "./lock.ts";
 export type { FileMark, LogBatch, LogStore, WriteResult } from "./log.ts";
 export { SCHEMA_VERSION } from "./schema.ts";
-export type { OpenStoreOptions, Store, StoreReport } from "./store.ts";
-export { defaultDataDir, openStore } from "./store.ts";
+export type { MemoryStore, OpenReaderOptions, OpenStoreOptions, Store, StoreReport } from "./store.ts";
+export { defaultDataDir, openReader, openStore } from "./store.ts";

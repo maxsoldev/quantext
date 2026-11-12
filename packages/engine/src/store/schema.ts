@@ -221,8 +221,26 @@ CREATE TABLE report_unreadable (
 ) STRICT, WITHOUT ROWID;
 `;
 
+/**
+ * Project memory documents; and the Calls of a lane in order with what pricing a Block per Call needs, so that the
+ * lifetime cost of the Blocks reads only this index for each Call of a run (docs/schema.md "Views").
+ */
+const V2 = `
+CREATE TABLE project_memory (
+  project_dir TEXT NOT NULL,
+  path TEXT NOT NULL,
+  content TEXT NOT NULL,
+  mtime_ms REAL NOT NULL,
+  size INTEGER NOT NULL,
+  PRIMARY KEY (project_dir, path)
+) STRICT, WITHOUT ROWID;
+
+CREATE INDEX calls_lane ON calls (log, session_id, lane, idx, usage_basis, cache_boundary_position,
+  cache_read_tokens, cache_write_tokens, input_tokens, cost_cache_read_usd, cost_cache_write_usd, cost_input_usd);
+`;
+
 /** Migration i (0-based) takes the schema from version i to version i + 1. */
-const MIGRATIONS: readonly string[] = [V1];
+const MIGRATIONS: readonly string[] = [V1, V2];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
 

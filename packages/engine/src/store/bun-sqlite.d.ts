@@ -8,6 +8,8 @@ declare module "bun:sqlite" {
     run(...params: Value[]): { changes: number; lastInsertRowid: number | bigint };
     get(...params: Value[]): unknown;
     all(...params: Value[]): unknown[];
+    iterate(...params: Value[]): IterableIterator<unknown>;
+    readonly columnNames: string[];
   }
   export class Database {
     constructor(path: string, options?: { create?: boolean; readonly?: boolean; strict?: boolean });
