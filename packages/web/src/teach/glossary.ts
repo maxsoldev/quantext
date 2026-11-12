@@ -136,6 +136,17 @@ export const TERMS: readonly Term[] = [
     where: { label: "The subagent links in the session head", selector: "[data-testid=subagents]" },
   },
   {
+    id: "unlogged-calls",
+    term: "Calls the transcript does not show",
+    short: "Some model calls of the harness are billed but written to no transcript, so no tool can count them.",
+    body:
+      "Claude Code writes the progress summary of a running subagent every 30 seconds by sending the subagent's " +
+      "whole context to the model again (a cache read plus a short answer). It also makes calls for recaps. None of " +
+      "these is in a transcript. In a session with many long subagents they can add 10–15% to the bill. Setting " +
+      "CLAUDE_CODE_DISABLE_AGENT_PROGRESS_SUMMARIES=1 turns the summaries off; you then see no live subagent progress.",
+    where: { label: "The subagent links in the session head", selector: "[data-testid=subagents]" },
+  },
+  {
     id: "lifetime-cost",
     term: "Lifetime cost",
     short: "What a block costs over all the calls it stays in.",
