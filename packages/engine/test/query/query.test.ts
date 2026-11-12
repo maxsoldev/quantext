@@ -480,6 +480,31 @@ describe("contextDiff", () => {
 });
 
 describe("a Session's detail", () => {
+  test("estimates the unlogged progress summaries of its subagents, apart from the exact totals", async () => {
+    // Stretch the subagent's run to 95 s, with its three requests sent at 0, 40 and 70 s.
+    const { db } = await ingested(["subagent"], undefined, (w) => {
+      const sub = String(w.prepare("SELECT id FROM sessions WHERE parent_id = ?").get(ID(2))?.id);
+      const at = (s: number) => new Date(Date.parse("2026-11-12T01:00:00Z") + s * 1000).toISOString();
+      w.prepare("UPDATE sessions SET started = ?, ended = ? WHERE id = ?").run(at(0), at(95), sub);
+      for (const [idx, s] of [0, 40, 70].entries())
+        w.prepare("UPDATE calls SET ts = ? WHERE session_id = ? AND idx = ?").run(at(s), sub, idx);
+    });
+    const q = createQuery({ db, codec: claudeCodeCodec });
+    const detail = q.getSession(key(q, 2));
+    const prompts = q
+      .listCalls({ log: key(q, 2).log, id: String(detail?.subagents[0]?.id) })
+      .items.map(
+        (c) => (c.usage?.inputTokens ?? 0) + (c.usage?.cacheReadTokens ?? 0) + (c.usage?.cacheWriteTokens ?? 0),
+      );
+    const read = prompts.reduce((a, b) => a + b, 0);
+    expect(detail?.unlogged).toMatchObject({ calls: 3, cacheReadTokens: read, unpricedCalls: 0, subagents: 1 });
+    // Opus 5.5 on a Bedrock regional endpoint (+10%), like the subagent's own Calls.
+    expect(detail?.unlogged.costUsd).toBeCloseTo(1.1 * (read * 0.2e-6 + 3 * (400 * 4e-6 + 40 * 20e-6)), 9);
+    expect(detail?.session.totals).toEqual(q.listSessions().items[0]?.totals);
+    const sub = detail?.subagents[0];
+    if (sub !== undefined) expect(q.getSession(sub)?.unlogged.calls).toBe(0);
+  });
+
   test("has its lanes, subagents and tool calls", async () => {
     const q = await query(["subagent", "basic-tools"]);
     const detail = q.getSession(key(q, 2));

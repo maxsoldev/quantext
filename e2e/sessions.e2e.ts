@@ -54,3 +54,28 @@ test("the cost is the total with the subagents; its tooltip splits it", async ({
   await head.hover();
   await expect(tip).toContainText("Main conversation: $");
 });
+
+test("the session cost names the unlogged summaries as an estimate, apart from the total", async ({ page, engine }) => {
+  const url = await engine.sessionUrl("subagent");
+  // The fixture's subagent runs for seconds; give its detail an estimate as a long run would have.
+  await page.route(/\/api\/v\d+\/sessions\/\d+\/[^/?]+$/, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.unlogged = { calls: 1292, cacheReadTokens: 271_964_770, costUsd: 63.24, unpricedCalls: 0, subagents: 35 };
+    await route.fulfill({ response, json: body });
+  });
+  await page.goto(url);
+  const total = await page.getByTestId("session-cost").textContent();
+  const note = page.getByTestId("unlogged");
+  await expect(note).toHaveText(/plus up to ~\$63\.24 unlogged/);
+  await expect(page.getByTestId("session-cost")).toHaveText(total ?? "");
+  await expect(page.getByTestId("session-cost")).not.toHaveText(/63/);
+  await note.getByRole("button", { name: /unlogged/ }).hover();
+  const tip = page.getByTestId("tooltip");
+  await expect(tip).toContainText("(~1,292 calls) of 35 subagents");
+  await expect(tip).toContainText("not in the exact cost");
+  await page.getByTestId("session-cost").hover();
+  await expect(tip).toContainText("Plus up to ~$63.24");
+  await note.getByRole("button", { name: "What is calls the transcript does not show?" }).click();
+  await expect(page.getByTestId("glossary")).toContainText("Calls the transcript does not show");
+});

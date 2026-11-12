@@ -1,5 +1,5 @@
 /** A Session's cost with its subagents: the total, and the lines of its split for a tooltip. */
-import type { SessionSummary } from "@quantext/shared";
+import type { SessionSummary, UnloggedEstimate } from "@quantext/shared";
 import { count, usd } from "../format/format.ts";
 
 /** A subagent's name: its agent name, its title, else the end of its id. */
@@ -35,4 +35,24 @@ export function costSplit(
     lines.push(`· and ${rest.length} more: ${usd(rest.reduce((n, a) => n + a.totals.all.cost.totalUsd, 0))}`);
   }
   return { total, lines };
+}
+
+/**
+ * The note next to a Session's cost on the calls no transcript holds: a short label and its tooltip. "Up to",
+ * because a transcript cannot show whether the summaries were turned off. None when nothing is estimated.
+ */
+export function unloggedNote(u: UnloggedEstimate): { label: string; tip: string } | undefined {
+  if (u.calls === 0) return undefined;
+  const cost = `~${usd(u.costUsd)}`;
+  return {
+    label: `plus up to ${cost} unlogged`,
+    tip: [
+      `Plus up to ${cost} of unlogged progress summaries (~${count(u.calls, "call")}) of ${count(u.subagents, "subagent")}.`,
+      "An estimate, not in the exact cost: Claude Code bills these calls but writes them to no transcript. While a " +
+        "subagent runs, every 30 s it sends the subagent's whole context again for a short summary; the estimate " +
+        "counts the 30 s ticks with new rows and prices each as a cache read of the latest prompt.",
+      ...(u.unpricedCalls > 0 ? [`${u.unpricedCalls} of them have no price and are not in the amount.`] : []),
+      "It is $0 if CLAUDE_CODE_DISABLE_AGENT_PROGRESS_SUMMARIES=1 was set, which a transcript cannot show.",
+    ].join("\n"),
+  };
 }
