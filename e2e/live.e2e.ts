@@ -39,3 +39,20 @@ test("when the leader tab closes, the other tab takes over the stream", async ({
     await engine.stop();
   }
 });
+
+test("an open Session page follows the new Calls as the harness writes them", async ({ page }) => {
+  const half = Math.floor(fixtureLines("basic-tools") / 2);
+  const engine = await startEngine({ scenarios: ["basic-tools"], firstLines: { "basic-tools": half } });
+  try {
+    await page.goto(await engine.sessionUrl("basic-tools"));
+    const position = page.getByTestId("call-position");
+    await expect(position).toBeVisible();
+    const before = await position.textContent();
+    appendRest(engine, "basic-tools", half);
+    await expect(position).not.toHaveText(before ?? "");
+    await expect(position).toContainText("Call 7");
+    await expect(page.getByTestId("context")).toContainText("Context at call 7");
+  } finally {
+    await engine.stop();
+  }
+});

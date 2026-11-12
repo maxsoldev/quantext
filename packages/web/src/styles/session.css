@@ -288,3 +288,6 @@
     padding: var(--space-3) var(--space-4);
   }
 }
+.card {
+  scroll-margin-top: 80px;
+}
