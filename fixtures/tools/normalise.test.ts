@@ -58,6 +58,33 @@ describe("normaliseSession", () => {
     expect(unresolvedTailHashes).toBe(0);
   });
 
+  test("remaps a tail hash of a string prompt that the API received as one text block", () => {
+    const input = jsonl(
+      { type: "user", message: { role: "user", content: `see ${ROOT}/repo/a.txt` } },
+      { type: "api-request", keep: 0, tail: ["cc6bf601be8f19d8c1e95d87761efc433153d93c9ded6afa3b9337d3645f396b"] },
+    );
+    const result = normaliseSession({ "s.jsonl": input }, REPLACE);
+    expect(rowsOf(result.files["s.jsonl"])[1].tail).toEqual([
+      "2e8716c39aec2701b9203b2186ad0ba0dab85ed1c720acec08040f7ed4271b05",
+    ]);
+    expect(result.unresolvedTailHashes).toBe(0);
+  });
+
+  test("remaps the tail hash of an assistant message that is split over rows with one message id", () => {
+    const part = (text: string) => ({ role: "assistant", id: "msg_1", content: [{ type: "text", text }] });
+    const input = jsonl(
+      { type: "assistant", message: part(`in ${ROOT}/repo`) },
+      { type: "user", message: { role: "user", content: "between" } },
+      { type: "assistant", message: part("two") },
+      { type: "api-request", keep: 0, tail: ["a9dcf240e712548ebdc145886051d14e259530e87beb8b3ec7ba9cb5f38da91f"] },
+    );
+    const result = normaliseSession({ "s.jsonl": input }, REPLACE);
+    expect(rowsOf(result.files["s.jsonl"])[3].tail).toEqual([
+      "e9e58af5bfc9aacfd509ad696b58d1899973d220328c8aafb73c207aef49107c",
+    ]);
+    expect(result.unresolvedTailHashes).toBe(0);
+  });
+
   test("rehashes a changed shape and the requests that use it", () => {
     const shape = { system: [{ type: "text", text: `cwd ${ROOT}/repo` }], tools: [] };
     const input = jsonl(

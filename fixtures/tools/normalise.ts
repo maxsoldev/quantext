@@ -26,16 +26,29 @@ export function normaliseSession(input: Record<string, string>, replacements: re
   const hashMap = new Map<string, string>(); // recorded hash -> normalised hash
   const known = new Set<string>(); // every message hash before normalisation
   const changed = new Map<Row, Row>();
+  const remember = ([before, after]: [string, string]) => {
+    known.add(before);
+    if (before !== after) hashMap.set(before, after);
+  };
   for (const { rows } of parsed) {
+    const split = new Map<string, { before: Json[]; after: Json[] }>(); // assistant message id -> content parts
     for (const row of rows ?? []) {
       if (row === undefined) continue;
       const next = mapStrings(row, replace) as Row;
       const isChanged = JSON.stringify(next) !== JSON.stringify(row);
       if (isChanged) changed.set(row, next);
-      for (const [before, after] of contentHashes(row, next, isChanged)) {
-        known.add(before);
-        if (before !== after) hashMap.set(before, after);
+      contentHashes(row, next, isChanged).forEach(remember);
+      const id = row.type === "assistant" && isObject(row.message) ? row.message.id : undefined;
+      if (typeof id === "string" && isObject(row.message) && isObject(next.message)) {
+        const parts = split.get(id) ?? { before: [], after: [] };
+        parts.before.push(...asArray(row.message.content));
+        parts.after.push(...asArray(next.message.content));
+        split.set(id, parts);
       }
+    }
+    // Claude Code writes one assistant row per content block; the API message is all rows of one id, in order.
+    for (const { before, after } of split.values()) {
+      remember([wireHash("assistant", before), wireHash("assistant", after)]);
     }
   }
 
@@ -95,10 +108,23 @@ function contentHashes(row: Row, next: Row, isChanged: boolean): [string, string
     return [[row.shapeHash, isChanged ? (next.shapeHash as string) : row.shapeHash]];
   }
   if ((row.type === "user" || row.type === "assistant") && isObject(row.message) && isObject(next.message)) {
-    const wire = (m: Row) => ({ role: m.role ?? null, content: m.content ?? null });
-    return [[sha256Sorted(wire(row.message)), sha256Sorted(wire(next.message))]];
+    const wire = (m: Row) => wireHash(m.role ?? null, m.content ?? null);
+    // A string prompt reaches the API as one text block.
+    const block = (m: Row) => wireHash(m.role ?? null, [{ type: "text", text: m.content ?? "" }]);
+    const pairs: [string, string][] = [[wire(row.message), wire(next.message)]];
+    if (typeof row.message.content === "string") pairs.push([block(row.message), block(next.message)]);
+    return pairs;
   }
   return [];
+}
+
+/** The hash of a message as the API received it: role and content only. */
+function wireHash(role: Json, content: Json): string {
+  return sha256Sorted({ role, content });
+}
+
+function asArray(value: Json | undefined): Json[] {
+  return Array.isArray(value) ? value : value === undefined ? [] : [value];
 }
 
 /** sha256 of the JSON with object keys sorted at every level: Claude Code's content hash. */
