@@ -14,6 +14,9 @@ are in ADR 19 and ADR 20; the domain terms are in `GLOSSARY.md`. This file is th
   open run).
 - **JSON columns are text.** Read them with `json_each` and `->>`.
 - **Positions and indexes are 0-based.** `calls.idx` is the Call's position in its Session.
+- **Integers are exact up to 2^53.** The engine reads INTEGER columns as JavaScript numbers, which lose precision
+  beyond 2^53: no column of the store comes near (token counts, Call indexes, byte offsets, the change cursor, log
+  ids). Costs are REAL.
 - **Hashes are hex text**, so that they can be read and pasted (binary hashes: see "Later").
 - **Tables with a natural key have no rowid** (`WITHOUT ROWID`); only `blocks` and `media` keep one.
 

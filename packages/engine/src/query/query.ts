@@ -705,14 +705,24 @@ export function createQuery(options: QueryOptions): Query {
       const real = (b: ContextBlock) => b.hash !== undefined;
       const before = new Set((was?.blocks ?? []).filter(real).map(runKey));
       const after = new Set(now.blocks.filter(real).map(runKey));
-      const added = now.blocks.filter((b) => real(b) && !before.has(runKey(b)));
-      const removed = (was?.blocks ?? []).filter((b) => real(b) && !after.has(runKey(b)));
-      const changed = [...added, ...removed].map((b) => b.position);
+      const newHere = now.blocks.filter((b) => real(b) && !before.has(runKey(b)));
+      const goneHere = (was?.blocks ?? []).filter((b) => real(b) && !after.has(runKey(b)));
+      // The same content in both, at another position, moved: it is neither added nor removed.
+      const wasAt = new Map(goneHere.map((b) => [b.hash, b.position]));
+      const moved = newHere.flatMap((b) => {
+        const from = wasAt.get(b.hash);
+        return from === undefined ? [] : [{ ...b, from }];
+      });
+      const movedHashes = new Set(moved.map((b) => b.hash));
+      const added = newHere.filter((b) => !movedHashes.has(b.hash));
+      const removed = goneHere.filter((b) => !movedHashes.has(b.hash));
+      const changed = [...added, ...removed].map((b) => b.position).concat(moved.flatMap((b) => [b.position, b.from]));
       const diff: ContextDiff = {
         ...meta,
         call: index,
         added,
         removed,
+        moved,
         uncached: now.blocks.filter((b) => real(b) && before.has(runKey(b)) && !b.inCachedPrefix),
         cacheReadDrop: Math.max(0, (was?.call.usage?.cacheReadTokens ?? 0) - (now.call.usage?.cacheReadTokens ?? 0)),
       };

@@ -143,7 +143,8 @@ export function printCall(ctx: CallContext, diff: ContextDiff | undefined): stri
       "",
       diff.previous === undefined
         ? "first call of its lane: every block is new"
-        : `against call ${diff.previous}: ${diff.added.length} added, ${diff.removed.length} removed, ` +
+        : `against call ${diff.previous}${diff.modelSwitch === true ? " (another model)" : ""}: ${diff.added.length} added, ` +
+            `${diff.removed.length} removed, ${diff.moved.length} moved, ` +
             `first change at position ${diff.firstChange ?? "-"}; cache read lost ${count(diff.cacheReadDrop)}; ` +
             `${diff.uncached.length} kept blocks written to the cache again`,
     );

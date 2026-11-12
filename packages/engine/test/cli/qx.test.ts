@@ -86,7 +86,7 @@ describe("qx", () => {
     expect(call.out).toMatch(/^call 4 of 00000000-0000-4000-8000-000000000005 \(lane /);
     expect(call.out).toMatch(/\n +13 +messages +summary +738 +estimate/);
     expect(call.out).toContain(
-      "against call 2: 8 added, 8 removed, first change at position 13; cache read lost 3,812",
+      "against call 2: 7 added, 7 removed, 1 moved, first change at position 13; cache read lost 3,812",
     );
     const json = JSON.parse(
       (await qx("call", ...data, COMPACTION, "1", "--lane", "eu.anthropic.claude-opus-5-5|sdk", "--json")).out,
