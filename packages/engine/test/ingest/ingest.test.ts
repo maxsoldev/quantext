@@ -1,10 +1,13 @@
 import {
   appendFileSync,
   chmodSync,
+  mkdirSync,
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
+  symlinkSync,
   truncateSync,
   writeFileSync,
 } from "node:fs";
@@ -467,6 +470,34 @@ describe("errors", () => {
     expect(s.store.report().errors).toEqual([]);
     expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
   });
+
+  test.skipIf(process.getuid?.() === 0)(
+    "symbolic links (not followed) and folders that cannot be read are kept in the report until a scan finds them gone",
+    async () => {
+      const s = await setup();
+      const files = copyScenario(s.root, "basic-tools");
+      const link = join(s.root, "projects", "-linked", "00000000-0000-4000-8000-00000000aaaa.jsonl");
+      writeText(join(s.root, "elsewhere.jsonl"), "");
+      mkdirSync(join(link, ".."), { recursive: true });
+      symlinkSync(join(s.root, "elsewhere.jsonl"), link);
+      const closed = join(s.root, "projects", "-closed");
+      mkdirSync(closed);
+      chmodSync(closed, 0o000);
+      onCleanup(() => chmodSync(closed, 0o755));
+      const summary = await s.ingest.ingestAll();
+      const scan = [
+        { path: closed, issue: expect.stringMatching(/EACCES/) },
+        { path: link, issue: "a symbolic link; not followed" },
+      ];
+      expect(s.store.report().scan).toEqual(scan);
+      expect(summary.errors).toEqual([{ path: closed, error: expect.stringMatching(/EACCES/) }]);
+      chmodSync(closed, 0o755);
+      rmSync(link);
+      await s.ingest.ingestAll();
+      expect(s.store.report().scan).toEqual([]);
+      expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
+    },
+  );
 
   test("unknown row types are counted in the report", async () => {
     const s = await setup();

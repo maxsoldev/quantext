@@ -25,10 +25,14 @@ export interface PathError {
   error: string;
 }
 
-/** Every log under `<root>/projects`, sorted by path. A missing projects folder is no error: there is nothing yet. */
-export async function discoverLogs(root: string): Promise<{ logs: LogFiles[]; errors: PathError[] }> {
+/**
+ * Every log under `<root>/projects`, sorted by path, the folders that could not be read, and the symbolic links
+ * that were not followed. A missing projects folder is no error: there is nothing yet.
+ */
+export async function discoverLogs(root: string): Promise<{ logs: LogFiles[]; errors: PathError[]; links: string[] }> {
   const mains = new Set<string>();
   const errors: PathError[] = [];
+  const links: string[] = [];
   const walk = async (dir: string): Promise<void> => {
     let entries: Dirent[];
     try {
@@ -43,6 +47,7 @@ export async function discoverLogs(root: string): Promise<{ logs: LogFiles[]; er
       const path = join(dir, entry.name);
       if (entry.isDirectory()) await walk(path);
       else if (entry.isFile() && entry.name.endsWith(".jsonl")) mains.add(logOf(path));
+      else if (entry.isSymbolicLink()) links.push(path); // not followed: it may lead out of the folder, or loop
     }
   };
   await walk(join(root, "projects"));
@@ -52,7 +57,7 @@ export async function discoverLogs(root: string): Promise<{ logs: LogFiles[]; er
     logs.push(found.files);
     errors.push(...found.errors);
   }
-  return { logs, errors };
+  return { logs, errors, links };
 }
 
 /**

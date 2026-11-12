@@ -205,6 +205,11 @@ CREATE TABLE report_kinds (
   PRIMARY KEY (log, status, kind)
 ) STRICT, WITHOUT ROWID;
 
+CREATE TABLE scan_issues (
+  path TEXT PRIMARY KEY,
+  issue TEXT NOT NULL
+) STRICT, WITHOUT ROWID;
+
 CREATE TABLE report_unreadable (
   log INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
   seq INTEGER NOT NULL,

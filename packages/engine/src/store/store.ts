@@ -31,6 +31,8 @@ export interface StoreReport {
   errors: { path: string; error: string }[];
   /** Files whose last bytes are not a complete line yet: held back until the newline comes. */
   files: { path: string; pendingBytes: number }[];
+  /** What the last scan of the transcript folder could not read or did not follow (folders, symbolic links). */
+  scan: { path: string; issue: string }[];
   /** Sessions by whether the log holds their requests (`absent`: usage only, the context cannot be rebuilt). */
   requestLogs: { requestLog: RequestLog; sessions: number }[];
 }
@@ -44,6 +46,8 @@ export interface Store {
   log(path: string, harness: string, codec: StoreCodec): LogStore;
   /** What could not be read, over all logs: the report rows, file errors, and lines still being written. */
   report(): StoreReport;
+  /** Replace what the last full scan of the transcript folder found it could not read or did not follow. */
+  setScanIssues(issues: readonly { path: string; issue: string }[]): void;
   /** The paths of every log in the store, oldest first. */
   logs(): string[];
   close(): void;
@@ -94,11 +98,23 @@ export async function openStore(options: OpenStoreOptions): Promise<Store> {
           )
           .all()
           .map((r) => ({ path: String(r.path), pendingBytes: Number(r.pending) })),
+        scan: sql
+          .get("SELECT path, issue FROM scan_issues ORDER BY path")
+          .all()
+          .map((r) => ({ path: String(r.path), issue: String(r.issue) })),
         requestLogs: sql
           .get("SELECT request_log, count(*) AS n FROM sessions GROUP BY request_log ORDER BY request_log")
           .all()
           .map((r) => ({ requestLog: String(r.request_log) as RequestLog, sessions: Number(r.n) })),
       }),
+      setScanIssues(issues) {
+        opened.transaction(() => {
+          sql.get("DELETE FROM scan_issues").run();
+          for (const { path: at, issue } of issues) {
+            sql.get("INSERT INTO scan_issues (path, issue) VALUES (?, ?) ON CONFLICT DO NOTHING").run(at, issue);
+          }
+        });
+      },
       logs: () =>
         sql
           .get("SELECT path FROM logs ORDER BY id")

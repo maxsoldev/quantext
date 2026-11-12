@@ -160,6 +160,10 @@ export function createIngest(options: IngestOptions): Ingest {
     ingestAll: (run = {}) =>
       serial(async () => {
         const found = await discoverLogs(root);
+        store.setScanIssues([
+          ...found.errors.map((e) => ({ path: e.path, issue: e.error })),
+          ...found.links.map((path) => ({ path, issue: "a symbolic link; not followed" })),
+        ]);
         return pass(found.logs, found.errors, run.signal);
       }),
     ingestPaths: (paths, run = {}) =>
