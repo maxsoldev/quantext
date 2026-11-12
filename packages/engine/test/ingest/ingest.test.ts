@@ -357,6 +357,29 @@ describe("subagents", () => {
     expect(graph.sessions).toHaveLength(2);
   });
 
+  test("of a workflow (`subagents/workflows/<id>/`) are subagents of the session, not logs of their own", async () => {
+    const s = await setup();
+    const files = layout(s.root, "subagent");
+    writeText(files.main, readFileSync(files.source));
+    const agent = files.subagents[0];
+    if (agent === undefined || agent.sourceMeta === undefined) throw new Error("the subagent scenario has a subagent");
+    const dir = join(files.main.replace(/\.jsonl$/, ""), "subagents", "workflows", "wf-1");
+    const name = agent.path.split("/").pop() ?? "";
+    writeText(join(dir, name), readFileSync(agent.source));
+    writeText(join(dir, name.replace(/\.jsonl$/, ".meta.json")), readFileSync(agent.sourceMeta));
+    await s.ingest.ingestAll();
+    expect(s.store.logs()).toEqual([files.main]);
+    const expected = expectedGraph(readFileSync(files.source), [
+      {
+        name: `workflows/wf-1/${name.replace(/\.jsonl$/, "")}`,
+        text: readFileSync(agent.source, "utf8"),
+        meta: readFileSync(agent.sourceMeta, "utf8"),
+      },
+    ]);
+    expect(graphOf(s.store, files.main)).toEqual(expected);
+    expect(expected.sessions.find((x) => x.parentId !== undefined)).toBeDefined();
+  });
+
   test("and the main transcript growing together give the same graph as one read", async () => {
     const s = await setup();
     const files = layout(s.root, "subagent");
