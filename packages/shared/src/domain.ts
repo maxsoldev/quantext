@@ -119,7 +119,8 @@ export interface Call {
 
 /**
  * A flag on a Call. `no-request`: the harness version logs no request, only the response's usage, so the Call has
- * exact usage and cost but no Blocks. `unresolved-request`: part of the request is not in the log, so the rebuilt input is
+ * exact usage and cost but no Blocks. `missing-message`: a message of the request is not in the log; a gap Block
+ * stands in its place and takes the tokens the other Blocks leave. `unresolved-request`: part of the request is not in the log, so the rebuilt input is
  * incomplete. `no-usage`: the log holds no Usage, so the Call has no exact total. `unreconciled-tokens`: the exact
  * change from the previous Call does not fit the new Blocks, so the whole total is split by estimate. `no-price`:
  * there is no list price for the model, so the Call has no cost. `price-assumption`: the cost rests on an
@@ -129,6 +130,7 @@ export interface Call {
 export interface CallIssue {
   kind:
     | "no-request"
+    | "missing-message"
     | "unresolved-request"
     | "no-usage"
     | "unreconciled-tokens"
@@ -153,7 +155,8 @@ export type BlockKind =
   | "tool-result"
   | "image"
   | "document"
-  | "summary";
+  | "summary"
+  | "gap";
 
 /** Where a Block's content came from, as far as the log tells. */
 export interface BlockSource {

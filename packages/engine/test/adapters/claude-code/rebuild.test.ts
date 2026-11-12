@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { parseClaudeCodeSession } from "../../../src/adapters/claude-code/index.ts";
 import { mainRows, scenarios, transcriptsOf } from "../../fixtures.ts";
-import { blocksAt, runsAt } from "./helpers.ts";
+import { blocksAt, inputTotal, runsAt, tokensOf } from "./helpers.ts";
 
 describe.each(scenarios())("rebuild of $version/$name", ({ name }) => {
   const graph = parseClaudeCodeSession(transcriptsOf(name));
@@ -50,19 +50,27 @@ describe("rebuild of split and joined messages", () => {
 });
 
 describe("rebuild with a part missing from the log", () => {
-  test("flags the Call with the hash of a message that is not in the log", () => {
+  test("puts a gap Block where a message is missing, flags the Call, and later Calls rebuild around it", () => {
     const { main } = transcriptsOf("basic-tools");
-    const blob = "57f8db8649716b6b1a1f14bfb320331edaae432d80df2b5b26ed801af4679fa3";
+    const blob = "53224856c0db31604feaa203061d5728a761ef39f55ee5e221bf1a4e42aa09dd"; // first in call 5
     const without = main
       .split("\n")
       .filter((line) => !line.includes(`"type":"api-request-blob"`) || !line.includes(blob))
       .join("\n");
     const graph = parseClaudeCodeSession({ main: without, subagents: [] });
-    expect(graph.calls[7]?.issues).toEqual([
-      { kind: "unresolved-request", detail: `message ${blob} is not in the log` },
-    ]);
-    expect(graph.calls[6]?.issues).toEqual([]);
-    expect(blocksAt(graph, graph.calls[7])).toEqual([]);
+    const call = graph.calls[5];
+    expect(call?.issues).toEqual([{ kind: "missing-message", detail: `message ${blob} is not in the log` }]);
+    expect(graph.calls[4]?.issues).toEqual([]);
+    const gaps = blocksAt(graph, call).filter((b) => b.kind === "gap");
+    expect(gaps).toHaveLength(1);
+    expect(tokensOf(runsAt(graph, call)) + (call?.framingTokens ?? 0)).toBe(inputTotal(call));
+    expect(gaps[0]?.text).toBe(`Message ${blob} is not in the log`);
+    expect(graph.calls.slice(6)).toHaveLength(2);
+    for (const later of graph.calls.slice(6)) {
+      expect(later.issues).toEqual([]);
+      expect(blocksAt(graph, later).filter((b) => b.kind === "gap")).toHaveLength(1);
+      expect(tokensOf(runsAt(graph, later)) + later.framingTokens).toBe(inputTotal(later));
+    }
   });
 
   test("resolves a request whose base is an earlier call than the one before", () => {

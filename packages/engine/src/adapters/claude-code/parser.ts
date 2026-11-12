@@ -173,6 +173,13 @@ class Rows {
     const ids = Object.keys(this.state.waiting);
     if (ids.length <= MAX_WAITING) return;
     const oldest = ids[0] ?? "";
+    const spec = this.store.spec(oldest);
+    const transcript = transcriptOf(this.state, get(this.state.waiting, oldest) ?? this.name);
+    if (spec !== undefined && !this.missing(spec, transcript).some((i) => i.kind === "unresolved-request")) {
+      put(this.state.gapped, oldest, 1); // it waits only for messages: split it with gaps
+      this.recheck();
+      return;
+    }
     delete this.state.waiting[oldest];
     const call = this.store.call(oldest);
     if (call === undefined) return;
@@ -191,9 +198,15 @@ class Rows {
     for (const call of ids) {
       const spec = this.store.spec(call.id);
       const transcript = get(this.state.waiting, call.id) ?? this.name;
-      if (spec === undefined || this.missing(spec, transcriptOf(this.state, transcript)).length > 0) continue;
+      if (spec === undefined) continue;
+      const missing = this.missing(spec, transcriptOf(this.state, transcript));
+      if (this.blocked(call.id, missing)) continue;
       delete this.state.waiting[call.id];
-      call.issues = call.issues.filter((i) => i.kind !== "unresolved-request");
+      delete this.state.gapped[call.id];
+      call.issues = [
+        ...call.issues.filter((i) => i.kind !== "unresolved-request" && i.kind !== "missing-message"),
+        ...missing,
+      ];
       this.changes().calls.add(call.id);
       if (call.usage === undefined) {
         call.issues.push({ kind: "no-usage", detail: "the log has no response with usage for this call yet" });
@@ -307,9 +320,10 @@ class Rows {
     this.requestLog(session, "r");
     call.params = paramsOf(params);
     if (shapeHash !== undefined) call.shapeHash = shapeHash;
+    this.settle(spec);
     const missing = this.missing(spec);
-    call.issues.push(...missing.map((detail): CallIssue => ({ kind: "unresolved-request", detail })));
-    if (missing.length === 0) {
+    call.issues.push(...missing);
+    if (!this.blocked(id, missing)) {
       call.issues.push({ kind: "no-usage", detail: "the log has no response with usage for this call yet" });
       put(this.state.pending, id, 1);
     } else {
@@ -339,25 +353,58 @@ class Rows {
     return put(this.state.calls, id, call);
   }
 
-  /** What of a request is not in the log: its base, its shape, the messages of its tail. */
-  private missing(spec: CallSpec, transcript: TranscriptState = this.t): string[] {
-    const missing: string[] = [];
+  /**
+   * What of a request is not in the log. A missing base or shape is `unresolved-request`: the Call cannot be
+   * split. A missing message is `missing-message`: once the Call stops waiting for it, a gap Block takes its place.
+   */
+  private missing(spec: CallSpec, transcript: TranscriptState = this.t): CallIssue[] {
+    const missing: CallIssue[] = [];
+    const unresolved = (detail: string) => missing.push({ kind: "unresolved-request", detail });
     const base = spec.baseId === undefined ? undefined : this.store.spec(spec.baseId);
-    if (spec.baseId !== undefined && base === undefined) missing.push(`base call ${spec.baseId} is not in the log`);
-    if (spec.keep > (base?.length ?? 0)) missing.push(`keep ${spec.keep} is more than the base call's messages`);
-    if (
-      spec.baseId !== undefined &&
-      (this.store.call(spec.baseId)?.issues ?? []).some((i) => i.kind === "unresolved-request")
-    ) {
-      missing.push(`base call ${spec.baseId} is incomplete`);
-    }
+    if (spec.baseId !== undefined && base === undefined) unresolved(`base call ${spec.baseId} is not in the log`);
+    if (spec.keep > (base?.length ?? 0)) unresolved(`keep ${spec.keep} is more than the base call's messages`);
+    if (spec.baseId !== undefined && this.incomplete(spec.baseId)) unresolved(`base call ${spec.baseId} is incomplete`);
     if (spec.shapeHash === undefined || this.store.shape(spec.shapeHash) === undefined) {
-      missing.push(`shape ${spec.shapeHash ?? "(none)"} is not in the log`);
+      unresolved(`shape ${spec.shapeHash ?? "(none)"} is not in the log`);
     }
     for (const hash of spec.tail) {
-      if (resolve(this.store, transcript, hash) === undefined) missing.push(`message ${hash} is not in the log`);
+      if (resolve(this.store, transcript, hash) === undefined) {
+        missing.push({ kind: "missing-message", detail: `message ${hash} is not in the log` });
+      }
     }
     return missing;
+  }
+
+  /** A base Call that cannot be split yet: part of its request is not resolved, or it still waits for a message. */
+  private incomplete(id: string): boolean {
+    const issues = this.store.call(id)?.issues ?? [];
+    if (issues.some((i) => i.kind === "unresolved-request")) return true;
+    return get(this.state.waiting, id) !== undefined && get(this.state.gapped, id) === undefined;
+  }
+
+  /** The Call must wait: part of its request is unresolved, or it has missing messages it still waits for. */
+  private blocked(id: string, missing: readonly CallIssue[]): boolean {
+    if (missing.some((i) => i.kind === "unresolved-request")) return true;
+    return missing.length > 0 && get(this.state.gapped, id) === undefined;
+  }
+
+  /**
+   * A new request in the lane (or one that builds on a waiting Call) means the log has moved on: Calls that wait
+   * only for messages stop waiting, and are split with gap Blocks, so later Calls can build on them.
+   */
+  private settle(spec: CallSpec): void {
+    let settled = false;
+    for (const [id, transcript] of Object.entries(this.state.waiting)) {
+      const waiting = this.store.spec(id);
+      if (waiting === undefined || waiting.sessionId !== spec.sessionId) continue;
+      if (waiting.lane !== spec.lane && id !== spec.baseId) continue;
+      if (this.missing(waiting, transcriptOf(this.state, transcript)).some((i) => i.kind === "unresolved-request")) {
+        continue;
+      }
+      put(this.state.gapped, id, 1);
+      settled = true;
+    }
+    if (settled) this.recheck();
   }
 
   private assistant(row: Row, message: JsonObject, session: Session | undefined): void {
@@ -665,6 +712,7 @@ function frontier(state: ParserState): ParserState {
     toolSources: {},
     compactions: {},
     report: { unknownRecords: [], unreadable: [] },
+    gapped: pick(state.gapped, new Set(Object.keys(state.waiting))),
     specs: pick(state.specs, calls),
     calls: pick(state.calls, calls),
     responses: pick(state.responses, calls),

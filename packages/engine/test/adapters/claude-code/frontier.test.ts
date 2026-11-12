@@ -69,3 +69,60 @@ describe("the parser's frontier", () => {
     expect(parser.snapshot().transcripts.main?.userRun).toHaveLength(1);
   });
 });
+
+describe("a message missing from the log", () => {
+  const prompt: Json[] = [{ type: "text", text: "Go." }];
+  const shapeRow = line({ type: "api-request-shape", sessionId: S, shapeHash, shape });
+  const user = line({ type: "user", sessionId: S, message: { role: "user", content: prompt } });
+  const step = (i: number, keep: number, tail: string[]) =>
+    line({
+      type: "api-request",
+      sessionId: S,
+      id: `c${i}`,
+      shapeHash,
+      params: { model: "claude-opus-5-5" },
+      ...(i === 0 ? {} : { base: `c${i - 1}` }),
+      keep,
+      tail,
+      cacheControl: [],
+    }) +
+    line({
+      type: "assistant",
+      sessionId: S,
+      requestRef: `c${i}`,
+      message: {
+        id: `msg_${i}`,
+        role: "assistant",
+        content: [{ type: "text", text: `Reply ${i}.` }],
+        usage: {
+          input_tokens: 100 + 40 * i,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+          output_tokens: 3,
+        },
+      },
+    });
+
+  test("does not make the rest of the lane unresolved: one gap, one flagged Call", () => {
+    let rows = shapeRow + user + step(0, 0, [wire("user", prompt)]) + step(1, 1, ["not-in-the-log"]);
+    let keep = 2;
+    for (let i = 2; i < 40; i++) {
+      rows += step(i, keep, [wire("assistant", [{ type: "text", text: `Reply ${i - 1}.` }])]);
+      keep++;
+    }
+    const graph = parseClaudeCodeSession({ main: rows, subagents: [] });
+    expect(graph.calls).toHaveLength(40);
+    expect(graph.calls.flatMap((c) => c.issues.map((i) => `${c.id} ${i.kind}`))).toEqual(["c1 missing-message"]);
+    expect(graph.calls.every((c) => c.blockCount !== undefined)).toBe(true);
+    expect(graph.blocks.filter((b) => b.kind === "gap")).toHaveLength(1);
+    const store = new MemoryStore();
+    let parser = createClaudeCodeParser(undefined, { lookup: store });
+    for (const row of rows.split("\n").filter((l) => l !== "")) {
+      store.apply(parser.push(`${row}\n`));
+      parser = createClaudeCodeParser(JSON.parse(JSON.stringify(parser.snapshot())), { lookup: store });
+    }
+    const restored = store.graph();
+    expect(restored.calls.flatMap((c) => c.issues.map((i) => `${c.id} ${i.kind}`))).toEqual(["c1 missing-message"]);
+    expect(restored.callBlocks.length).toBe(graph.callBlocks.length);
+  });
+});

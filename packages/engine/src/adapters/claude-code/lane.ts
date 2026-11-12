@@ -180,7 +180,8 @@ function warmLane(ctx: SplitContext, lane: Lane): void {
     const index = contentIndex.get(message) ?? 0;
     lane.contentOf.push(deferred ? -1 : index);
     if (!deferred) contentIndex.set(message, index + 1);
-    lane.estimates.push(block === undefined ? { tokens: 0, method: "unknown" } : ctx.estimator(block));
+    const known = block !== undefined && block.kind !== "gap";
+    lane.estimates.push(known ? ctx.estimator(block) : { tokens: 0, method: "unknown" });
     lane.reasoning.push(block?.kind === "reasoning");
     lane.runs.push(structuredClone(run));
     setShare(lane, p, {
@@ -248,7 +249,8 @@ function freshEntries(
     for (const [i, ref] of shape.refs.entries()) out.push({ ref, section: shape.sections[i] ?? "system", message: -1 });
   }
   for (let m = from; m < messages.length; m++) {
-    for (const ref of classifier.message(messages[m] ?? "") ?? []) {
+    const hash = messages[m] ?? "";
+    for (const ref of classifier.message(hash) ?? [classifier.gap(hash)]) {
       out.push({ ref, section: "messages", message: m });
       for (const tool of ref.references) {
         const schema = get(shape.deferred, tool);

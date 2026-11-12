@@ -34,6 +34,8 @@ export interface ParserState {
   pending: Record<string, 1>;
   /** Calls whose request is not complete yet, with their transcript: a later row may bring the missing part. */
   waiting: Record<string, string>;
+  /** Waiting Calls that no longer wait for their missing messages: they are split with gap Blocks. */
+  gapped: Record<string, 1>;
   lanes: Record<string, Lane>;
   /** The size of each group of Blocks split from one exact total. */
   groupSizes: Record<string, number>;
@@ -154,6 +156,7 @@ export function emptyState(): ParserState {
     nextIndex: {},
     pending: {},
     waiting: {},
+    gapped: {},
     lanes: {},
     groupSizes: {},
     toolCalls: {},
