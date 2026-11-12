@@ -6,6 +6,7 @@
  */
 import { posix } from "node:path";
 import { parseAst } from "rolldown/parseAst";
+import { checkNode, importsOf } from "./egress-rules.ts";
 import type { Node, Parsed, Val, Vals } from "./resolve.ts";
 import { calleeName, children, index, lineOf, resolve } from "./resolve.ts";
 
@@ -91,7 +92,10 @@ function isExternal(url: string, policy: EgressPolicy): boolean {
 }
 
 function checkCode(p: Parsed, ctx: ReturnType<typeof index>, policy: EgressPolicy): void {
+  const imports = importsOf(p.program);
+  const servers = new Set<string>();
   const visit = (node: Node) => {
+    checkNode(node, p, ctx, policy, imports, servers);
     for (const child of children(node)) visit(child); // children first: a URL argument before its call
     if (node.type === "Literal" && typeof node.value === "string") checkString(node.value, node.start, p, policy);
     if (node.type === "TemplateElement") checkString(String(node.value.cooked ?? ""), node.start, p, policy);

@@ -103,9 +103,9 @@ function functionName(fn: Node, ctx: Index): string | undefined {
   return undefined;
 }
 
-function unwrap(node: Node): Node {
+export function unwrap(node: Node): Node {
   let n = node;
-  while (WRAPPERS.has(n.type)) n = n.expression;
+  while (WRAPPERS.has(n.type)) n = n.type === "AwaitExpression" ? n.argument : n.expression;
   return n;
 }
 
@@ -215,19 +215,53 @@ function returnsOf(fn: Node): (Node | null)[] {
 
 /** The values of identifier `id`: a parameter of an enclosing function, or a declaration or assignment in scope. */
 function binding(id: Node, p: Parsed, ctx: Index, depth: number): Vals {
+  const found = lookup(id, ctx);
+  if (found === undefined) return undefined;
+  if ("fn" in found) return parameter(found.fn, found.i, ctx, depth);
+  let out: Vals = [];
+  for (const d of found.decls) out = union(out, d === null ? undefined : declaredValues(d, p, ctx, depth));
+  return out;
+}
+
+type Binding = { fn: Node; i: number } | { decls: (Declared | null)[] };
+
+/** Where identifier `id` is bound: the innermost function parameter or scope that declares it. */
+function lookup(id: Node, ctx: Index): Binding | undefined {
   for (let scope = ctx.parents.get(id); scope !== undefined; scope = ctx.parents.get(scope)) {
     if (FUNCTIONS.has(scope.type)) {
       const i = (scope.params as Node[]).findIndex((param) => paramName(param) === id.name);
-      if (i !== -1) return parameter(scope, i, ctx, depth);
+      if (i !== -1) return { fn: scope, i };
     }
     if (!FUNCTIONS.has(scope.type) && scope.type !== "Program") continue;
-    const found = declarations(FUNCTIONS.has(scope.type) ? scope.body : scope, id.name);
-    if (found.length === 0) continue;
-    let out: Vals = [];
-    for (const d of found) out = union(out, d === null ? undefined : declaredValues(d, p, ctx, depth));
-    return out;
+    const decls = declarations(FUNCTIONS.has(scope.type) ? scope.body : scope, id.name);
+    if (decls.length > 0) return { decls };
   }
   return undefined;
+}
+
+/**
+ * The values of `a` and `b` as pairs. When both are destructured from one array (`const [cmd, args] = f()`),
+ * each pair comes from the same array, so a command is never matched with another command's arguments.
+ */
+export function resolvePair(a: Node, b: Node, p: Parsed, ctx: Index): [Vals, Vals][] {
+  const da = a.type === "Identifier" ? lookup(a, ctx) : undefined;
+  const db = b.type === "Identifier" ? lookup(b, ctx) : undefined;
+  const one = (d: Binding | undefined) => (d !== undefined && "decls" in d && d.decls.length === 1 ? d.decls[0] : null);
+  const [x, y] = [one(da), one(db)];
+  if (x?.at === undefined || y?.at === undefined || x.init !== y.init || x.init === "undefined") {
+    return [[resolve(a, p, ctx), resolve(b, p, ctx)]];
+  }
+  const vals = resolve(x.init, p, ctx);
+  if (vals === undefined) return [[undefined, undefined]];
+  const item = (v: Val, at: number): Vals =>
+    typeof v === "object" && "items" in v
+      ? at < v.items.length
+        ? v.items[at]
+        : v.open
+          ? undefined
+          : ["undefined"]
+      : undefined;
+  return vals.map((v) => [item(v, x.at as number), item(v, y.at as number)]);
 }
 
 type Declared = { init: Node | "undefined"; at?: number };

@@ -113,10 +113,164 @@ describe("fetch, EventSource, WebSocket", () => {
     ]);
   });
 
+  test("an awaited value is followed", () => {
+    expect(js('async function base() { return "/api/"; }\nfetch(`${await base()}x`);\n')).toEqual([]);
+  });
+
   test("XMLHttpRequest and sendBeacon are always findings", () => {
     expect(js('const x = new XMLHttpRequest();\nnavigator.sendBeacon("/api/x", d);\n')).toEqual([
       "engine/engine.js:1 xhr",
       "engine/engine.js:2 beacon",
     ]);
+  });
+});
+
+describe("Node and Bun network modules", () => {
+  test("a network module is a finding, however it is loaded", () => {
+    const text = [
+      'import { connect } from "node:net";',
+      'import https from "https";',
+      'const d = await import("node:dgram");',
+      'const t = require("tls");',
+      'const dns = process.getBuiltinModule("node:dns/promises");',
+      'export * from "node:http2";',
+    ].join("\n");
+    expect(js(text)).toEqual([1, 2, 3, 4, 5, 6].map((n) => `engine/engine.js:${n} module`));
+  });
+
+  test("built-ins without network access, relative chunks and type imports are fine", () => {
+    const text =
+      'import { readFileSync } from "node:fs";\nimport { Database } from "bun:sqlite";\nimport type { A } from "x";\nconst m = await import("./engine-node-driver.js");\n';
+    expect(check({ "engine/engine.ts": text })).toEqual([]);
+  });
+
+  test("a module name that is not a literal is a finding", () => {
+    expect(js("const m = await import(name);\nconst r = require(other);\n")).toEqual([
+      "engine/engine.js:1 dynamic",
+      "engine/engine.js:2 dynamic",
+    ]);
+  });
+
+  test("a package import is a finding: shipped code is bundled; the mod may import claude-code", () => {
+    expect(js('import React from "react";\n')).toEqual(["engine/engine.js:1 package"]);
+    expect(check({ "src/live.ts": 'import { atom } from "claude-code";\n' })).toEqual([]);
+  });
+
+  test("node:http may request only loopback hosts", () => {
+    const ok = 'import { request as r } from "node:http";\nr({ host: "127.0.0.1", port, path: "/health" });\n';
+    expect(js(ok)).toEqual([]);
+    expect(js('import { request } from "node:http";\nrequest({ hostname: "example.com" });\nrequest(opts);\n')).toEqual(
+      ["engine/engine.js:2 http-client", "engine/engine.js:3 http-client"],
+    );
+    expect(js('import * as http from "node:http";\nhttp.get(`http://${h}/`);\n')).toEqual([
+      "engine/engine.js:2 http-client",
+    ]);
+  });
+
+  test("a server from node:http must listen on loopback", () => {
+    const head = 'import { createServer } from "node:http";\nconst server = createServer(handle);\n';
+    expect(js(`${head}server.listen(0, "127.0.0.1", ready);\n`)).toEqual([]);
+    expect(js(`${head}server.listen(4747);\nserver.listen({ port: 0, host: "0.0.0.0" });\n`)).toEqual([
+      "engine/engine.js:3 listen",
+      "engine/engine.js:4 listen",
+    ]);
+  });
+
+  test("Bun's network and process APIs and native bindings are findings", () => {
+    expect(js('Bun.connect({ hostname: "x" });\nBun.serve({ fetch });\nprocess.binding("tcp_wrap");\n')).toEqual([
+      "engine/engine.js:1 bun",
+      "engine/engine.js:2 bun",
+      "engine/engine.js:3 native",
+    ]);
+  });
+});
+
+describe("child processes", () => {
+  const policy: EgressPolicy = {
+    ...POLICY,
+    commands: [
+      { argv: ["open", null], reason: "opens the viewer" },
+      { argv: ["xdg-open", null], reason: "opens the viewer" },
+      { argv: ["rundll32", "url.dll,FileProtocolHandler", null], reason: "opens the viewer" },
+      { argv: [["node", "bun"], "--version"], reason: "finds a runtime" },
+    ],
+  };
+  const cp = (text: string) =>
+    check({ "engine/engine.js": `import { exec, execFile, spawn } from "node:child_process";\n${text}` }, policy);
+
+  test("the runtime itself may run a shipped script, but not evaluate code", () => {
+    expect(cp("spawn(process.execPath, [...flags, SQL_CHILD, String(ms)]);\n")).toEqual([]);
+    expect(cp('spawn(process.execPath, ["-e", code]);\n')).toEqual(["engine/engine.js:2 process"]);
+  });
+
+  test("an allowlisted command passes; any other, a shell, or an unknown one is a finding", () => {
+    expect(cp('execFile("open", [url], { shell: false });\n')).toEqual([]);
+    expect(
+      cp('execFile("curl", [url]);\nexec("ls");\nspawn(cmd, []);\nspawn("open", [u], { shell: true });\n'),
+    ).toEqual([
+      "engine/engine.js:2 process",
+      "engine/engine.js:3 process",
+      "engine/engine.js:4 process",
+      "engine/engine.js:5 process",
+    ]);
+  });
+
+  test("a command and its arguments destructured from one call are checked together", () => {
+    const opener = [
+      "function openerFor(platform, url) {",
+      '  if (platform === "darwin") return ["open", [url]];',
+      '  if (platform === "win32") return ["rundll32", ["url.dll,FileProtocolHandler", url]];',
+      '  return ["xdg-open", [url]];',
+      "}",
+      "const [command, args] = openerFor(process.platform, url);",
+      "execFile(command, args, { shell: false });",
+    ].join("\n");
+    expect(cp(opener)).toEqual([]);
+  });
+});
+
+describe("the mod's $ API", () => {
+  const policy: EgressPolicy = {
+    ...POLICY,
+    commands: [
+      { argv: [["node", "bun"], "--version"], reason: "finds a runtime" },
+      { argv: [["open", "xdg-open"], null], reason: "opens the viewer" },
+    ],
+  };
+  const mod = (text: string) => check({ "src/viewer.ts": text }, policy);
+
+  test("$.process.run is checked through its helper's call sites", () => {
+    const helper =
+      "async function tryRun($: E, argv: string[]) { return await $.process.run(argv, { timeoutMs: 5 }); }\n";
+    const opener = 'const opener = os === "Darwin" ? "open" : os === "Linux" ? "xdg-open" : undefined;\n';
+    expect(mod(`${helper}${opener}await tryRun($, ["node", "--version"]);\nawait tryRun($, [opener, url]);\n`)).toEqual(
+      [],
+    );
+    expect(mod(`${helper}await tryRun($, ["curl", url]);\n`)).toEqual(["src/viewer.ts:1 process"]);
+  });
+
+  test("an argument from a function that may return undefined matches its rule", () => {
+    const text = [
+      'async function findRuntime() { if (a) return "node"; if (b) return "bun"; return undefined; }',
+      "const runtime = await findRuntime();",
+      'await $.process.run(["node", runtime === undefined ? "--version" : "--version"]);',
+      'await $.process.run([runtime, "--version"]);',
+    ].join("\n");
+    expect(mod(text)).toEqual([]);
+  });
+
+  test("APIs that reach the network or the model are findings", () => {
+    const text =
+      '$.telemetry.log({ to: "anthropic" });\nawait $.mcp.call("s", "t", {});\n$.audio.play(u);\nconst { http } = $;\n';
+    expect(mod(text)).toEqual([
+      "src/viewer.ts:1 mod-api",
+      "src/viewer.ts:2 mod-api",
+      "src/viewer.ts:3 mod-api",
+      "src/viewer.ts:4 mod-api",
+    ]);
+  });
+
+  test("$ in a bundle is a minified name, not the mod API", () => {
+    expect(js("$.telemetry.log(x);\n")).toEqual([]);
   });
 });
