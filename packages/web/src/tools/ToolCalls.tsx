@@ -58,6 +58,12 @@ export function ToolCalls({
     [data.value, sort],
   );
   const [open, setOpen] = useState<ToolRow | null>(null);
+  const wanted = route.tool;
+  useEffect(() => {
+    // A link from a response names the tool call to open.
+    const row = wanted === undefined ? undefined : rows.find((r) => r.call.id === wanted);
+    if (row) setOpen(row);
+  }, [wanted, rows]);
   if (data.state === "error" && !data.value) {
     return (
       <p className="error" role="alert">

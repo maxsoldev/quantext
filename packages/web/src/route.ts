@@ -1,6 +1,6 @@
 /**
  * The viewer's pages as URLs: `/` (Sessions, filters in the query), `/s/<log>/<id>?call=<n>` (the context view; n is the Call's 1-based number),
- * `/s/<log>/<id>/tools?sort=<key>`, `/s/<log>/<id>/compactions`, and `/memory?project=<project>&file=<name>`.
+ * `/s/<log>/<id>/tools?sort=<key>&tool=<tool use id>`, `/s/<log>/<id>/compactions`, and `/memory?project=<project>&file=<name>`.
  */
 import type { SessionKey } from "@quantext/shared";
 
@@ -20,6 +20,8 @@ export type Route =
       block?: string;
       view?: SessionView;
       sort?: ToolSort;
+      /** The tool use id of a tool call to open, on the tool calls view. */
+      tool?: string;
     }
   | { page: "memory"; project: string; file?: string }
   | { page: "not-found" };
@@ -58,6 +60,8 @@ export function parseRoute(pathname: string, search: string): Route {
     if (m[3] === "tools" || m[3] === "compactions") route.view = m[3];
     const sort = q.get("sort");
     if (route.view === "tools" && sort && TOOL_SORTS.includes(sort)) route.sort = sort as ToolSort;
+    const tool = q.get("tool");
+    if (route.view === "tools" && tool && /^[\w-]{1,200}$/.test(tool)) route.tool = tool;
     const call = q.get("call");
     if (call !== null && /^\d+$/.test(call) && Number(call) >= 1) route.call = callIndex(Number(call));
     const block = q.get("block");
@@ -74,6 +78,7 @@ export function hrefOf(route: Route): string {
     if (route.call !== undefined) q.set("call", String(callNumber(route.call)));
     if (route.block && !route.view) q.set("block", route.block);
     if (route.view === "tools" && route.sort) q.set("sort", route.sort);
+    if (route.view === "tools" && route.tool) q.set("tool", route.tool);
     const s = q.toString();
     return s ? `${path}?${s}` : path;
   }

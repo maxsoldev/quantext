@@ -23,6 +23,13 @@ describe("routes", () => {
     expect(parseRoute("/s/1/a", "?call=0")).toEqual({ page: "session", key: { log: 1, id: "a" } });
   });
 
+  test("a tool call to open is named by its tool use id, on the tool calls page only", () => {
+    const route = { page: "session", key: { log: 3, id: "a" }, view: "tools", tool: "toolu_01" } as const;
+    expect(hrefOf(route)).toBe("/s/3/a/tools?tool=toolu_01");
+    expect(parseRoute("/s/3/a/tools", "?tool=toolu_01")).toEqual(route);
+    expect(parseRoute("/s/3/a", "?tool=toolu_01")).toEqual({ page: "session", key: { log: 3, id: "a" } });
+  });
+
   test("a Session's tool calls and compactions are pages of their own; tool calls keep their sort", () => {
     expect(parseRoute("/s/3/abc-1/tools", "?sort=tokens")).toEqual({
       page: "session",
