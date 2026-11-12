@@ -8,7 +8,13 @@ describe.each(scenarios())("cost of $version/$name", ({ name }) => {
   test("the cost of all Calls is the harness's own running total", () => {
     const costStates = mainRows(name).filter((row) => row.type === "cost-state");
     const harnessTotal = costStates.at(-1)?.totalCostUSD as number;
-    const ours = graph.calls.reduce((sum, call) => sum + (call.cost?.totalUsd ?? Number.NaN), 0);
+    // Claude Code prices at the list price: it does not add the 10% of a Bedrock regional endpoint.
+    const listPrice = (usd: number, modifiers: string[]) =>
+      modifiers.includes("Bedrock regional endpoint +10%") ? usd / 1.1 : usd;
+    const ours = graph.calls.reduce(
+      (sum, call) => sum + (call.cost ? listPrice(call.cost.totalUsd, call.cost.price.modifiers) : Number.NaN),
+      0,
+    );
     expect(ours).toBeCloseTo(harnessTotal, 9);
   });
 

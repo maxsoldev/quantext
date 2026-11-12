@@ -6,7 +6,7 @@ import {
   estimateBlock,
   estimateRequest,
   imageSize,
-} from "../../src/core/estimate.ts";
+} from "../../../src/providers/anthropic/estimate.ts";
 
 const block = (kind: Block["kind"], content: Block["content"]): Block => ({ hash: kind, kind, source: {}, content });
 

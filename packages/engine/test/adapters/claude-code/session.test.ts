@@ -49,16 +49,14 @@ describe("parseClaudeCodeSession on basic-tools", () => {
     expect(graph.calls[5]?.usage).toMatchObject({ inputTokens: 2, cacheReadTokens: 26894, outputTokens: 200 });
   });
 
-  test("prices each Call by part at the canonical model's list price", () => {
-    // Opus 5.5: $4 input, $5 5-minute cache write, $0.20 cache read, $20 output per million tokens.
-    expect(graph.calls[0]?.cost).toMatchObject({
-      inputUsd: 0.000008,
-      cacheReadUsd: 0,
-      cacheWriteUsd: 0.082785,
-      outputUsd: 0.00172,
-      price: { model: "claude-opus-5-5" },
-    });
-    expect(graph.calls[0]?.cost?.totalUsd).toBeCloseTo(0.084513, 12);
+  test("prices each Call by part at the list price, plus 10% for the Bedrock regional endpoint", () => {
+    // Opus 5.5: $4 input, $5 5-minute cache write, $0.20 cache read, $20 output per million tokens; `eu.` is regional.
+    const cost = graph.calls[0]?.cost;
+    expect(
+      [cost?.inputUsd, cost?.cacheReadUsd, cost?.cacheWriteUsd, cost?.outputUsd].map((x) => x?.toFixed(10)),
+    ).toEqual([0.000008 * 1.1, 0, 0.082785 * 1.1, 0.00172 * 1.1].map((x) => x.toFixed(10)));
+    expect(cost?.price).toMatchObject({ model: "claude-opus-5-5", modifiers: ["Bedrock regional endpoint +10%"] });
+    expect(cost?.totalUsd).toBeCloseTo(0.084513 * 1.1, 12);
   });
 
   test("reports no unknown records for a known transcript", () => {
@@ -106,8 +104,8 @@ describe("parameters per Call", () => {
     ]);
   });
 
-  test("price a Bedrock Sonnet id at the Sonnet list price", () => {
+  test("price a Bedrock Sonnet id at the Sonnet list price, plus 10% for the regional endpoint", () => {
     // Sonnet 4.5: 10 input, 12 944 cache write (5 minutes) and 323 output tokens.
-    expect(graph.calls[2]?.cost?.totalUsd).toBeCloseTo((10 * 3 + 12944 * 3.75 + 323 * 15) / 1e6, 12);
+    expect(graph.calls[2]?.cost?.totalUsd).toBeCloseTo((1.1 * (10 * 3 + 12944 * 3.75 + 323 * 15)) / 1e6, 12);
   });
 });

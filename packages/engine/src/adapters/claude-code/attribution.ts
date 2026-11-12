@@ -3,8 +3,8 @@ import type { Call, CallBlock } from "@quantext/shared";
 import type { AttributionCall } from "../../core/attribute.ts";
 import { attributeCalls } from "../../core/attribute.ts";
 import type { Estimator } from "../../core/estimate.ts";
-import { estimateRequest } from "../../core/estimate.ts";
 import { blockCosts } from "../../core/pricing.ts";
+import { estimateRequest } from "../../providers/anthropic/estimate.ts";
 import type { RequestBlock } from "./blocks.ts";
 import type { WireRequest } from "./rebuild.ts";
 

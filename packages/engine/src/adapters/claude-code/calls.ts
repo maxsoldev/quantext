@@ -1,6 +1,6 @@
 /** Map `api-request` rows and the `assistant` rows of their responses to Calls with exact Usage and cost. */
 import type { Call, CallIssue, CallParams, Usage } from "@quantext/shared";
-import { canonicalModel, priceUsage } from "../../core/pricing.ts";
+import { canonicalModel, priceCall } from "../../providers/anthropic/pricing.ts";
 import type { JsonObject } from "./json.ts";
 import { arr, num, obj, str } from "./json.ts";
 import type { WireRequest } from "./rebuild.ts";
@@ -23,12 +23,14 @@ export function callsOf(rows: readonly Row[], sessionId: string, requests: Reado
       if (canonical !== undefined) call.canonicalModel = canonical;
       const shapeHash = str(row.data.shapeHash);
       if (shapeHash !== undefined) call.shapeHash = shapeHash;
-      const usage = usageByRequest.get(id);
-      if (usage !== undefined) call.usage = usage;
-      const cost = usage && canonical ? priceUsage(usage, canonical) : undefined;
-      if (cost !== undefined) call.cost = cost;
-      if (usage !== undefined && cost === undefined)
-        issues.push({ kind: "no-price", detail: `no list price for model ${model}` });
+      const response = usageByRequest.get(id);
+      if (response !== undefined) {
+        call.usage = response.usage;
+        Object.assign(call, response.service);
+        const { cost, issues: priceIssues } = priceCall(response.usage, { model, ...response.service });
+        if (cost !== undefined) call.cost = cost;
+        issues.push(...priceIssues);
+      }
       return call;
     });
 }
@@ -37,14 +39,26 @@ export function callsOf(rows: readonly Row[], sessionId: string, requests: Reado
  * Usage per request id. One response is written as one `assistant` row per content block, each with the same
  * usage, so usage is taken once per `message.id`: from the last row of the last message of the request.
  */
-function responseUsage(rows: readonly Row[]): Map<string, Usage> {
-  const byRequest = new Map<string, Usage>();
+interface Response {
+  usage: Usage;
+  service: Service;
+}
+
+/** How the provider served the Call, where it says so. */
+interface Service {
+  speed?: string;
+  serviceTier?: string;
+  inferenceGeo?: string;
+}
+
+function responseUsage(rows: readonly Row[]): Map<string, Response> {
+  const byRequest = new Map<string, Response>();
   for (const row of rows) {
     if (row.type !== "assistant") continue;
     const ref = str(row.data.requestRef);
     const usage = obj(obj(row.data.message)?.usage);
     if (ref === undefined || usage === undefined) continue;
-    byRequest.set(ref, usageOf(usage));
+    byRequest.set(ref, { usage: usageOf(usage), service: serviceOf(usage) });
   }
   return byRequest;
 }
@@ -83,4 +97,15 @@ function paramsOf(params: JsonObject): CallParams {
   const effort = str(obj(params.output_config)?.effort);
   if (effort !== undefined) result.effort = effort;
   return result;
+}
+
+function serviceOf(raw: JsonObject): Service {
+  const service: Service = {};
+  const speed = str(raw.speed);
+  const tier = str(raw.service_tier);
+  const geo = str(raw.inference_geo);
+  if (speed) service.speed = speed;
+  if (tier) service.serviceTier = tier;
+  if (geo) service.inferenceGeo = geo;
+  return service;
 }

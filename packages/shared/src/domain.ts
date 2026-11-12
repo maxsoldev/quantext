@@ -61,6 +61,8 @@ export interface PriceRef {
   model: string;
   source: string;
   date: string;
+  /** The price modifiers that applied (regional endpoint, fast mode, US-only inference, prompt-size tier). */
+  modifiers: string[];
 }
 
 /** One request from the harness to the model, with its response and Usage. */
@@ -78,6 +80,10 @@ export interface Call {
   shapeHash?: string;
   /** Absent when the log holds no response for the request; then the Call has no exact total. */
   usage?: Usage;
+  /** How the provider served the Call, where the response says so (these change the price). */
+  speed?: string;
+  serviceTier?: string;
+  inferenceGeo?: string;
   cost?: Cost;
   /**
    * Input tokens that belong to no Block: the end of the request after its last Block, known exactly when the last
@@ -92,10 +98,11 @@ export interface Call {
  * A flag on a Call. `unresolved-request`: part of the request is not in the log, so the rebuilt input is
  * incomplete. `no-usage`: the log holds no Usage, so the Call has no exact total. `unreconciled-tokens`: the exact
  * change from the previous Call does not fit the new Blocks, so the whole total is split by estimate. `no-price`:
- * there is no list price for the model, so the Call has no cost.
+ * there is no list price for the model, so the Call has no cost. `price-assumption`: the cost rests on an
+ * assumption that the log cannot confirm (a cache write's time to live, a long-context price).
  */
 export interface CallIssue {
-  kind: "unresolved-request" | "no-usage" | "unreconciled-tokens" | "no-price";
+  kind: "unresolved-request" | "no-usage" | "unreconciled-tokens" | "no-price" | "price-assumption";
   detail: string;
 }
 
