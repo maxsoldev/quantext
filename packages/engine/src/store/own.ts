@@ -34,8 +34,13 @@ const MARKERS: readonly [string, string][] = [
 export async function refuseForeign(path: string): Promise<void> {
   const size = statOrUndefined(path)?.size ?? 0;
   if (size === 0) return;
-  // immutable: SQLite reads only the main file, takes no lock and makes no -wal or -shm file next to it.
-  const db = await openRaw(`${pathToFileURL(path).href}?immutable=1`, { readOnly: true }).catch((error: unknown) => {
+  // Node: immutable reads only the main file, takes no lock and makes no -wal or -shm file next to it.
+  // Bun on Linux bundles a SQLite without URI filenames, and a read-only connection cannot open a WAL store
+  // whose -shm file is gone. So Bun opens the plain path normally and runs only SELECTs: SQLite may add -wal
+  // and -shm side files, but a read never writes the database file itself.
+  const bun = process.versions.bun !== undefined;
+  const target = bun ? path : `${pathToFileURL(path).href}?immutable=1`;
+  const db = await openRaw(target, { readOnly: !bun }).catch((error: unknown) => {
     throw new ForeignDatabaseError(path, `it cannot be read as SQLite: ${String(error)}`);
   });
   try {
