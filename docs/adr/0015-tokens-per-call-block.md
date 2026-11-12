@@ -6,7 +6,7 @@ Status: accepted
 
 The first domain model gave each `Block` one token count. But the same content has a different count under a
 different tokenizer: the 2.1.322 fixtures switch from Opus 5.5 to Sonnet 4.5 in one session (`effort`), and the
-two models count the same tool schemas differently. A Block also gets its number by splitting a Call's exact total
+tokenizer of Opus 4.7 and later counts the same text as up to about 1.35 times the tokens of the older one. A Block also gets its number by splitting a Call's exact total
 (ADR 6), so the number depends on that Call.
 
 The provider reports how many input tokens follow the last cache breakpoint (`input_tokens`). When the last Block

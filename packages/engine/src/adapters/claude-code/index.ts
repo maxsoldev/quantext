@@ -8,6 +8,7 @@ import { contentNotes } from "./notes.ts";
 import { rebuildRequests } from "./rebuild.ts";
 import { readRows } from "./rows.ts";
 import { sessionIdOf, sessionOf } from "./session.ts";
+import { toolCallsOf } from "./tool-calls.ts";
 
 /** One session's transcripts as text: the main transcript and each subagent transcript (with its meta file). */
 export interface ClaudeCodeTranscripts {
@@ -47,7 +48,8 @@ export function parseClaudeCodeSession(input: ClaudeCodeTranscripts, options: Pa
     return { call, request, entries };
   });
   const callBlocks = attributeSession(split, options.estimator);
-  return { sessions: [sessionOf(rows, id)], calls, blocks: [...blocks.values()], callBlocks, report };
+  const toolCalls = toolCallsOf(rows, id, new Set(blocks.keys()));
+  return { sessions: [sessionOf(rows, id)], calls, blocks: [...blocks.values()], callBlocks, toolCalls, report };
 }
 
 function count(report: IngestReport, kind: string): void {

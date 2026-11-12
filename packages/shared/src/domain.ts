@@ -157,6 +157,27 @@ export interface CallBlock {
   inCachedPrefix: boolean;
 }
 
+/** One use of a tool by the model. */
+export interface ToolCall {
+  /** The tool use id the model gave it. */
+  id: string;
+  sessionId: string;
+  /** The Call whose response holds the tool use. */
+  callId: string;
+  name: string;
+  input: JsonValue;
+  source: BlockSource;
+  /** The Block that holds the result, once a later Call sends it. */
+  resultBlockHash?: string;
+  isError: boolean;
+  /** From the tool use to its result, by the log's timestamps. */
+  durationMs?: number;
+  /** The number of tool uses in the same response (1 when the tool ran alone). */
+  parallel: number;
+  /** The Session the tool started, for a tool that runs a subagent. */
+  childSessionId?: string;
+}
+
 /** Input that the adapter could not map, counted so that nothing is dropped in silence. */
 export interface IngestReport {
   /** Unknown record kinds, by the harness's own name, with their counts. */
@@ -171,5 +192,6 @@ export interface SessionGraph {
   calls: Call[];
   blocks: Block[];
   callBlocks: CallBlock[];
+  toolCalls: ToolCall[];
   report: IngestReport;
 }

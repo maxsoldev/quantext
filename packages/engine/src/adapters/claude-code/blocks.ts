@@ -34,7 +34,7 @@ export function splitRequest(request: WireRequest, notes: ContentNotes): Request
   const out: RequestBlock[] = [];
   const push = (role: string, content: Json, section: RequestSection, path: string, message?: number) => {
     const { kind, source, unknownType } = classify(role, obj(content) ?? {}, context);
-    const block: Block = { hash: sha256Sorted({ role, block: content }), kind, source, content };
+    const block: Block = { hash: blockHash(role, content), kind, source, content };
     const entry: RequestBlock = { block, section, cacheBreakpoint: breakpoints.has(path) };
     if (message !== undefined) entry.message = message;
     if (unknownType !== undefined) entry.unknownType = unknownType;
@@ -49,6 +49,11 @@ export function splitRequest(request: WireRequest, notes: ContentNotes): Request
     }
   }
   return out;
+}
+
+/** The hash of a content block, with the role it is sent in (so equal text as system and as user stays apart). */
+export function blockHash(role: string, content: Json): string {
+  return sha256Sorted({ role, block: content });
 }
 
 interface Context {
@@ -110,7 +115,7 @@ function userText(text: string, context: Context): Classified {
 }
 
 /** The source of a tool: its name, its MCP server (`mcp__<server>__<tool>`), the file and skill in its input. */
-function toolSource(name: string | undefined, input?: JsonObject): BlockSource {
+export function toolSource(name: string | undefined, input?: JsonObject): BlockSource {
   if (name === undefined) return {};
   const source: BlockSource = { tool: name };
   const server = /^mcp__(.+?)__/.exec(name)?.[1];
