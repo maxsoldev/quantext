@@ -16,6 +16,12 @@ import { completeLines, fingerprint, statOf } from "./files.ts";
 
 const HARNESS = "claude-code";
 export const DEFAULT_BATCH_BYTES = 4 * 1024 * 1024;
+export const DEFAULT_RESTORE_BYTES = 64 * 1024 * 1024;
+
+interface Limits {
+  batchBytes: number;
+  restoreBytes: number;
+}
 
 export interface IngestOptions {
   store: Store;
@@ -23,6 +29,11 @@ export interface IngestOptions {
   root: string;
   /** About this many bytes are read, parsed and written per transaction. */
   batchBytes?: number;
+  /**
+   * After this many bytes of one log, the parser is made again from its snapshot and the store, so that a long
+   * file does not keep its whole content in memory. Each log's pass also starts from the snapshot.
+   */
+  restoreBytes?: number;
 }
 
 /** Calls that one write added or updated in one Session of a log (the main transcript's path). */
@@ -54,7 +65,10 @@ export interface Ingest {
 
 export function createIngest(options: IngestOptions): Ingest {
   const { store, root } = options;
-  const batchBytes = options.batchBytes ?? DEFAULT_BATCH_BYTES;
+  const limits: Limits = {
+    batchBytes: options.batchBytes ?? DEFAULT_BATCH_BYTES,
+    restoreBytes: options.restoreBytes ?? DEFAULT_RESTORE_BYTES,
+  };
   const listeners = new Set<(event: CallsEvent) => void>();
   let queue: Promise<unknown> = Promise.resolve();
   /** One pass at a time: two passes over one log would read its new bytes twice. */
@@ -76,7 +90,7 @@ export function createIngest(options: IngestOptions): Ingest {
     for (const files of logs) {
       const log = store.log(files.main, HARNESS, claudeCodeRecords);
       try {
-        await ingestLog(log, files, batchBytes, summary, (result) => emit(files.main, result));
+        await ingestLog(log, files, limits, summary, (result) => emit(files.main, result));
       } catch (error) {
         summary.errors.push({ path: files.main, error: `ingest failed: ${describe(error)}` });
         markFailed(log, files.main, describe(error));
@@ -120,7 +134,7 @@ interface Entry {
 async function ingestLog(
   log: LogStore,
   files: LogFiles,
-  batchBytes: number,
+  limits: Limits,
   summary: IngestSummary,
   emit: (result: WriteResult) => void,
 ): Promise<void> {
@@ -139,15 +153,23 @@ async function ingestLog(
     let snapshot = log.snapshot() as ParserState | undefined;
     let parser: ClaudeCodeParser | undefined;
     const parserNow = () => (parser ??= createClaudeCodeParser(snapshot, { lookup: log.lookup }));
-    /** Write one delta with its mark and snapshot; then drop the parser, so its memory stays bounded by a batch. */
-    const write = (delta: ReturnType<ClaudeCodeParser["push"]> | undefined, mark: FileMark) => {
+    let sinceRestore = 0;
+    /**
+     * Write one delta with its mark and snapshot. After `restoreBytes` of input, drop the parser: the next one is
+     * restored from the snapshot and the store, so the memory of a long file stays bounded.
+     */
+    const write = (delta: ReturnType<ClaudeCodeParser["push"]> | undefined, mark: FileMark, bytes = 0) => {
       if (delta !== undefined && parser !== undefined) snapshot = parser.snapshot();
       const result = log.write({
         deltas: delta === undefined ? [] : [delta],
         files: [mark],
         ...(delta === undefined || snapshot === undefined ? {} : { snapshot: snapshot as unknown as JsonValue }),
       });
-      parser = undefined;
+      sinceRestore += bytes;
+      if (sinceRestore >= limits.restoreBytes) {
+        parser = undefined;
+        sinceRestore = 0;
+      }
       marks.set(mark.path, mark);
       summary.callsAdded += result.calls.reduce((n, c) => n + c.added.length, 0);
       emit(result);
@@ -183,12 +205,13 @@ async function ingestLog(
       }
       let offset = old?.offset ?? 0;
       let read = false;
-      for await (const piece of completeLines(entry.handle, offset, stat.size, batchBytes)) {
+      for await (const piece of completeLines(entry.handle, offset, stat.size, limits.batchBytes)) {
         const delta = parserNow().push(piece.text, entry.transcript);
-        summary.bytes += piece.end - offset;
+        const bytes = piece.end - offset;
+        summary.bytes += bytes;
         offset = piece.end;
         read = true;
-        write(delta, mark(offset, await fingerprint(entry.handle, offset)));
+        write(delta, mark(offset, await fingerprint(entry.handle, offset)), bytes);
       }
       if (read) summary.files++;
       else write(undefined, mark(offset, old?.fingerprint));

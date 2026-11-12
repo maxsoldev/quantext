@@ -28,12 +28,20 @@ interface Setup {
   events: CallsEvent[];
 }
 
-async function setup(options: { root?: string; dataDir?: string; batchBytes?: number } = {}): Promise<Setup> {
+async function setup(
+  options: { root?: string; dataDir?: string; batchBytes?: number; restoreBytes?: number } = {},
+): Promise<Setup> {
   const root = options.root ?? tempDir("qx-root-");
   const dataDir = options.dataDir ?? tempDir("qx-data-");
   const store = await openStore({ dataDir });
   onCleanup(() => store.close());
-  const ingest = createIngest({ store, root, ...(options.batchBytes ? { batchBytes: options.batchBytes } : {}) });
+  const { batchBytes, restoreBytes } = options;
+  const ingest = createIngest({
+    store,
+    root,
+    ...(batchBytes === undefined ? {} : { batchBytes }),
+    ...(restoreBytes === undefined ? {} : { restoreBytes }),
+  });
   const events: CallsEvent[] = [];
   ingest.onCalls((e) => events.push(e));
   return { root, dataDir, store, ingest, events };
@@ -129,8 +137,11 @@ describe("reading again", () => {
     expect(summary.bytes).toBe(0);
   });
 
-  test("in batches much smaller than the file gives the same graph", async () => {
-    const s = await setup({ batchBytes: 2048 });
+  test.each([
+    ["a parser restored after each batch", 1],
+    ["one parser for the whole file", Number.MAX_SAFE_INTEGER],
+  ])("in batches much smaller than the file, with %s, gives the same graph", async (_, restoreBytes) => {
+    const s = await setup({ batchBytes: 2048, restoreBytes });
     const files = copyScenario(s.root, "compaction");
     await s.ingest.ingestAll();
     expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));

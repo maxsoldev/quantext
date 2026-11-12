@@ -10,6 +10,11 @@ import { openLog } from "./log.ts";
 import { migrate } from "./schema.ts";
 import { Statements } from "./statements.ts";
 
+/** The default data folder, `~/.quantext`: outside the plugin folder, which an uninstall deletes. */
+export function defaultDataDir(home: string): string {
+  return join(home, ".quantext");
+}
+
 export interface OpenStoreOptions {
   /** The folder of the database (`quantext.db`) and the writer lock (`writer.lock`); created when missing. */
   dataDir: string;

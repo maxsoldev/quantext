@@ -115,7 +115,6 @@ CREATE TABLE call_blocks (
   PRIMARY KEY (log, id)
 ) STRICT;
 CREATE INDEX call_blocks_interval ON call_blocks (log, session_id, lane, first_call, last_call);
-CREATE INDEX call_blocks_open ON call_blocks (log, session_id, lane) WHERE last_call IS NULL;
 CREATE INDEX call_blocks_block ON call_blocks (block_hash);
 
 CREATE TABLE tool_calls (

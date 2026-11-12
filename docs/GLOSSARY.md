@@ -14,6 +14,12 @@ One conversation in a harness, from its start to its end. A subagent run is its 
 started it as its parent.
 _Avoid_: conversation, transcript, thread, chat
 
+**Log**:
+The files a harness writes for one Session and its subagent Sessions (in Claude Code: the main transcript and the
+transcripts under its `subagents/` folder). It is the unit of ingest: one parser, one read position per file, and
+the rows read from it, which are deleted together when the log must be read again.
+_Avoid_: transcript (one file of a log), source, feed
+
 **Call**:
 One request from the harness to the model, with the response and its usage. The model and the parameters (max
 tokens, thinking, effort, betas) belong to the Call, not to its Shape.
