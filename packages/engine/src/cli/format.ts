@@ -9,7 +9,7 @@ export interface Column<T> {
   max?: number;
 }
 
-/** Rows as an aligned table with a header line; cells are cut to their column's `max`. */
+/** Rows as an aligned table with a header line; cells are cut to their column's `max` (after the query layer redacted them). */
 export function table<T>(rows: readonly T[], columns: readonly Column<T>[]): string {
   const cells = rows.map((row) => columns.map((c) => cut(oneLine(c.value(row)), c.max)));
   const widths = columns.map((c, i) => Math.max(c.title.length, ...cells.map((r) => (r[i] ?? "").length)));

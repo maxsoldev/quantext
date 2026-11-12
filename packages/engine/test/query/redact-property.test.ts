@@ -3,6 +3,7 @@
  * The output must hold no home folder name, no user name and no hidden project name.
  */
 import { describe, expect, test } from "vitest";
+import { previewOf } from "../../src/query/preview.ts";
 import { createRedactor } from "../../src/query/redact.ts";
 
 const j = (...parts: string[]) => parts.join("");
@@ -53,6 +54,29 @@ describe("demo mode leaves no home folder, user name or hidden project", () => {
             expect(lower, `${around(text)} → ${out}`).not.toContain(encodeURIComponent(name).toLowerCase());
             expect(out, `${around(text)} → ${out}`).not.toContain("secret-plans");
           }
+        }
+      }
+    });
+  }
+});
+
+describe("a preview is cut after redaction, so no cut word escapes it", () => {
+  for (const name of NAMES) {
+    test(name, () => {
+      const home = `${j("/Us", "ers/")}${name}`;
+      const hidden = `${home}/work/secretproj`;
+      const redact = createRedactor({ home, user: name, hidden: [hidden] });
+      const text = `cd ${hidden}/src; git push git@github.com:${name}/x.git; ${home}/notes and the secretproj repo`;
+      const pieces = (s: string) => {
+        const out: string[] = [];
+        for (let n = 4; n <= s.length; n++) out.push(s.slice(0, n));
+        return out;
+      };
+      for (let max = 2; max <= text.length + 2; max++) {
+        const { preview } = previewOf(text, max, (s) => redact(s, `${home}/code/shop`));
+        const lower = preview.toLowerCase();
+        for (const secret of [name.toLowerCase(), "secretproj"]) {
+          for (const part of pieces(secret)) expect(lower, `${max}: ${preview}`).not.toContain(part);
         }
       }
     });

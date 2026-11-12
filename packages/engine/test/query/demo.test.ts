@@ -137,6 +137,22 @@ describe("demo mode", () => {
     expect(text).not.toMatch(/\bsecret\b/);
   });
 
+  test("cuts previews and tool input summaries after it redacts them, at any length", async () => {
+    const { db } = await homes();
+    for (const previewChars of [10, 23, 37, 61, 120]) {
+      const q = createQuery({
+        db,
+        codec: claudeCodeCodec,
+        demo: { redactPaths: true },
+        home: ALICE,
+        user: "alice",
+        previewChars,
+      });
+      const text = everything(q);
+      for (const part of ["alice", "/Users/", "carol", "/home/", "Users\\\\"]) expect(text).not.toContain(part);
+    }
+  });
+
   test("marks its responses as redacted, with images to blur", async () => {
     const q = await demo([PROJECTS.image]);
     const [s] = q.listSessions().items;

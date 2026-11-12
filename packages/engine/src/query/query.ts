@@ -53,6 +53,7 @@ import {
   toolCallFromRow,
 } from "../store/index.ts";
 import { categoryOf, emptyCategories, isDeferred } from "./categories.ts";
+import { previewOf } from "./preview.ts";
 import type { Redactor } from "./redact.ts";
 import { createRedactor, lastFolder, projectAllowed, trimSeparators } from "./redact.ts";
 import { API_VERSION } from "./sql.ts";
@@ -164,6 +165,11 @@ export function createQuery(options: QueryOptions): Query {
     }
     return redactor.redact;
   };
+  /** Text as demo mode shows it (paths relative to `root`); as it is without demo mode. */
+  const redactText =
+    (root: string | undefined) =>
+    (text: string): string =>
+      demo === undefined ? text : redactorNow()(text, root);
   /** The value with local paths and hidden projects hidden, in demo mode. */
   const hide = <T>(value: T, root?: string): T =>
     demo === undefined ? value : (redactorNow().json(value as unknown as JsonValue, root) as unknown as T);
@@ -339,8 +345,7 @@ export function createQuery(options: QueryOptions): Query {
     const blocks: ContextBlock[] = runs.map((r) => {
       const run = runFromRow(r);
       const source = sourceOf(r);
-      const text = textOf(r.content);
-      const flat = text.replace(/\s+/g, " ").trim();
+      const shown = previewOf(textOf(r.content), previewChars, redactText(found.project));
       const b: ContextBlock = {
         position: run.position,
         section: run.section,
@@ -349,9 +354,7 @@ export function createQuery(options: QueryOptions): Query {
         category: categoryOf(String(r.kind) as BlockKind, run.section, source),
         source,
         inCachedPrefix: run.position < boundary,
-        preview: flat.length > previewChars ? `${flat.slice(0, previewChars - 1)}…` : flat,
-        chars: text.length,
-        truncated: flat.length > previewChars,
+        ...shown,
         run:
           run.lastCall === undefined
             ? { firstCall: run.firstCall }
@@ -850,7 +853,7 @@ export function createQuery(options: QueryOptions): Query {
     toolOutputs(key, options = {}) {
       const found = sessionProject(key);
       if (found === undefined) return { ...meta, items: [] };
-      const sql = toolOutputsSql(`(${SESSION_LIFETIME})`, "WHERE t.log = ? AND t.session_id = ?");
+      const sql = toolOutputsSql(`(${SESSION_LIFETIME})`, "WHERE t.log = ? AND t.session_id = ?", false);
       const rows = db
         .prepare(`${sql} ORDER BY coalesce(${LIFETIME_SORTS[options.sort ?? "cost"]}, 0) DESC, tool_use_id LIMIT ?`)
         .all(key.log, key.id, key.log, key.id, options.limit ?? 50);
@@ -863,7 +866,9 @@ export function createQuery(options: QueryOptions): Query {
           ...lifetimeOf(r),
         };
         if (r.call_idx !== null) o.callIndex = Number(r.call_idx);
-        if (r.input_summary !== null) o.inputSummary = String(r.input_summary);
+        if (r.input_summary !== null) {
+          o.inputSummary = previewOf(String(r.input_summary), 200, redactText(found.project)).preview;
+        }
         if (r.result_block_hash !== null) o.resultBlockHash = String(r.result_block_hash);
         if (r.first_call !== null) o.firstCall = Number(r.first_call);
         if (r.last_call !== null) o.lastCall = Number(r.last_call);
