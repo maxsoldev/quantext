@@ -240,10 +240,17 @@ describe("the event stream", () => {
     });
     socket.on("error", () => socket.destroy());
     while (api.activity().streams === 0) await new Promise((r) => setTimeout(r, 5));
-    while (api.activity().streams === 1) await new Promise((r) => setTimeout(r, 10));
+    // Large kernel socket buffers (Linux loopback) can take in the whole replay; then the client is dropped by the
+    // live-write rule instead, so keep publishing until one of the two rules drops it.
+    let n = 1024;
+    while (api.activity().streams === 1 && n < 1024 + 20_000) {
+      n++;
+      api.publish({ ...callsEvent(key.log, key.id, cursor + n), added });
+      await new Promise((r) => setTimeout(r, 1));
+    }
     expect(api.activity().streams).toBe(0);
     socket.destroy();
-  });
+  }, 30_000);
 
   test("drops a client that does not read, without holding its bytes", async () => {
     const { port, api, key, cursor } = await setup({ events: { maxBufferedBytes: 64 * 1024 } });
