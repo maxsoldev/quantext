@@ -62,6 +62,8 @@ export interface Store {
   readonly memory: MemoryStore;
   /** The change cursor: it grows with each write that changes a Session (`WriteResult.cursor`). */
   changeCursor(): number;
+  /** Each file's bytes read so far, by path: what ingest goes on from. */
+  fileOffsets(): Map<string, number>;
   /** The paths of every log in the store, oldest first. */
   logs(): string[];
   close(): void;
@@ -159,6 +161,13 @@ export async function openStore(options: OpenStoreOptions): Promise<Store> {
           }),
       },
       changeCursor: () => Number(sql.get("SELECT seq FROM change_cursor").get()?.seq ?? 0),
+      fileOffsets: () =>
+        new Map(
+          sql
+            .get("SELECT path, byte_offset FROM ingest_files")
+            .all()
+            .map((r) => [String(r.path), Number(r.byte_offset)]),
+        ),
       logs: () =>
         sql
           .get("SELECT path FROM logs ORDER BY id")

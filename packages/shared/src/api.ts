@@ -17,6 +17,35 @@ export interface Health extends Meta {
   dataDir?: string;
 }
 
+/** How far the pass in progress (or the last one) has read: of the logs and bytes it found new, how many it read. */
+export interface IngestProgress {
+  logsDone: number;
+  logsTotal: number;
+  bytesDone: number;
+  bytesTotal: number;
+  /** When the pass started (ISO 8601). */
+  startedAt: string;
+}
+
+/** The engine's ingest: catching up after its start, then live, then stopping. */
+export interface IngestStatus extends IngestProgress {
+  phase: "catching-up" | "live" | "stopping";
+  /** The last read that failed; in demo mode only that there was one. */
+  lastError?: string;
+}
+
+/** `GET /api/v1/status`: the engine, its ingest, its open event streams. */
+export interface EngineStatus extends Meta {
+  engine: { version: string; pid: number; startedAt: string; demo: boolean };
+  ingest: IngestStatus;
+  streams: number;
+}
+
+/** SSE `ingest`: the ingest status, at most once a second while it changes; it has no id. */
+export interface SseIngest extends IngestStatus {
+  apiVersion: ApiVersion;
+}
+
 /** The body of every 4xx and 5xx response of the API. */
 export interface ApiError {
   apiVersion: ApiVersion;

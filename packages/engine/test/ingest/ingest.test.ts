@@ -619,3 +619,30 @@ describe("Calls events", () => {
     expect(new Set(s.events.map((e) => e.logId))).toEqual(new Set([1]));
   });
 });
+
+describe("progress", () => {
+  test("counts the logs and the new bytes of a pass, after each batch, up to its totals", async () => {
+    const s = await setup({ batchBytes: 32 * 1024 });
+    const names = ["basic-tools", "subagent", "image"];
+    let bytes = 0;
+    for (const name of names) {
+      const files = copyScenario(s.root, name);
+      const sizes = [
+        files.main,
+        ...files.subagents.flatMap((a) => (a.meta === undefined ? [a.path] : [a.path, a.meta])),
+      ];
+      bytes += sizes.reduce((n, path) => n + statSync(path).size, 0);
+    }
+    expect(s.ingest.progress()).toBeUndefined();
+    const seen: { logsDone: number; bytesDone: number }[] = [];
+    s.ingest.onProgress((p) => seen.push({ logsDone: p.logsDone, bytesDone: p.bytesDone }));
+    await s.ingest.ingestAll();
+    expect(s.ingest.progress()).toMatchObject({ logsDone: 3, logsTotal: 3, bytesDone: bytes, bytesTotal: bytes });
+    expect(seen.length).toBeGreaterThan(5); // after each batch, not only at the end
+    expect(seen.map((p) => p.bytesDone)).toEqual([...seen.map((p) => p.bytesDone)].sort((a, b) => a - b));
+    expect(seen.at(-1)).toEqual({ logsDone: 3, bytesDone: bytes });
+    // A pass with nothing new: no bytes to read.
+    await s.ingest.ingestAll();
+    expect(s.ingest.progress()).toMatchObject({ logsDone: 3, logsTotal: 3, bytesDone: 0, bytesTotal: 0 });
+  });
+});

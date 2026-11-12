@@ -4,9 +4,9 @@
  * store's ContentLookup; each batch of complete lines is one transaction with the new snapshot and read position.
  */
 import type { FileHandle } from "node:fs/promises";
-import { open, readFile } from "node:fs/promises";
+import { open, readFile, stat } from "node:fs/promises";
 import { sep } from "node:path";
-import type { CallsEvent, IngestEvent, JsonValue, StoreCodec } from "@quantext/shared";
+import type { CallsEvent, IngestEvent, IngestProgress, JsonValue, StoreCodec } from "@quantext/shared";
 import type { ClaudeCodeParser, ParserState } from "../adapters/claude-code/index.ts";
 import { claudeCodeCodec, createClaudeCodeParser } from "../adapters/claude-code/index.ts";
 import type { FileMark, LogStore, Store, WriteResult } from "../store/index.ts";
@@ -90,6 +90,10 @@ export interface Ingest {
    * errors and does not stop ingest. Returns a function that stops listening.
    */
   onCalls(listener: (event: CallsEvent) => void): () => void;
+  /** The pass in progress, or the last one: logs and bytes read, of those it found new. Undefined before any. */
+  progress(): IngestProgress | undefined;
+  /** Listen for progress, after each batch and each log. Returns a function that stops listening. */
+  onProgress(listener: (progress: IngestProgress) => void): () => void;
 }
 
 export function createIngest(options: IngestOptions): Ingest {
@@ -101,6 +105,13 @@ export function createIngest(options: IngestOptions): Ingest {
     maxLineBytes: options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES,
   };
   const listeners = new Set<(event: IngestEvent) => void>();
+  const progressListeners = new Set<(progress: IngestProgress) => void>();
+  let progress: IngestProgress | undefined;
+  const told = () => {
+    if (progress === undefined) return;
+    const now = { ...progress };
+    for (const listener of progressListeners) listener(now);
+  };
   /** The parsers of the logs read last, oldest first: a live log is read on without a restore. */
   const warmParsers = new Map<string, Warm>();
   let queue: Promise<unknown> = Promise.resolve();
@@ -152,6 +163,19 @@ export function createIngest(options: IngestOptions): Ingest {
       errors: [...errors],
       stopped: false,
     };
+    const current: IngestProgress = {
+      logsDone: 0,
+      logsTotal: logs.length,
+      bytesDone: 0,
+      bytesTotal: await newBytes(logs, store.fileOffsets()),
+      startedAt: new Date().toISOString(),
+    };
+    progress = current;
+    const step = () => {
+      current.bytesDone = summary.bytes;
+      current.bytesTotal = Math.max(current.bytesTotal, summary.bytes); // a file replaced meanwhile is read whole
+      told();
+    };
     for (const files of logs) {
       const log = store.log(files.main, HARNESS, codec);
       try {
@@ -165,7 +189,10 @@ export function createIngest(options: IngestOptions): Ingest {
           tell({ kind: "log-removed", logId: log.id, ...log.emptied }, files.main, summary.errors);
         }
         const removed = (event: IngestEvent) => tell(event, files.main, summary.errors);
-        const emitted = (result: WriteResult) => emit(files.main, result, summary);
+        const emitted = (result: WriteResult) => {
+          emit(files.main, result, summary);
+          step();
+        };
         await ingestLog(log, files, limits, summary, emitted, signal, warm, removed);
         if (warm.parser !== undefined) warmParsers.set(files.main, warm);
         for (const old of warmParsers.keys()) {
@@ -176,6 +203,8 @@ export function createIngest(options: IngestOptions): Ingest {
         summary.errors.push({ path: files.main, error: `ingest failed: ${describe(error)}` });
         markFailed(log, files.main, describe(error));
       }
+      current.logsDone++;
+      step();
     }
     return summary;
   };
@@ -214,6 +243,11 @@ export function createIngest(options: IngestOptions): Ingest {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    progress: () => (progress === undefined ? undefined : { ...progress }),
+    onProgress(listener) {
+      progressListeners.add(listener);
+      return () => progressListeners.delete(listener);
+    },
     onCalls(listener) {
       const calls = (event: IngestEvent) => {
         if (event.kind === "calls" && (event.added.length > 0 || event.updated.length > 0)) listener(event);
@@ -231,6 +265,22 @@ interface Entry {
   handle?: FileHandle;
   stat?: FileStat;
   error?: string;
+}
+
+/** The bytes of these logs' files beyond what the store has read: what a pass will read (a file gone counts 0). */
+async function newBytes(logs: readonly LogFiles[], offsets: ReadonlyMap<string, number>): Promise<number> {
+  let total = 0;
+  for (const files of logs) {
+    const paths = [files.main, ...files.subagents.flatMap((a) => (a.meta === undefined ? [a.path] : [a.path, a.meta]))];
+    for (const path of paths) {
+      try {
+        total += Math.max(0, (await stat(path)).size - (offsets.get(path) ?? 0));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; // the pass reports it
+      }
+    }
+  }
+  return total;
 }
 
 async function ingestLog(

@@ -55,6 +55,8 @@ function recordingIngest() {
     },
     onCalls: () => () => undefined,
     onEvent: () => () => undefined,
+    progress: () => undefined,
+    onProgress: () => () => undefined,
   };
   return {
     ingest,
