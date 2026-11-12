@@ -50,6 +50,11 @@ export interface ClaudeCodeParser {
 
 export const HARNESS = "claude-code";
 
+/** Rows that can bring a missing part of a waiting request. */
+const WIRE_ROWS = new Set(["api-request-blob", "api-request-shape", "api-request", "user", "assistant"]);
+/** Calls kept waiting for a missing part; older ones stay unresolved. */
+const MAX_WAITING = 32;
+
 export function createClaudeCodeParser(
   state: ParserState = emptyState(),
   options: ParseOptions = {},
@@ -146,6 +151,51 @@ class Rows {
   }
 
   private row(row: Row): void {
+    this.handle(row);
+    if (Object.keys(this.state.waiting).length > 0 && WIRE_ROWS.has(row.type)) this.recheck();
+  }
+
+  /** Remember a call whose request is not complete yet: a later row may still bring the missing part. */
+  private wait(id: string): void {
+    put(this.state.waiting, id, this.name);
+    const ids = Object.keys(this.state.waiting);
+    if (ids.length > MAX_WAITING) delete this.state.waiting[ids[0] ?? ""];
+  }
+
+  /** Check the waiting calls again, oldest first; a call whose request is now complete waits for, or gets, its split. */
+  private recheck(): void {
+    const ids = Object.keys(this.state.waiting)
+      .flatMap((id) => get(this.state.calls, id) ?? [])
+      .sort((a, b) => a.index - b.index);
+    for (const call of ids) {
+      const spec = get(this.state.specs, call.id);
+      const transcript = get(this.state.waiting, call.id) ?? this.name;
+      if (spec === undefined || this.missing(spec, transcriptOf(this.state, transcript)).length > 0) continue;
+      delete this.state.waiting[call.id];
+      call.issues = call.issues.filter((i) => i.kind !== "unresolved-request");
+      this.changes().calls.add(call.id);
+      if (call.usage === undefined) {
+        call.issues.push({ kind: "no-usage", detail: "the log has no response with usage for this call yet" });
+        put(this.state.pending, call.id, 1);
+      } else {
+        this.split(call, spec, call.usage);
+      }
+    }
+  }
+
+  private split(call: Call, spec: CallSpec, usage: Usage): void {
+    const lane = laneOf(this.state, spec.lane, call.sessionId);
+    if (lane.lastIndex !== undefined && lane.lastIndex > call.index) {
+      call.issues.push({
+        kind: "unreconciled-tokens",
+        detail: "the response came after a later call was split; not split",
+      });
+      return;
+    }
+    splitCall({ state: this.state, classifier: this.classifier, changes: this.changes() }, call, spec, usage);
+  }
+
+  private handle(row: Row): void {
     const session = this.session(row);
     const data = row.data;
     const message = obj(data.message);
@@ -238,6 +288,8 @@ class Rows {
     if (missing.length === 0) {
       call.issues.push({ kind: "no-usage", detail: "the log has no response with usage for this call yet" });
       put(this.state.pending, id, 1);
+    } else {
+      this.wait(id);
     }
     this.t.callsSinceCost.push(id);
     this.t.openCompaction?.calls.push(id);
@@ -265,7 +317,7 @@ class Rows {
   }
 
   /** What of a request is not in the log: its base, its shape, the messages of its tail. */
-  private missing(spec: CallSpec): string[] {
+  private missing(spec: CallSpec, transcript: TranscriptState = this.t): string[] {
     const missing: string[] = [];
     const base = spec.baseId === undefined ? undefined : get(this.state.specs, spec.baseId);
     if (spec.baseId !== undefined && base === undefined) missing.push(`base call ${spec.baseId} is not in the log`);
@@ -280,7 +332,7 @@ class Rows {
       missing.push(`shape ${spec.shapeHash ?? "(none)"} is not in the log`);
     }
     for (const hash of spec.tail) {
-      if (resolve(this.state, this.t, hash) === undefined) missing.push(`message ${hash} is not in the log`);
+      if (resolve(this.state, transcript, hash) === undefined) missing.push(`message ${hash} is not in the log`);
     }
     return missing;
   }
@@ -306,15 +358,7 @@ class Rows {
     const spec = get(this.state.specs, call.id);
     if (pending !== undefined && spec !== undefined) {
       delete this.state.pending[call.id];
-      const lane = laneOf(this.state, spec.lane, call.sessionId);
-      if (lane.lastIndex !== undefined && lane.lastIndex > call.index) {
-        call.issues.push({
-          kind: "unreconciled-tokens",
-          detail: "the response came after a later call was split; not split",
-        });
-      } else {
-        splitCall({ state: this.state, classifier: this.classifier, changes: this.changes() }, call, spec, usage);
-      }
+      this.split(call, spec, usage);
     }
     this.changes().calls.add(call.id);
   }

@@ -120,3 +120,41 @@ describe("a growing transcript", () => {
     expect(after.toolCalls.map((t) => t.durationMs)).toEqual([55]);
   });
 });
+
+describe("rows that come late", () => {
+  const { main } = transcriptsOf("basic-tools");
+  const lines = main.split("\n").filter((l) => l !== "");
+  /** Move the line that matches `what` to just after the line that matches `after`. */
+  const moveAfter = (what: (l: string) => boolean, after: (l: string) => boolean) => {
+    const from = lines.findIndex(what);
+    const moved = lines.filter((_, i) => i !== from);
+    const to = moved.findIndex(after);
+    return [...moved.slice(0, to + 1), lines[from] ?? "", ...moved.slice(to + 1)].join("\n") + "\n";
+  };
+  const whole = normal(parseClaudeCodeSession({ main, subagents: [] }));
+  const blob = "57f8db8649716b6b1a1f14bfb320331edaae432d80df2b5b26ed801af4679fa3";
+
+  test("a blob written after its request resolves the waiting call", () => {
+    const late = moveAfter(
+      (l) => l.includes('"type":"api-request-blob"') && l.includes(blob),
+      (l) => l.includes('"type":"api-request"') && l.includes(blob),
+    );
+    expect(normal(parseClaudeCodeSession({ main: late, subagents: [] }))).toEqual(whole);
+  });
+
+  test("a blob written after the response too resolves the call and splits it then", () => {
+    const late = moveAfter(
+      (l) => l.includes('"type":"api-request-blob"') && l.includes(blob),
+      (l) => l.includes('"requestRef":"5810d630') && l.includes('"type":"assistant"'),
+    );
+    expect(normal(parseClaudeCodeSession({ main: late, subagents: [] }))).toEqual(whole);
+  });
+
+  test("a shape written after the first request resolves it", () => {
+    const late = moveAfter(
+      (l) => l.includes('"type":"api-request-shape"'),
+      (l) => l.includes('"type":"api-request"'),
+    );
+    expect(normal(parseClaudeCodeSession({ main: late, subagents: [] }))).toEqual(whole);
+  });
+});

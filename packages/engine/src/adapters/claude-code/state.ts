@@ -32,6 +32,8 @@ export interface ParserState {
   nextIndex: Record<string, number>;
   /** Calls with a complete request that wait for their response. */
   pending: Record<string, 1>;
+  /** Calls whose request is not complete yet, with their transcript: a later row may bring the missing part. */
+  waiting: Record<string, string>;
   lanes: Record<string, Lane>;
   /** The size of each group of Blocks split from one exact total. */
   groupSizes: Record<string, number>;
@@ -140,6 +142,7 @@ export function emptyState(): ParserState {
     calls: {},
     nextIndex: {},
     pending: {},
+    waiting: {},
     lanes: {},
     groupSizes: {},
     toolCalls: {},
