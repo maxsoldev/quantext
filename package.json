@@ -21,7 +21,8 @@
     "check:bun": "bun test ./fixtures ./packages/engine ./packages/shared ./packages/web ./scripts && bun scripts/check-layers.ts && bun scripts/scan-personal-data.ts && bun scripts/scan-personal-data.ts --history",
     "scan": "node scripts/scan-personal-data.ts && pnpm scan:history && sh scripts/gitleaks.sh",
     "scan:history": "node scripts/scan-personal-data.ts --history",
-    "test:mod": "node scripts/test-mod.ts"
+    "test:mod": "node scripts/test-mod.ts",
+    "build:plugin": "node scripts/build-plugin.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

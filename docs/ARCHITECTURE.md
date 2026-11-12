@@ -40,8 +40,8 @@ agents (SQL, CLI, later MCP). Nothing leaves the machine.
 1. `$.http.fetch('http://127.0.0.1:<port>/health')`, with the port from `~/.quantext/engine.json` (4747 when free;
    ADR 25). If it answers, go to step 4.
 2. Find a runtime: `node` ≥ 22.18, else `bun`, else show a clear message with install steps.
-3. Start it detached: `$.process.run(['sh', '-c', 'nohup <runtime> "<plugin root>/dist/engine.js" >>"<log>" 2>&1 </dev/null &'])`.
-   Poll `/health`.
+3. Start it detached: `$.process.run(['sh', '-c', 'umask 077; mkdir -p "$3" && nohup "$0" "$1" serve --live while-viewer >>"$2" 2>&1 </dev/null &', runtime, '<plugin root>/engine/engine.js', log, dataDir])`,
+   paths as arguments (ADR 27). Poll `/health` up to 10 s.
 4. Open the URL: `open` on macOS, `xdg-open` on Linux (there is no open-URL API in the mod).
 
 The engine:
@@ -162,7 +162,8 @@ fixtures/    session logs recorded on a dummy repo, one folder per harness versi
 docs/        this file, the store schema (schema.md), decision records (docs/adr/)
 ```
 
-The release is one plugin folder: the mod, `dist/engine.js` and the built viewer.
+The release is one plugin folder, `dist/plugin/` from `pnpm build:plugin`: the mod, the bundled engine and the built
+viewer (ADR 27).
 
 ## Quality bar
 
