@@ -336,9 +336,6 @@ function BillingLegend({ noUsage }: { noUsage: boolean }) {
         </button>
       </li>
       <li>
-        <Term id="prompt-cache">Prompt cache</Term>
-      </li>
-      <li>
         <button
           type="button"
           className="tip-anchor legend-item"
@@ -360,6 +357,9 @@ function BillingLegend({ noUsage }: { noUsage: boolean }) {
           </button>
         </li>
       )}
+      <li>
+        <Term id="prompt-cache">Prompt cache</Term>
+      </li>
     </ul>
   );
 }
