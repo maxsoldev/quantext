@@ -195,6 +195,8 @@ export interface BlockSource {
   mcpServer?: string;
   /** The skill whose text or call this is. */
   skill?: string;
+  /** The kind of context the harness attached, in its own words (a file, a skill listing, session context, …). */
+  attachment?: string;
 }
 
 /** One unique piece of content sent to the model, identified by the hash of its content. */

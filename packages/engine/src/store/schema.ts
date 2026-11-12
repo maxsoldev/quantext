@@ -106,6 +106,7 @@ CREATE TABLE log_blocks (
   file_path TEXT,
   mcp_server TEXT,
   skill TEXT,
+  attachment TEXT,
   PRIMARY KEY (log, hash)
 ) STRICT, WITHOUT ROWID;
 
@@ -139,6 +140,7 @@ CREATE TABLE tool_calls (
   file_path TEXT,
   mcp_server TEXT,
   skill TEXT,
+  attachment TEXT,
   result_block_hash TEXT,
   is_error INTEGER NOT NULL,
   duration_ms REAL,

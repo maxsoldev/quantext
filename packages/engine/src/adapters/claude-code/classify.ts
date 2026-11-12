@@ -161,7 +161,17 @@ function classify(role: string, block: JsonObject, store: Content, fresh: boolea
   }
 }
 
+/** A user-role text, with the source of the attachment that rendered it, when one did (exact text only). */
 function userText(text: string, state: ParserState, fresh: boolean): Classified {
+  const plain = plainUserText(text, state, fresh);
+  const attached = get(state.attachments, attachedTextHash(text));
+  if (attached === undefined || plain.kind === "summary") return plain;
+  const source: BlockSource = { ...plain.source, attachment: attached.type };
+  if (source.filePath === undefined && attached.path !== undefined) source.filePath = attached.path;
+  return { kind: "reminder", source };
+}
+
+function plainUserText(text: string, state: ParserState, fresh: boolean): Classified {
   const hash = textHash(text);
   if (get(state.summaries, hash) !== undefined) return { kind: "summary", source: {} };
   const skill = get(state.skills, hash);
@@ -179,6 +189,11 @@ function userText(text: string, state: ParserState, fresh: boolean): Classified 
     return { kind: "reminder", source: last !== undefined && last.tool === result[1] ? last : toolSource(result[1]) };
   }
   return { kind: "reminder", source: {} };
+}
+
+/** The key of an attached text: the text without white space around it (the harness may add a newline). */
+export function attachedTextHash(text: string): string {
+  return textHash(text.trim());
 }
 
 /** The key under which the state remembers a text (summaries, skills). */

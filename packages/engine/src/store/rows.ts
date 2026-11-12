@@ -202,7 +202,7 @@ export function call(r: SqlRow): Call {
   return c;
 }
 
-export const LOG_BLOCK_COLUMNS = ["hash", "kind", "tool", "file_path", "mcp_server", "skill"];
+export const LOG_BLOCK_COLUMNS = ["hash", "kind", "tool", "file_path", "mcp_server", "skill", "attachment"];
 
 /** A Block's classification in one log: its kind and source. Its content is stored once, by hash. */
 export function logBlockRow(b: Block): SqlValue[] {
@@ -275,6 +275,7 @@ export const TOOL_CALL_COLUMNS = [
   "file_path",
   "mcp_server",
   "skill",
+  "attachment",
   "result_block_hash",
   "is_error",
   "duration_ms",
@@ -365,7 +366,7 @@ export function event(r: SqlRow): SessionEvent {
 }
 
 function sourceRow(s: BlockSource): (string | undefined)[] {
-  return [s.tool, s.filePath, s.mcpServer, s.skill];
+  return [s.tool, s.filePath, s.mcpServer, s.skill, s.attachment];
 }
 
 function source(r: SqlRow): BlockSource {
@@ -374,6 +375,7 @@ function source(r: SqlRow): BlockSource {
   put(s, "filePath", r.file_path);
   put(s, "mcpServer", r.mcp_server);
   put(s, "skill", r.skill);
+  put(s, "attachment", r.attachment);
   return s;
 }
 

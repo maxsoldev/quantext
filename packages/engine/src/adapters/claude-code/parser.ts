@@ -20,7 +20,7 @@ import { estimateBlock } from "../../providers/anthropic/estimate.ts";
 import { canonicalModel } from "../../providers/anthropic/pricing.ts";
 import { Changes } from "./changes.ts";
 import type { Classifier } from "./classify.ts";
-import { blockHash, createClassifier, textHash, toolSource } from "./classify.ts";
+import { attachedTextHash, blockHash, createClassifier, textHash, toolSource } from "./classify.ts";
 import type { Json, JsonObject } from "./json.ts";
 import { arr, num, obj, str } from "./json.ts";
 import { laneOf, splitCall } from "./lane.ts";
@@ -61,6 +61,8 @@ export const HARNESS = "claude-code";
 
 /** Rows that can bring a missing part of a waiting request. */
 const WIRE_ROWS = new Set(["api-request-blob", "api-request-shape", "api-request", "user", "assistant"]);
+/** Attached texts remembered until a Block with that text is classified, newest first. */
+const MAX_ATTACHMENTS = 64;
 /** Open ToolCalls kept in the snapshot, newest first. */
 const MAX_OPEN_TOOL_CALLS = 64;
 /** Calls kept waiting for a missing part; older ones stay unresolved. */
@@ -268,6 +270,9 @@ class Rows {
       case "cost-state":
         this.costState(data);
         break;
+      case "attachment":
+        this.attachment(data);
+        break;
       case "ai-title":
       case "custom-title":
       case "agent-name":
@@ -288,6 +293,28 @@ class Rows {
         countIgnored(this.changes().report, row.type); // known rows that hold nothing for the domain
         break;
     }
+  }
+
+  /**
+   * The texts an attachment row says the harness rendered: a Block with exactly that text gets the attachment as
+   * its source when it is classified. A row that renders nothing holds nothing for the domain.
+   */
+  private attachment(data: JsonObject): void {
+    const attachment = obj(data.attachment);
+    const parts = (arr(data.rendered) ?? []).flatMap((p) => str(obj(p)?.content) ?? []);
+    const type = str(attachment?.type);
+    if (type === undefined || parts.length === 0) {
+      countIgnored(this.changes().report, "attachment");
+      return;
+    }
+    const path = str(attachment?.filename) ?? str(attachment?.path);
+    for (const text of parts) {
+      const hash = attachedTextHash(text);
+      delete this.state.attachments[hash]; // newest last
+      put(this.state.attachments, hash, path === undefined ? { type } : { type, path });
+    }
+    const hashes = Object.keys(this.state.attachments);
+    for (const old of hashes.slice(0, Math.max(0, hashes.length - MAX_ATTACHMENTS))) delete this.state.attachments[old];
   }
 
   /** A title (the user's own wins over the harness's) or an agent name for the Session. */
