@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { segments, stopWords, toolInput } from "./model.ts";
+import { segments, stopWords, toolInput, toolWords } from "./model.ts";
 
 describe("segments", () => {
   test("splits a reply at fenced code, keeping the text's line breaks and the code's language", () => {
@@ -34,4 +34,13 @@ test("says why the model stopped in words, and keeps an unknown reason as it is"
 test("shows a tool call's input without the tool name the preview starts with", () => {
   expect(toolInput("Read", 'Read {"file_path":"src/a.ts"}')).toBe('{"file_path":"src/a.ts"}');
   expect(toolInput("Read", "other")).toBe("other");
+});
+
+test("says a tool call's input in words from its preview, even when the preview is cut", () => {
+  expect(toolWords("Read", 'Read {"file_path":"/w/repo/src/a.ts"}', "/w/repo")).toBe("src/a.ts");
+  expect(toolWords("Bash", 'Bash {"command":"ls -la","description":"Li', "/w/repo")).toBe("ls -la");
+  expect(toolWords("Edit", 'Edit {"replace_all":false,"file_path":"/w/repo/src/math.ts","old_str', "/w/repo")).toBe(
+    "src/math.ts",
+  );
+  expect(toolWords("Odd", 'Odd {"x":1}')).toBe('{"x":1}');
 });
