@@ -101,6 +101,8 @@ export interface SessionFilter {
   search?: string;
   sort?: "ended" | "started" | "cost" | "calls";
   order?: "asc" | "desc";
+  /** Only Sessions changed after this change cursor (`Page.cursor`, or a "calls added" event's). */
+  changedSince?: number;
   limit?: number;
   offset?: number;
 }
@@ -108,8 +110,11 @@ export interface SessionFilter {
 export interface Page<T> extends Meta {
   /** Items over all pages. */
   total: number;
+  /** Items before this page. */
   offset: number;
   items: T[];
+  /** `listSessions`: the store's change cursor when the page was read; pass it as `changedSince` to get what changed. */
+  cursor?: number;
 }
 
 export interface LaneSummary {
@@ -128,13 +133,16 @@ export interface SessionDetail extends Meta {
   subagents: SessionSummary[];
 }
 
+/** The parameters of a Call that every provider has; the provider's own are in `CallDetail.raw`. */
+export type StableCallParams = Omit<CallParams, "provider">;
+
 export interface CallSummary {
   id: string;
   index: number;
   lane: string;
   ts: string;
   model: string;
-  params: CallParams;
+  params: StableCallParams;
   usage?: Usage;
   cost?: Cost;
   cacheBoundary?: { tokens: number; position: number };
@@ -225,9 +233,45 @@ export interface BlockDetail extends Meta {
   source: BlockSource;
   /** The whole display text. */
   text: string;
-  /** The content as sent, with each image or document as `{"$media": hash}`; `getMedia` gives its bytes. */
-  content: JsonValue;
   media: { hash: string; mediaType: string; bytes: number }[];
+  /**
+   * Not stable: the content as the provider takes it, with each image or document as `{"$media": hash}` (its bytes
+   * from `getMedia`). Its shape is the provider's and changes with it.
+   */
+  raw: { content: JsonValue };
+}
+
+export interface CallDetail extends Meta {
+  call: CallSummary;
+  /** Not stable: the parameters as the provider names them (for Anthropic: `thinking`, `betas`). */
+  raw: { params: CallParams };
+}
+
+export interface CallListOptions {
+  lane?: string;
+  /** Only Calls with a larger index. */
+  afterIndex?: number;
+  /** At most this many (default 1000). */
+  limit?: number;
+}
+
+/** One Call on a Session's timeline: its numbers and what its context holds, by group, without its Blocks. */
+export interface TimelineCall {
+  index: number;
+  lane: string;
+  ts: string;
+  model: string;
+  usage?: Usage;
+  cost?: CostParts;
+  cacheBoundary?: { tokens: number; position: number };
+  /** False for a Call whose context cannot be rebuilt (no request, not split). */
+  rebuilt: boolean;
+  sections: Record<RequestSection | "framing", number>;
+  categories: Record<ContextCategory, number>;
+  /** The kinds of its issues, in order. */
+  issues: CallIssue["kind"][];
+  /** `summary`: the Call that wrote a compaction's summary; `after`: the first Call of the lane after it. */
+  compaction?: "summary" | "after";
 }
 
 export interface ToolCallSummary {

@@ -15,7 +15,7 @@ const RUN_CALLS = `call_blocks r JOIN calls c ON c.log = r.log AND c.session_id 
 const SESSIONS = `
 CREATE TEMP VIEW v_sessions AS
 SELECT s.log, s.id, s.parent_id, s.title, s.title_source, s.agent_name, s.harness, s.harness_version, s.project,
-  s.cwd, s.started, s.ended, s.request_log,
+  s.cwd, s.started, s.ended, s.request_log, s.changed_seq,
   count(c.id) AS calls,
   group_concat(DISTINCT coalesce(c.canonical_model, c.model)) AS models,
   coalesce(sum(c.input_tokens), 0) AS input_tokens,

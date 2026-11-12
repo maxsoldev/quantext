@@ -34,7 +34,7 @@ describe("the views against the query layer", () => {
   test("v_calls and v_context give each Call's usage and the tokens of its Blocks", async () => {
     const { q, sessions, rows } = await setup();
     for (const s of sessions) {
-      for (const call of q.listCalls(s)) {
+      for (const call of q.listCalls(s).items) {
         const [v] = rows(
           `SELECT * FROM v_calls WHERE log = ${s.log} AND session_id = '${s.id}' AND idx = ${call.index}`,
         );
@@ -58,7 +58,7 @@ describe("the views against the query layer", () => {
     const { q, sessions, rows } = await setup();
     const expected = new Map<string, { calls: number; tokens: number; read: number; usd: number }>();
     for (const s of sessions) {
-      for (const call of q.listCalls(s)) {
+      for (const call of q.listCalls(s).items) {
         for (const b of q.contextAt(s, call.index)?.blocks ?? []) {
           if (b.hash === undefined) continue;
           const k = `${s.log}:${b.hash}`;
@@ -86,7 +86,7 @@ describe("the views against the query layer", () => {
 
   test("v_tool_outputs has each tool result with its tool, input, tokens and the Calls it stayed in", async () => {
     const { q, sessions, rows } = await setup();
-    const tools = sessions.flatMap((s) => q.toolCalls(s).map((t) => ({ s, t })));
+    const tools = sessions.flatMap((s) => q.toolCalls(s).items.map((t) => ({ s, t })));
     const view = rows("SELECT * FROM v_tool_outputs");
     expect(view).toHaveLength(tools.length);
     for (const { s, t } of tools) {
@@ -101,7 +101,7 @@ describe("the views against the query layer", () => {
       if (t.resultBlockHash === undefined) continue;
       const inCalls = q
         .listCalls(s)
-        .filter((c) => q.contextAt(s, c.index)?.blocks.some((b) => b.hash === t.resultBlockHash))
+        .items.filter((c) => q.contextAt(s, c.index)?.blocks.some((b) => b.hash === t.resultBlockHash))
         .map((c) => c.index);
       expect(v).toMatchObject({ calls: inCalls.length, first_call: inCalls[0], last_call: inCalls.at(-1) });
     }
@@ -110,7 +110,7 @@ describe("the views against the query layer", () => {
   test("v_cache_breaks has each Call whose cache read dropped against the previous Call of its lane", async () => {
     const { q, sessions, rows } = await setup();
     const expected = sessions.flatMap((s) => {
-      const calls = q.listCalls(s).filter((c) => c.usage !== undefined);
+      const calls = q.listCalls(s).items.filter((c) => c.usage !== undefined);
       return calls.flatMap((c) => {
         const prev = calls.filter((p) => p.lane === c.lane && p.index < c.index).at(-1);
         const drop = (prev?.usage?.cacheReadTokens ?? 0) - (c.usage?.cacheReadTokens ?? 0);
@@ -148,7 +148,7 @@ describe("lifetime cost per Session", () => {
       const costs = lifetimes.map((b) => b.costUsd.total);
       expect(costs).toEqual([...costs].sort((a, b) => b - a));
       const outputs = q.toolOutputs(s, { sort: "tokens", limit: 2 }).items;
-      const tools = q.toolCalls(s);
+      const tools = q.toolCalls(s).items;
       expect(outputs.length).toBe(Math.min(2, tools.length));
       for (const o of outputs) {
         const [all] = rows(`SELECT * FROM v_tool_outputs WHERE log = ${s.log} AND tool_use_id = '${o.toolUseId}'`);
