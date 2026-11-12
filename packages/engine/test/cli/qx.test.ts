@@ -1,5 +1,5 @@
 /** `qx` end to end on a temporary data folder, ingested from the fixtures with `qx ingest`. */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import type { CliIo } from "../../src/cli/index.ts";
@@ -10,6 +10,27 @@ import { copyScenario } from "../ingest/corpus.ts";
 import { onCleanup, tempDir } from "../store/temp.ts";
 
 const QX = join(import.meta.dirname, "../../src/cli/qx.ts");
+
+/** The pid of the first child of `pid`, once it has one. */
+async function childOf(pid: number): Promise<number> {
+  for (let i = 0; i < 200; i++) {
+    const found = spawnSync("pgrep", ["-P", String(pid)], { encoding: "utf8" })
+      .stdout.trim()
+      .split("\n")[0];
+    if (found !== undefined && found !== "") return Number(found);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`process ${pid} started no child`);
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false; // ESRCH: no such process
+  }
+}
 
 /** Whether this runtime's SQLite lets a program deny statements (`node:sqlite` from Node 24). */
 function authorizerSupported(): boolean {
@@ -123,11 +144,39 @@ describe("qx", () => {
 
   test.skipIf(!authorizerSupported())("lets SQLite deny anything but reads where the runtime can", async () => {
     const data = await ingested();
-    // Passes the text check, but reads the schema through a pragma: the authorizer denies it.
-    const run = await qx("sql", ...data, "SELECT name FROM pragma_table_info('calls')");
+    // Passes the text check, but names the database's files: a pragma outside the schema ones is denied.
+    const run = await qx("sql", ...data, "SELECT * FROM pragma_database_list");
     expect(run.code).toBe(EXIT.failed);
     expect(run.err).toMatch(/not authorized/i);
   });
+
+  test("lets an agent discover the schema through pragma reads, on every runtime", async () => {
+    const data = await ingested();
+    for (const sql of [
+      "SELECT name FROM pragma_table_list WHERE schema = 'main' ORDER BY name",
+      "SELECT name FROM pragma_table_info('calls')",
+      "SELECT name FROM pragma_index_list('calls')",
+    ]) {
+      const run = await qx("sql", ...data, sql, "--json");
+      expect(run.err).toBe("");
+      expect(JSON.parse(run.out).rows.length).toBeGreaterThan(0);
+    }
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "takes its SQL process along when it is killed",
+    { timeout: 30_000 },
+    async () => {
+      const data = await ingested();
+      const forever = "WITH RECURSIVE r(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM r) SELECT count(*) FROM r";
+      const parent = spawn(process.execPath, [QX, "sql", ...data, "--timeout", "20", forever], { stdio: "ignore" });
+      const child = await childOf(parent.pid ?? 0);
+      parent.kill("SIGKILL");
+      const started = Date.now();
+      while (alive(child) && Date.now() - started < 5000) await new Promise((r) => setTimeout(r, 50));
+      expect(alive(child)).toBe(false);
+    },
+  );
 
   test("reads while an engine holds the writer lock", async () => {
     const data = await ingested();

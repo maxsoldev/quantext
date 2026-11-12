@@ -223,7 +223,15 @@ async function sql(values: Values, args: string[], dataDir: string, io: CliIo): 
 /** Run the SQL child with `input` on stdin; its stdout, or "timeout" when it was killed after `ms`. */
 function runChild(input: string, ms: number): Promise<string> {
   const flags = process.versions.bun === undefined ? ["--no-warnings"] : [];
-  const child = spawn(process.execPath, [...flags, SQL_CHILD], { stdio: ["pipe", "pipe", "pipe"] });
+  // The child kills itself a little after the parent would, in case the parent cannot (it was killed).
+  const child = spawn(process.execPath, [...flags, SQL_CHILD, String(ms + 1000)], { stdio: ["pipe", "pipe", "pipe"] });
+  // Ctrl-C or a stop for qx stops the query too.
+  const forward = () => child.kill("SIGKILL");
+  const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+  for (const signal of signals) process.once(signal, forward);
+  const done = () => {
+    for (const signal of signals) process.off(signal, forward);
+  };
   return new Promise((resolve, reject) => {
     let out = "";
     let err = "";
@@ -236,10 +244,16 @@ function runChild(input: string, ms: number): Promise<string> {
     child.stderr.on("data", (d: Buffer) => (err += d.toString("utf8")));
     child.on("error", (error) => {
       clearTimeout(timer);
+      done();
       reject(error);
     });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       clearTimeout(timer);
+      done();
+      if (signal !== null && !killed) {
+        reject(new Error(`the SQL process was stopped (${signal})`));
+        return;
+      }
       if (killed) resolve("timeout");
       else if (code === 0 && out !== "") resolve(out);
       else reject(new Error(`the SQL process failed (exit ${code}): ${err.trim()}`));

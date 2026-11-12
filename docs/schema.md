@@ -250,12 +250,20 @@ WHERE log = :log AND session_id = :session
 
 **`qx sql` rules.** One statement that starts with `SELECT`, `WITH`, `VALUES` or `EXPLAIN`, and holds no word of a
 write, a schema or connection change (`INSERT`, `UPDATE`, `DELETE`, `CREATE`, `DROP`, `ALTER`, `ATTACH`, `DETACH`,
-`PRAGMA`, `VACUUM`, transactions, …). Comments and quoted text do not count. The connection is opened read-only,
-with `query_only` set, and where the runtime has an authorizer (`node:sqlite` from Node 24; not `bun:sqlite`)
-SQLite itself denies every action but reading, selecting, functions and recursive queries (so also pragma
-functions such as `pragma_table_info`). The statement runs in a child process, which is killed after
-`--timeout` seconds (default 30): neither SQLite module can interrupt a statement. At most 1000 rows
-(`--limit`); a BLOB shows as its size. `qx sql` does not run in demo mode: it reads the tables as they are.
+`PRAGMA`, `VACUUM`, transactions, …). Comments and quoted text do not count. What protects the store:
+
+- **Every runtime:** this check of the text; the file opened read-only (SQLITE_OPEN_READONLY), so no write reaches
+  it; `query_only`, so not even the temporary schema changes. Pragma functions (`pragma_table_info('calls')`,
+  `pragma_table_list`, `pragma_index_list('calls')`) are reads that SQLite allows only for pragmas without side
+  effects: use them to discover the schema.
+- **Node 24 and later** (`node:sqlite` has an authorizer; `bun:sqlite` has none): SQLite itself also denies every
+  action but reading, selecting, functions, recursive queries and the schema pragmas above (so, for example,
+  `pragma_database_list`, which names files, is denied).
+
+The statement runs in a child process. The parent kills it after `--timeout` seconds (default 30), and passes on
+Ctrl-C; a watchdog thread in the child kills it a second later, or as soon as the parent is gone, so a killed `qx`
+leaves nothing running. Neither SQLite module can interrupt a statement. At most 1000 rows (`--limit`); a BLOB
+shows as its size. `qx sql` does not run in demo mode: it reads the tables as they are.
 
 ## Later
 

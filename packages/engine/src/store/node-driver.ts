@@ -4,11 +4,24 @@ import type { RawDatabase, RawOptions, SqlRow, SqlValue } from "./driver.ts";
 
 /** SQLite's authorizer codes for reading (sqlite3.h): READ, SELECT, FUNCTION, RECURSIVE. */
 const READ_ACTIONS = new Set([20, 21, 31, 33]);
+const SQLITE_PRAGMA = 19;
+/** Pragmas that only describe the schema, so an agent can discover it (`pragma_table_info('calls')`). */
+const SCHEMA_PRAGMAS = new Set([
+  "table_info",
+  "table_xinfo",
+  "table_list",
+  "index_list",
+  "index_info",
+  "index_xinfo",
+  "foreign_key_list",
+]);
 const SQLITE_OK = 0;
 const SQLITE_DENY = 1;
 
 /** The authorizer of `node:sqlite` (Node 24 and later); not in the Node 22 types. */
-type WithAuthorizer = { setAuthorizer?: (callback: ((action: number) => number) | null) => void };
+type WithAuthorizer = {
+  setAuthorizer?: (callback: ((action: number, name: string | null) => number) | null) => void;
+};
 
 export function hasAuthorizer(): boolean {
   return typeof (DatabaseSync.prototype as unknown as WithAuthorizer).setAuthorizer === "function";
@@ -33,7 +46,11 @@ export function openNode(path: string, options: RawOptions = {}): RawDatabase {
     denyAllButReads() {
       const set = (db as unknown as WithAuthorizer).setAuthorizer;
       if (typeof set !== "function") return false;
-      set.call(db, (action) => (READ_ACTIONS.has(action) ? SQLITE_OK : SQLITE_DENY));
+      set.call(db, (action, name) =>
+        READ_ACTIONS.has(action) || (action === SQLITE_PRAGMA && SCHEMA_PRAGMAS.has(String(name).toLowerCase()))
+          ? SQLITE_OK
+          : SQLITE_DENY,
+      );
       return true;
     },
     close: () => db.close(),

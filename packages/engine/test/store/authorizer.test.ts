@@ -12,7 +12,8 @@ test("a reader for reads only lets SQLite deny everything but reads, where the r
       .prepare("WITH RECURSIVE r(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM r WHERE i < 3) SELECT sum(i) AS s FROM r")
       .get(),
   ).toEqual({ s: 6 });
-  const pragma = () => reader.prepare("SELECT name FROM pragma_table_info('calls')").all();
-  if (await readsOnlyEnforced()) expect(pragma).toThrow(/not authorized/i);
-  else expect(pragma().length).toBeGreaterThan(0);
+  // Schema reads through pragmas are allowed; other pragmas (here: the database's file paths) are not.
+  expect(reader.prepare("SELECT name FROM pragma_table_info('calls')").all().length).toBeGreaterThan(0);
+  const setting = () => reader.prepare("SELECT * FROM pragma_database_list").all();
+  if (await readsOnlyEnforced()) expect(setting).toThrow(/not authorized/i);
 });

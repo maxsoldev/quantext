@@ -1,11 +1,19 @@
 /**
  * `qx sql` runs each statement in this process, so that a statement that never ends can be killed (neither SQLite
  * module can interrupt one) and never runs in the engine. Reads `{ dataDir, sql, limit }` as JSON on stdin and
- * writes `{ result }` or `{ error, rejected }` as JSON on stdout.
+ * writes `{ result }` or `{ error, rejected }` as JSON on stdout. Its first argument is the time limit in ms: a
+ * watchdog thread kills this process then, or when the parent is gone.
  */
 import "./quiet.ts";
+import { Worker } from "node:worker_threads";
 import { installViews, runSql, SqlRejectedError } from "../query/index.ts";
 import { openReader } from "../store/index.ts";
+
+const limitMs = Number(process.argv[2] ?? 30_000);
+const watchdog = new Worker(new URL("./sql-watchdog.ts", import.meta.url), {
+  workerData: { parent: process.ppid, deadline: Date.now() + limitMs },
+});
+watchdog.unref();
 
 const chunks: Buffer[] = [];
 for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
