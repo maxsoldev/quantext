@@ -179,6 +179,9 @@ its "done when" and the bar below.
   Every number shows its basis (exact or estimate) and links to the calls it comes from.
 - **Safety:** localhost only, Host check, no CORS, no telemetry; a secret scan in CI.
 
+Issues found and deferred (not critical or high) are recorded in [`known-issues.md`](known-issues.md), with a
+proposed fix.
+
 ## Release plan
 
 ### Release 1: harness features + live context viewer
