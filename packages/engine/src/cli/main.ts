@@ -23,8 +23,9 @@ export interface CliIo {
   stderr(text: string): void;
   env: Readonly<Record<string, string | undefined>>;
   home: string;
-  /** The user name, hidden in demo mode. */
+  /** The user name and the machine's name, hidden in demo mode. */
   user?: string;
+  host?: string;
 }
 
 export const USAGE = `qx: what the model received on every call, from the local session logs.
@@ -111,6 +112,7 @@ export async function main(argv: readonly string[], given: CliIo): Promise<numbe
         ...demoOf(values),
         home: io.home,
         ...(io.user === undefined ? {} : { user: io.user }),
+        ...(io.host === undefined ? {} : { host: io.host }),
       });
       return run({ values, args, query, db, io });
     } finally {
@@ -299,7 +301,11 @@ function inDemo(argv: readonly string[]): boolean {
 
 /** The same I/O with local paths and the user name hidden in what goes to stderr. */
 function redactedErrors(io: CliIo): CliIo {
-  const redact = createRedactor({ home: io.home, ...(io.user === undefined ? {} : { user: io.user }) });
+  const redact = createRedactor({
+    home: io.home,
+    ...(io.user === undefined ? {} : { user: io.user }),
+    ...(io.host === undefined ? {} : { host: io.host }),
+  });
   return { ...io, stderr: (text) => io.stderr(redact(text)) };
 }
 

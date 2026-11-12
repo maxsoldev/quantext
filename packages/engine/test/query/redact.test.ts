@@ -86,6 +86,28 @@ describe("demo mode: what the first redaction missed", () => {
   });
 });
 
+describe("demo mode: what the second review found", () => {
+  const secret = `${alice}/code/secretproj`;
+  const redact = createRedactor({ home: alice, user: "alice", hidden: [secret], host: "alice-mbp" });
+
+  test("hides a hidden project's name next to . _ - and in any case", () => {
+    expect(redact("secretproj.git, mcp__secretproj__search, SecretProj-v2 and SECRETPROJ")).toBe(
+      "<hidden project>.git, mcp__<hidden project>__search, <hidden project>-v2 and <hidden project>",
+    );
+  });
+
+  test("decodes paths encoded twice, JSON-escaped slashes and HTML entities", () => {
+    expect(redact(`a ${j("%252FUs", "ers%252Falice%252Fx")}`)).toBe("a ~/x");
+    expect(redact(j("\\/Us", "ers\\/alice\\/y"))).toBe("~/y");
+    expect(redact(j("&#x2F;Us", "ers&#x2F;alice&#47;z"))).toBe("~/z");
+  });
+
+  test("masks e-mail addresses (not git@) and the machine's name", () => {
+    expect(redact("by jane.doe@corp.example via git@github.com:x/y")).toBe("by <email> via git@github.com:x/y");
+    expect(redact("ssh ALICE-MBP.local and alice-mbp:22")).toBe("ssh <host>.local and <host>:22");
+  });
+});
+
 describe("demo mode: project allowlist", () => {
   test("allows a project by its exact path only, not every project with the same folder name", () => {
     expect(projectAllowed("/w/shop", ["/w/shop"])).toBe(true);

@@ -53,11 +53,14 @@ For showing sessions to an audience. Applied in the query layer, so the API and 
 - Only the allowed projects are visible (`--demo-project`, by exact path); every other Session, its Blocks, media,
   tool calls and memory are not found, and the report lists only their logs' entries (no folder scan issues).
 - Every other project's path (as is, JSON-escaped, percent-encoded, as the harness's encoded folder name, and its
-  folder name as a word of 4 or more characters) becomes `<hidden project>` wherever it shows in visible text.
-- Percent-encoded text is decoded first. Paths in the project are shown relative to it (`src/a.ts`, the project
+  folder name of 4 or more characters as a word, also next to `.`, `_`, `-`, in any case) becomes
+  `<hidden project>` wherever it shows in visible text.
+- Encoded text is decoded first: percent-encoding (also twice), `\/`, HTML character references. Paths in the project are shown relative to it (`src/a.ts`, the project
   itself as `.`), the project as its folder name; any home folder (macOS, Linux, Windows, with spaces or letters
   beyond ASCII, JSON-escaped or encoded, also `C--Users-<name>`) as `~`.
 - The user name, in any case, is hidden after `@ / \ - : ~` and before `@` (`git@github.com:<name>/…`,
-  `~<name>`, `<name>@host`), not inside other words. Errors on stderr are redacted the same way.
+  `~<name>`, `<name>@host`), not inside other words. E-mail addresses (but `git@`) become `<email>`, the
+  machine's name `<host>`. Errors on stderr are redacted the same way.
+- Text is redacted in full before it is cut to a preview, so that a cut word cannot escape the patterns.
 - Responses carry `redacted: true` and `blurImages: true`: the viewer blurs images, which may show what text hides.
 - `qx sql` refuses to run in demo mode (exit 2): it reads the tables as they are.

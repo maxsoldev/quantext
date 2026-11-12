@@ -74,9 +74,10 @@ export interface QueryOptions {
   /** The adapter's codec: Block text and media from stored content. */
   codec: StoreCodec;
   demo?: DemoOptions;
-  /** The home folder and user name to hide in demo mode. */
+  /** The home folder, user name and machine name to hide in demo mode. */
   home?: string;
   user?: string;
+  host?: string;
   now?: () => number;
   /** A Session is live when its last event is at most this old. Default 5 minutes. */
   liveWindowMs?: number;
@@ -158,6 +159,7 @@ export function createQuery(options: QueryOptions): Query {
         redact: createRedactor({
           ...nonEmpty("home", options.home),
           ...nonEmpty("user", options.user),
+          ...nonEmpty("host", options.host),
           hidden,
           paths: redacting,
         }),
