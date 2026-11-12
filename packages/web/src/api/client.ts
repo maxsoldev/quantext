@@ -7,6 +7,7 @@ import type {
   BlockDetail,
   CacheBreak,
   CallContext,
+  CallResponseDetail,
   CompactionDetail,
   ContextDiff,
   EngineStatus,
@@ -46,6 +47,7 @@ export interface Api {
   cacheBreaks(key: SessionKey, signal?: AbortSignal): Promise<Items<CacheBreak>>;
   context(key: SessionKey, call: number, signal?: AbortSignal): Promise<CallContext>;
   diff(key: SessionKey, call: number, signal?: AbortSignal): Promise<ContextDiff>;
+  response(key: SessionKey, call: number, signal?: AbortSignal): Promise<CallResponseDetail>;
   toolCalls(key: SessionKey, signal?: AbortSignal): Promise<Items<ToolCallSummary>>;
   toolOutputs(key: SessionKey, signal?: AbortSignal): Promise<Items<ToolOutput>>;
   compactions(key: SessionKey, signal?: AbortSignal): Promise<Items<CompactionDetail>>;
@@ -72,6 +74,7 @@ export function createApi(fetchFn: FetchFn): Api {
     cacheBreaks: (key, signal) => get(`${sessionPath(key)}/cache-breaks`, signal),
     context: (key, call, signal) => get(`${sessionPath(key)}/calls/${call}/context`, signal),
     diff: (key, call, signal) => get(`${sessionPath(key)}/calls/${call}/diff`, signal),
+    response: (key, call, signal) => get(`${sessionPath(key)}/calls/${call}/response`, signal),
     toolCalls: (key, signal) => get(`${sessionPath(key)}/tool-calls`, signal),
     toolOutputs: (key, signal) => get(`${sessionPath(key)}/tool-outputs?limit=10000`, signal),
     compactions: (key, signal) => get(`${sessionPath(key)}/compactions`, signal),

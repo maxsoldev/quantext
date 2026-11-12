@@ -2,7 +2,14 @@
  * One Session: its numbers, the timeline of one lane, a scrubber over its Calls, and the context of the selected
  * Call. The selected Call is in the URL (`?call=<number>`, 1-based; see `callNumber`); with none, the page follows the lane's latest Call.
  */
-import type { CallContext, ContextDiff, SessionKey, SessionSummary, TimelineCall } from "@quantext/shared";
+import type {
+  CallContext,
+  CallResponseDetail,
+  ContextDiff,
+  SessionKey,
+  SessionSummary,
+  TimelineCall,
+} from "@quantext/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client.ts";
 import { laneNames, laneView, mainLane } from "../chart/lane.ts";
@@ -14,6 +21,7 @@ import { DiffCard } from "../diff/DiffCard.tsx";
 import { count, duration, percent, projectName, shortModel, usd, when } from "../format/format.ts";
 import { useLiveVersion } from "../live/hooks.ts";
 import { Link, navigate } from "../nav.tsx";
+import { ResponseCard } from "../response/ResponseCard.tsx";
 import type { Route } from "../route.ts";
 import { callNumber } from "../route.ts";
 import { Term } from "../teach/Term.tsx";
@@ -220,6 +228,9 @@ export function SessionPage({ route }: { route: SessionRoute }) {
                 onOpened={clearBlock}
               />
             )}
+            {callIndex !== undefined && (
+              <ResponseCard sessionKey={key} call={callIndex} resp={call.resp} next={view?.calls[place + 1]?.index} />
+            )}
           </div>
           {view && view.calls.length > 0 && (
             <Scrubber
@@ -290,7 +301,7 @@ function Subagents({ parent, items }: { parent: SessionKey; items: readonly Sess
   );
 }
 
-/** The selected Call's context, its diff, and the context of the Call it is compared with. */
+/** The selected Call's context, its diff, the context of the Call it is compared with, and its response. */
 function useCallData(key: SessionKey, call: number | undefined, version: number) {
   const ctx = useLoad(
     (signal) => (call === undefined ? pending<CallContext>() : api.context(key, call, signal)),
@@ -300,12 +311,16 @@ function useCallData(key: SessionKey, call: number | undefined, version: number)
     (signal) => (call === undefined ? pending<ContextDiff>() : api.diff(key, call, signal)),
     [key.log, key.id, call, version],
   );
+  const resp = useLoad(
+    (signal) => (call === undefined ? pending<CallResponseDetail>() : api.response(key, call, signal)),
+    [key.log, key.id, call, version],
+  );
   const previous = diff.value?.call === call ? diff.value?.previous : undefined;
   const prev = useLoad(
     async (signal) => (previous === undefined ? undefined : api.context(key, previous, signal)),
     [key.log, key.id, previous],
   );
-  return { ctx, diff, prev };
+  return { ctx, diff, prev, resp };
 }
 
 /** No Call to load yet: stay loading. */
