@@ -83,6 +83,15 @@ describe("usage over the rows of one response", () => {
     expect(call?.issues).toEqual([]);
   });
 
+  test("a later copy of the message with output 0 does not drop the output", () => {
+    const done = callOf(head + row("a", first) + row("b", { ...first, output: 600 }));
+    const call = callOf(
+      head + row("a", first) + row("b", { ...first, output: 600 }) + row("b", { ...first, output: 0 }),
+    );
+    expect(call?.usage?.outputTokens).toBe(600);
+    expect(call?.cost?.totalUsd).toBe(done?.cost?.totalUsd);
+  });
+
   test("a different non-zero input side after the split is still flagged", () => {
     const call = callOf(head + row("a", first) + row("b", { ...first, input: 500 }));
     expect(call?.issues.map((i) => i.kind)).toEqual(["unreconciled-tokens"]);

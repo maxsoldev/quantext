@@ -655,7 +655,7 @@ class Rows {
   }
 
   /**
-   * A later row of the same response: keep the first input side and take the latest output side. A different
+   * A later row of the same response: keep the first input side and take the largest output side. A different
    * input side after the split is flagged (the split used the first); a change of the output only is not.
    */
   private usageChanged(call: Call, next: Usage, raw: JsonObject): void {

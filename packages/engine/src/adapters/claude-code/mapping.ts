@@ -89,13 +89,15 @@ export function sameInput(a: Usage, b: Usage): boolean {
 
 /**
  * The Usage of a response logged over several rows: the first input side that is reported (later rows of one
- * message may carry 0 there, with only a cache write split), and the latest output side.
+ * message may carry 0 there, with only a cache write split), and the largest output side. The output only grows
+ * while a response streams, but Claude Code can log the message again later with output 0.
  */
 export function mergeUsage(known: Usage, next: Usage): Usage {
   const merged: Usage = { ...(hasInput(known) ? known : next) };
   for (const k of OUTPUT_SIDE) {
-    if (next[k] === undefined) delete merged[k];
-    else merged[k] = next[k];
+    const v = Math.max(known[k] ?? -1, next[k] ?? -1);
+    if (v < 0) delete merged[k];
+    else merged[k] = v;
   }
   return merged;
 }
