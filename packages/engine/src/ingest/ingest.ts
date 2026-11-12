@@ -80,7 +80,8 @@ export interface Ingest {
   /** Read the projects' memory folders again (a memory document changed); returns what could not be read. */
   ingestMemory(): Promise<PathError[]>;
   /**
-   * Listen for every change event (Calls, memory, a log emptied), after its write; same rules as `onCalls`.
+   * Listen for every change event (Calls, memory, a log emptied), after its write; same rules as `onCalls`. A
+   * Session changed with no Call added or updated (a title, an event, its end) gives a `calls` event with empty lists.
    * Returns a function that stops listening.
    */
   onEvent(listener: (event: IngestEvent) => void): () => void;
@@ -120,9 +121,11 @@ export function createIngest(options: IngestOptions): Ingest {
       }
     }
   };
+  /** One event per Session the write changed: with no Calls listed when only the Session itself changed. */
   const emit = (log: string, result: WriteResult, summary: IngestSummary) => {
-    for (const { sessionId, added, addedIndexes, updated } of result.calls) {
-      if (added.length === 0 && updated.length === 0) continue;
+    const byId = new Map(result.calls.map((c) => [c.sessionId, c]));
+    for (const sessionId of new Set([...result.calls.map((c) => c.sessionId), ...result.sessions])) {
+      const { added = [], addedIndexes = [], updated = [] } = byId.get(sessionId) ?? {};
       const event: CallsEvent = {
         kind: "calls",
         logId: result.log,
@@ -213,7 +216,7 @@ export function createIngest(options: IngestOptions): Ingest {
     },
     onCalls(listener) {
       const calls = (event: IngestEvent) => {
-        if (event.kind === "calls") listener(event);
+        if (event.kind === "calls" && (event.added.length > 0 || event.updated.length > 0)) listener(event);
       };
       listeners.add(calls);
       return () => listeners.delete(calls);

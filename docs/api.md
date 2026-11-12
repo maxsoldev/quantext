@@ -43,7 +43,7 @@ demo mode), Call, Block or media; 403 `forbidden-host`, `forbidden-origin`, `for
 
 | Event | id | data |
 |---|---|---|
-| `calls` | `<cursor>.<n>` | `VisibleEvent` of kind `calls`: `cursor`, `session`, `added` (`id`, `index`), `updated` |
+| `calls` | `<cursor>.<n>` | `VisibleEvent` of kind `calls`: `cursor`, `session`, `added` (`id`, `index`), `updated`. One per Session each write changed; both lists empty when only the Session changed (its end, title, events), so the stream's cursor keeps up with the store's |
 | `memory` | `<cursor>.<n>` | `{ kind, cursor, projects }` |
 | `log-removed` | `<cursor>.<n>` | `{ kind, cursor, logId }` (its Sessions are read again from the start) |
 | `resync` | `<cursor>` | `SseResync`: `cursor`, `since`. Read `/api/v1/sessions?changedSince=<since>` again |

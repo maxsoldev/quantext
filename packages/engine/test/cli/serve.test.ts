@@ -67,13 +67,18 @@ function start(argv: string[], hooks: Partial<NonNullable<CliIo["serve"]>> = {})
 }
 
 /** A transcript root with the first half of the basic-tools fixture, and a way to append the rest. */
-function halfSession(): { root: string; appendRest(): void } {
+function halfSession(): { root: string; appendRest(): void; appendOne(): void } {
   const root = tempDir("qx-root-");
   const files = layout(root, "basic-tools");
   const lines = readFileSync(files.source, "utf8").split(/(?<=\n)/);
-  const half = Math.floor(lines.length / 2);
-  writeText(files.main, lines.slice(0, half).join(""));
-  return { root, appendRest: () => appendFileSync(files.main, lines.slice(half).join("")) };
+  let at = Math.floor(lines.length / 2);
+  writeText(files.main, lines.slice(0, at).join(""));
+  return {
+    root,
+    appendRest: () => appendFileSync(files.main, lines.slice(at).join("")),
+    /** The next line: a user's tool result, which changes the Session but adds no Call. */
+    appendOne: () => appendFileSync(files.main, lines[at++] ?? ""),
+  };
 }
 
 /** The engine file once it is written (5 s at most). */
@@ -90,10 +95,10 @@ async function engineFile(dataDir: string, other?: number): Promise<EngineFile> 
 }
 
 /** Open the event stream and wait for a frame whose text matches. */
-async function sse(port: number, match: RegExp, act: () => void): Promise<string> {
+async function sse(port: number, match: RegExp, act: () => void, query = ""): Promise<string> {
   const { request } = await import("node:http");
   return new Promise((resolve, reject) => {
-    const req = request({ host: "127.0.0.1", port, path: "/api/v1/events", agent: false }, (res) => {
+    const req = request({ host: "127.0.0.1", port, path: `/api/v1/events${query}`, agent: false }, (res) => {
       let text = "";
       res.on("data", (chunk: Buffer) => {
         const first = text === "";
@@ -143,6 +148,25 @@ describe("qx serve", () => {
     run.stop();
     expect(await run.done).toBe(EXIT.ok);
     expect(existsSync(join(dataDir, "engine.json"))).toBe(false);
+  });
+
+  test("a write that changes a Session but adds no Call moves the stream's cursor with the store's", async () => {
+    const { root, appendOne } = halfSession();
+    const dataDir = tempDir("qx-data-");
+    start(["--root", root, "--data-dir", dataDir]);
+    const file = await engineFile(dataDir);
+    const cursorOf = async () => (await get(file.port, "/api/v1/sessions")).json<{ cursor: number; total: number }>();
+    let page = await cursorOf();
+    for (let i = 0; i < 200 && page.total === 0; i++) page = await cursorOf();
+    const before = page.cursor;
+    const frame = await sse(file.port, /^event: calls\n/m, appendOne);
+    const after = (await cursorOf()).cursor;
+    expect(after).toBeGreaterThan(before);
+    expect(frame).toContain(`id: ${after}.0`);
+    expect(frame).toContain('"added":[]');
+    const again = await sse(file.port, /^event: (ready|resync)\n/m, () => undefined, `?cursor=${after}`);
+    expect(again).toMatch(/^event: ready\n/m);
+    expect(again).toContain(`"cursor":${after}`);
   });
 
   test("a second start reuses the running engine, and opens it with --open", async () => {

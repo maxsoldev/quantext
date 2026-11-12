@@ -603,7 +603,9 @@ describe("Calls events", () => {
     expect(memory).toMatchObject({ projectDirs: [join(s.root, "projects", "-fixture-image")] });
     const cursors = all.map((e) => e.cursor);
     expect(cursors).toEqual([...cursors].sort((a, b) => a - b));
-    expect(all.filter((e) => e.kind === "calls").length).toBe(s.events.length);
+    // onCalls gets the events that list Calls; onEvent also those of a Session changed with no Call.
+    const listing = all.filter((e) => e.kind === "calls" && e.added.length + e.updated.length > 0);
+    expect(listing.length).toBe(s.events.length);
   });
 
   test("carry the store's log id, the Calls' indexes and the change cursor after their write", async () => {
