@@ -1,4 +1,6 @@
 /** The JSON routes over HTTP: one per query method, the same bodies as the query layer, strict parameters. */
+
+import { connect } from "node:net";
 import type { ApiError, Page, SessionSummary } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
 import { engine, get } from "./client.ts";
@@ -195,5 +197,42 @@ describe("/api/v1/status", () => {
     const { port } = await engine(["basic-tools"], { info, ingestStatus: () => status });
     const reply = (await get(port, "/api/v1/status")).json<{ ingest: { lastError: string } }>();
     expect(reply.ingest.lastError).toBe("a read failed (hidden in demo mode)");
+  });
+});
+
+describe("activity, for the idle exit", () => {
+  test("counts the requests it answers, not /health and not refused ones", async () => {
+    let clock = 1000;
+    const { port, api } = await engine(["basic-tools"], { now: () => clock });
+    const since = api.activity().lastActive;
+    clock = 2000;
+    await get(port, "/health");
+    await get(port, "/api/v1/sessions", { host: "evil.example" });
+    await get(port, "/api/v1/sessions", { origin: "https://evil.example" });
+    expect(api.activity().lastActive).toBe(since);
+    clock = 3000;
+    await get(port, "/api/v1/sessions");
+    expect(api.activity().lastActive).toBe(3000);
+  });
+
+  test("decides what is the API by the parsed path", async () => {
+    const { port } = await engine(["basic-tools"]);
+    // An absolute-form target names the API too: it is checked as the API, so a navigation from elsewhere is refused.
+    // Raw sockets: Bun's HTTP client hangs on a second absolute-form request on one connection.
+    const send = (headers: string) =>
+      new Promise<string>((resolve) => {
+        let out = "";
+        const socket = connect({ host: "127.0.0.1", port }, () =>
+          socket.write(
+            `GET http://127.0.0.1:${port}/api/v1/sessions HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
+              `Connection: close\r\n${headers}\r\n`,
+          ),
+        );
+        socket.on("data", (d: Buffer) => (out += d.toString("utf8")));
+        socket.on("close", () => resolve(out));
+      });
+    const navigation = "Sec-Fetch-Site: cross-site\r\nSec-Fetch-Mode: navigate\r\nSec-Fetch-Dest: document\r\n";
+    expect(await send(navigation)).toMatch(/^HTTP\/1\.1 403 /);
+    expect(await send("")).toMatch(/^HTTP\/1\.1 200 [\s\S]*"apiVersion":1/);
   });
 });

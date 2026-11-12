@@ -27,7 +27,8 @@ an engine nobody uses must not stay.
   start goes on. When the writer lock is held, it waits up to 5 s for an engine to answer (two starts at once),
   else exits 1 with the lock's message. The writer lock stays the guarantee; `engine.json` is only the hint.
 - **Idle exit.** With `--live while-viewer` (the default) the engine stops after `--idle-minutes` (default 10)
-  with no open event stream and no request; with `--live always`, never.
+  with no open event stream and no answered request (`/health` and refused requests do not count, so a mod
+  that polls `/health` does not keep it; the mod keeps it with the stream while the viewer is open); with `--live always`, never.
 - **Shutdown** on SIGINT, SIGTERM or idle: stop the catch-up or the watcher after the batch in progress (each
   batch's parser snapshot and offsets are written with it), end the event streams, close the sockets and both
   connections (releasing the lock), remove `engine.json`, exit 0. A second signal exits at once (130).

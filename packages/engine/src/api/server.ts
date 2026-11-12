@@ -115,13 +115,26 @@ export function createApi(options: ApiOptions): Api {
   const sockets = new Set<Socket>();
 
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
-    const raw = req.url ?? "/";
-    const api = raw.startsWith(API_PREFIX) || raw === "/api/v1" || raw.startsWith("/api/");
-    const refused = refusal(req, port, api || raw.startsWith("/health"));
+    let url: URL | undefined;
+    try {
+      url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
+    } catch {
+      url = undefined; // refused below, as the API (the strictest), or a 400
+    }
+    const api = url === undefined || url.pathname === "/api/v1" || url.pathname.startsWith("/api/");
+    const refused = refusal(req, port, api || url?.pathname === "/health");
     if (refused !== undefined) return sendError(req, res, refused);
-    const url = parseUrl(raw, port);
+    if (url === undefined) throw badRequest("the URL is not one");
     const segments = decodeSegments(url.pathname);
     if (url.pathname === "/health") return sendJson(req, res, 200, health);
+    // Only an answered request is activity: a mod polling /health does not keep the engine.
+    const touch = () => {
+      lastActive = now();
+    };
+    touch();
+    // Bun tells a closed event stream on the request only, Node on both.
+    req.on("close", touch);
+    res.on("close", touch);
     if (url.pathname === "/api/v1/status") {
       if ([...url.searchParams.keys()].length > 0) throw badRequest("status takes no parameters");
       return sendJson(req, res, 200, status());
@@ -171,13 +184,6 @@ export function createApi(options: ApiOptions): Api {
       connectionsCheckingInterval: 500,
     },
     (req, res) => {
-      const touch = () => {
-        lastActive = now();
-      };
-      touch();
-      // Bun tells a closed event stream on the request only, Node on both.
-      req.on("close", touch);
-      res.on("close", touch);
       handle(req, res).catch((error: unknown) => {
         if (!(error instanceof HttpError)) onError(error);
         const failure = error instanceof HttpError ? error : new HttpError(500, "internal", "the engine failed");
@@ -220,15 +226,6 @@ export function createApi(options: ApiOptions): Api {
       });
     },
   };
-}
-
-/** The request target as a URL; `..` and `%2e%2e` segments are resolved away by the URL parser. */
-function parseUrl(raw: string, port: number): URL {
-  try {
-    return new URL(raw, `http://127.0.0.1:${port}`);
-  } catch {
-    throw badRequest("the URL is not one");
-  }
 }
 
 /** The path's segments, each percent-decoded once; a bad encoding is a 400. */
