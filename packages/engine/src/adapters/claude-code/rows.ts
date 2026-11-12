@@ -30,27 +30,25 @@ const KNOWN_TYPES = new Set([
 ]);
 const KNOWN_SYSTEM_SUBTYPES = new Set(["compact_boundary"]);
 
-/** The known rows of one transcript, in order; unknown and unreadable rows are added to `report`. */
-export function readRows(name: string, text: string, report: IngestReport): Row[] {
-  const rows: Row[] = [];
-  text.split("\n").forEach((line, index) => {
-    if (line.trim() === "") return;
-    const at = `${name}:${index + 1}`;
-    const data = parseLine(line);
-    if (typeof data === "string") {
-      report.unreadable.push({ at, reason: data });
-      return;
-    }
-    const kind = kindOf(data);
-    if (kind === undefined) {
-      report.unreadable.push({ at, reason: "row has no type" });
-    } else if (isKnown(kind)) {
-      rows.push({ at, type: kind, data });
-    } else {
-      countUnknown(report, kind);
-    }
-  });
-  return rows;
+/**
+ * The row of one complete line, or undefined for a blank, unknown or unreadable line (counted in `report`, the
+ * report of this read).
+ */
+export function readLine(at: string, line: string, report: IngestReport): Row | undefined {
+  if (line.trim() === "") return undefined;
+  const data = parseLine(line);
+  if (typeof data === "string") {
+    report.unreadable.push({ at, reason: data });
+    return undefined;
+  }
+  const kind = kindOf(data);
+  if (kind === undefined) {
+    report.unreadable.push({ at, reason: "row has no type" });
+    return undefined;
+  }
+  if (isKnown(kind)) return { at, type: kind, data };
+  countUnknown(report, kind);
+  return undefined;
 }
 
 /** Add one to the count of an unknown record kind. Any string is a safe kind, also `__proto__`. */

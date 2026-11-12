@@ -1,67 +1,51 @@
 import { describe, expect, test } from "vitest";
-import type { ClaudeCodeTranscripts } from "../../../src/adapters/claude-code/index.ts";
 import { parseClaudeCodeSession } from "../../../src/adapters/claude-code/index.ts";
-import { rebuildRequests } from "../../../src/adapters/claude-code/rebuild.ts";
-import { readRows } from "../../../src/adapters/claude-code/rows.ts";
-import { scenarios, transcriptsOf } from "../../fixtures.ts";
-
-function requestsOf(transcripts: ClaudeCodeTranscripts) {
-  const report = { unknownRecords: [], unreadable: [] };
-  const all = [
-    readRows("main", transcripts.main, report),
-    ...transcripts.subagents.map((s, i) => readRows(`subagent-${i}`, s.text, report)),
-  ];
-  return { rows: all.flat(), requests: rebuildRequests(all.flat()) };
-}
+import { mainRows, scenarios, transcriptsOf } from "../../fixtures.ts";
+import { blocksAt, runsAt } from "./helpers.ts";
 
 describe.each(scenarios())("rebuild of $version/$name", ({ name }) => {
-  const { rows, requests } = requestsOf(transcriptsOf(name));
-  const logged = rows.filter((row) => row.type === "api-request");
-
-  test.each(logged.map((row) => [row.data.id as string, row.data] as const))(
-    "call %s resolves to keep + tail messages and its shape",
-    (id, data) => {
-      const request = requests.get(id);
-      expect(request?.missing).toEqual([]);
-      expect(request?.messages).toHaveLength((data.keep as number) + (data.tail as unknown[]).length);
-      expect(request?.shape?.system.length).toBeGreaterThan(0);
-      expect(request?.shape?.tools.length).toBeGreaterThan(0);
-    },
+  const graph = parseClaudeCodeSession(transcriptsOf(name));
+  const logged = graph.calls.filter((call) => call.lane !== "compaction");
+  const requests = new Map(
+    mainRows(name).flatMap((row) => (row.type === "api-request" ? [[row.id as string, row]] : [])),
   );
 
-  test("no logged Call has an issue", () => {
-    const graph = parseClaudeCodeSession(transcriptsOf(name));
-    const logged = graph.calls.filter((call) => call.usage?.basis === "exact");
+  test("every logged Call resolves completely, and no logged Call has an issue", () => {
     expect(logged).toHaveLength(graph.calls.length - graph.compactions.length);
     expect(logged.filter((call) => call.issues.length > 0)).toEqual([]);
+  });
+
+  test.each(logged.map((call) => [call.id, call] as const))("call %s has keep + tail messages", (id, call) => {
+    const runs = runsAt(graph, call);
+    expect(runs).toHaveLength(call.blockCount ?? -1);
+    const row = requests.get(id);
+    if (row === undefined) return; // a subagent call: its rows are in the subagent transcript
+    const messages = new Set(runs.flatMap((r) => (r.message === undefined ? [] : [r.message])));
+    expect(messages.size).toBe((row.keep as number) + (row.tail as unknown[]).length);
   });
 });
 
 describe("rebuild of split and joined messages", () => {
+  const typesOf = (scenario: string, index: number, message: number) => {
+    const graph = parseClaudeCodeSession(transcriptsOf(scenario));
+    const call = graph.calls[index];
+    const byHash = new Map(graph.blocks.map((b) => [b.hash, b]));
+    return runsAt(graph, call)
+      .filter((r) => r.message === message)
+      .map((r) => (byHash.get(r.blockHash)?.content as { type?: string } | undefined)?.type);
+  };
+
   test("an assistant message written over several rows is one message with every block, in order", () => {
-    const { requests } = requestsOf(transcriptsOf("basic-tools"));
-    // Call 7 follows call 6, whose response was three rows: thinking, text, tool use.
-    const messages = requests.get("a90c1693-473b-43b0-aebd-df4315facde5")?.messages ?? [];
-    expect(messages[13]?.role).toBe("assistant");
-    expect(messages[13]?.content.map((block) => (block as { type: string }).type)).toEqual([
-      "thinking",
-      "text",
-      "tool_use",
-    ]);
+    // Call 6 follows call 5, whose response was three rows: thinking, text, tool use.
+    expect(typesOf("basic-tools", 6, 13)).toEqual(["thinking", "text", "tool_use"]);
   });
 
   test("a Skill tool result and the skill text after it are one user message", () => {
-    const { requests } = requestsOf(transcriptsOf("resume"));
-    const messages = requests.get("3b131579-d4ad-4b4e-a5d8-13c078886c02")?.messages ?? [];
-    expect(messages[8]?.role).toBe("user");
-    expect(messages[8]?.content.map((block) => (block as { type: string }).type)).toEqual(["tool_result", "text"]);
+    expect(typesOf("resume", 3, 8)).toEqual(["tool_result", "text"]);
   });
 
   test("a string prompt is one text block", () => {
-    const { requests } = requestsOf(transcriptsOf("resume"));
-    const first = requests.get("47bdeb4d-fd08-4a14-a4b7-3747cc2024b7")?.messages[0];
-    expect(first?.content).toHaveLength(1);
-    expect(first?.content[0]).toMatchObject({ type: "text" });
+    expect(typesOf("resume", 0, 0)).toEqual(["text"]);
   });
 });
 
@@ -78,5 +62,38 @@ describe("rebuild with a part missing from the log", () => {
       { kind: "unresolved-request", detail: `message ${blob} is not in the log` },
     ]);
     expect(graph.calls[6]?.issues).toEqual([]);
+    expect(blocksAt(graph, graph.calls[7])).toEqual([]);
+  });
+
+  test("resolves a request whose base is an earlier call than the one before", () => {
+    const { main } = transcriptsOf("basic-tools");
+    const rows = main
+      .split("\n")
+      .filter((l) => l !== "")
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    const requests = rows.filter((r) => r.type === "api-request");
+    const base = requests[3] as Record<string, unknown>;
+    const fork = { ...base, id: "fork", base: base.id, keep: 4, tail: [], timestamp: "2026-11-12T00:27:00.000Z" };
+    const reply = rows.find((r) => r.type === "assistant") as Record<string, unknown>;
+    const answer = { ...reply, requestRef: "fork", message: { ...(reply.message as object), id: "msg_fork" } };
+    const graph = parseClaudeCodeSession({
+      main: `${main}${JSON.stringify(fork)}\n${JSON.stringify(answer)}\n`,
+      subagents: [],
+    });
+    const call = graph.calls.find((c) => c.id === "fork");
+    expect(call?.issues.filter((i) => i.kind === "unresolved-request")).toEqual([]);
+    const forkBlocks = blocksAt(graph, call).map((b) => b.hash);
+    expect(forkBlocks).toEqual(
+      blocksAt(graph, graph.calls[3])
+        .slice(0, forkBlocks.length)
+        .map((b) => b.hash),
+    );
+    expect(
+      new Set(
+        runsAt(graph, call)
+          .map((r) => r.message)
+          .filter((m) => m !== undefined),
+      ).size,
+    ).toBe(4);
   });
 });

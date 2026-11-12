@@ -2,16 +2,12 @@ import type { Block, SessionGraph } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
 import { parseClaudeCodeSession } from "../../../src/adapters/claude-code/index.ts";
 import { scenarios, transcriptsOf } from "../../fixtures.ts";
+import { blocksAt, runsAt } from "./helpers.ts";
 
 const REPO = "/fixture-0000000000000000/repo";
 
 function blocksOfCall(graph: SessionGraph, index: number): Block[] {
-  const call = graph.calls[index];
-  const byHash = new Map(graph.blocks.map((block) => [block.hash, block]));
-  return graph.callBlocks
-    .filter((cb) => cb.callId === call?.id)
-    .sort((a, b) => a.position - b.position)
-    .flatMap((cb) => byHash.get(cb.blockHash) ?? []);
+  return blocksAt(graph, graph.calls[index]);
 }
 
 describe.each(scenarios())("blocks of $version/$name", ({ name }) => {
@@ -26,7 +22,7 @@ describe.each(scenarios())("blocks of $version/$name", ({ name }) => {
 
   test("each Call's CallBlocks have the positions 0..n-1, tool schemas first, then system, then messages", () => {
     for (const call of graph.calls) {
-      const own = graph.callBlocks.filter((cb) => cb.callId === call.id).sort((a, b) => a.position - b.position);
+      const own = runsAt(graph, call);
       expect(own.map((cb) => cb.position)).toEqual(own.map((_, i) => i));
       const order = { tools: 0, system: 1, messages: 2 };
       const sections = own.map((cb) => order[cb.section]);
@@ -45,8 +41,9 @@ describe("block kinds and sources", () => {
 
   test("the request of the first call is the tool schemas, the system blocks and the first messages", () => {
     const first = blocksOfCall(basic, 0);
+    // 12 tool schemas, less the deferred placeholder: a deferred schema is sent only where a tool reference loads it.
     expect(first.map((b) => b.kind)).toEqual([
-      ...Array(12).fill("tool-schema"),
+      ...Array(11).fill("tool-schema"),
       "system",
       "system",
       "reminder",
@@ -80,16 +77,21 @@ describe("block kinds and sources", () => {
 
   test("one content in many Calls is one Block", () => {
     const system = blocksOfCall(basic, 0)[12];
-    expect(basic.callBlocks.filter((cb) => cb.blockHash === system?.hash)).toHaveLength(8);
+    expect(basic.calls.filter((call) => blocksAt(basic, call).some((b) => b.hash === system?.hash))).toHaveLength(8);
+    expect(basic.callBlocks.filter((r) => r.blockHash === system?.hash)).toHaveLength(1);
   });
 
-  test("cache breakpoints are marked on the blocks that carry them", () => {
-    const first = basic.callBlocks.filter((cb) => cb.callId === basic.calls[0]?.id && cb.cacheBreakpoint);
-    expect(first.map((cb) => [cb.section, cb.message, cb.position])).toEqual([
-      ["system", undefined, 12],
-      ["system", undefined, 13],
-      ["messages", 1, 16],
-    ]);
+  test("cache breakpoints are positions of the call", () => {
+    expect(basic.calls[0]?.cacheBreakpoints).toEqual([11, 12, 15]);
+  });
+
+  test("a deferred tool schema is sent right after the tool reference that loads it", () => {
+    const mcp = parseClaudeCodeSession(transcriptsOf("mcp-deferred"));
+    const runs = runsAt(mcp, mcp.calls[1]);
+    const byHash = new Map(mcp.blocks.map((b) => [b.hash, b]));
+    const at = runs.findIndex((r) => byHash.get(r.blockHash)?.source.tool === "mcp__dictionary__lookup_word");
+    expect(runs[at]?.section).toBe("messages");
+    expect(JSON.stringify(byHash.get(runs[at - 1]?.blockHash ?? "")?.content)).toContain("tool_reference");
   });
 
   test("an MCP tool schema and its result name the MCP server", () => {
@@ -143,6 +145,6 @@ describe("content blocks the adapter does not know", () => {
     );
     const graph = parseClaudeCodeSession({ main: odd, subagents: [] });
     expect(graph.report.unknownRecords).toEqual([{ kind: "content block brand_new", count: 1 }]);
-    expect(blocksOfCall(graph, 0)[16]?.kind).toBe("system");
+    expect(blocksOfCall(graph, 0)[15]?.kind).toBe("system");
   });
 });

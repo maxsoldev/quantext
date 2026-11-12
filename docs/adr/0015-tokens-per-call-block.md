@@ -1,6 +1,6 @@
 # 15. Tokens belong to the CallBlock; the end of a request is framing
 
-Status: accepted
+Status: accepted; CallBlocks became runs in ADR 17
 
 ## Context
 

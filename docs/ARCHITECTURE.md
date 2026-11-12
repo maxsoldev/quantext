@@ -115,13 +115,15 @@ the mod sandbox accepts no other imports besides relative paths.
 | Entity | One per | Key fields |
 |---|---|---|
 | `Session` | session or subagent | id, parent id, harness, harness version, project, cwd, started, ended |
-| `Call` | LLM request | session, index, ts, model, params, shape hash, input / cache read / cache write / output tokens, framing tokens, cost, issues |
+| `Call` | LLM request | session, index, lane, ts, model, params, shape hash, input / cache read / cache write / output / reasoning tokens, framing tokens, cache boundary, cache breakpoints, cost, issues |
 | `Block` | unique content (by hash) | kind (tool schema, system, user, reminder, assistant, reasoning, tool call, tool result, image, document, summary), source (tool name, file path, MCP server, skill), content |
-| `CallBlock` | block × call | position, section, cache breakpoint, tokens, token basis (exact / derived / estimate), in cached prefix or not |
+| `CallBlock` | run of a block at one position over the calls of one lane | position, section, tokens, token basis (exact / derived / estimate), group, first call, last call |
 | `ToolCall` | tool use | call, name, input, result block, error, duration |
 | `Compaction` | compaction | session, before / after tokens, trigger |
 
-Lifetime cost of a block, "context at call N", and "what changed at call N" are all queries over `CallBlock`.
+Lifetime cost of a block, "context at call N", and "what changed at call N" are all queries over `CallBlock` runs
+(ADR 17). Adapters parse incrementally: each read of new bytes gives a delta of new and updated entities, and the
+adapter's state is plain JSON that ingest can persist.
 
 ## Live data flow
 

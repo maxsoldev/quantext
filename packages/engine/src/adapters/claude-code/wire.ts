@@ -1,45 +1,57 @@
 /**
- * Index every message a `tail` hash may name, by Claude Code's hash rules: an `api-request-blob` row; a `user` row
- * (role and content, a string prompt also as one text block); a run of adjacent `user` rows joined into one
- * message; and an assistant message, which is every `assistant` row of one `message.id`, in order.
+ * The messages a `tail` hash may name, by Claude Code's hash rules: an `api-request-blob` row; a `user` row (role
+ * and content, a string prompt also as one text block); an assistant message, which is every `assistant` row of one
+ * `message.id`, in order; and a run of adjacent `user` rows joined into one message, found only when a tail asks
+ * for a hash that nothing else gives (so each run is hashed once per miss, not on every row).
  */
 import { sha256Sorted } from "./hash.ts";
-import type { Json } from "./json.ts";
+import type { Json, JsonObject } from "./json.ts";
 import { arr, obj, str } from "./json.ts";
-import type { WireMessage } from "./rebuild.ts";
-import type { Row } from "./rows.ts";
+import { get, put } from "./records.ts";
+import type { ParserState, TranscriptState, WireMessage } from "./state.ts";
 
-export function wireMessages(rows: readonly Row[]): Map<string, WireMessage> {
-  const index = new Map<string, WireMessage>();
-  const add = (role: string, content: Json[], hashed: Json = content) =>
-    index.set(sha256Sorted({ role, content: hashed }), { role, content });
-  const assistant = new Map<string, Json[]>();
-  let userRun: Json[][] = [];
-  for (const row of rows) {
-    const message = obj(row.data.message);
-    if (row.type === "api-request-blob" && message !== undefined) {
-      const hash = str(row.data.hash);
-      if (hash !== undefined) index.set(hash, { role: str(message.role) ?? "", content: blocksOf(message.content) });
-    }
-    if (row.type === "assistant") {
-      userRun = [];
-      const id = str(message?.id);
-      if (id !== undefined) assistant.set(id, [...(assistant.get(id) ?? []), ...(arr(message?.content) ?? [])]);
-    }
-    if (row.type === "user" && message !== undefined) {
-      const content = blocksOf(message.content);
-      add("user", content, message.content ?? null);
-      add("user", content);
-      userRun.push(content);
-      for (let start = 0; start < userRun.length - 1; start++) add("user", userRun.slice(start).flat());
-    }
+export function wireHash(role: string, content: Json): string {
+  return sha256Sorted({ role, content });
+}
+
+export function addBlob(state: ParserState, data: JsonObject): void {
+  const hash = str(data.hash);
+  const message = obj(data.message);
+  if (hash === undefined || message === undefined) return;
+  put(state.messages, hash, { role: str(message.role) ?? "", content: blocksOf(message.content) });
+}
+
+export function addUserRow(state: ParserState, transcript: TranscriptState, message: JsonObject): void {
+  const content = blocksOf(message.content);
+  const role = str(message.role) ?? "user";
+  put(state.messages, wireHash(role, message.content ?? null), { role, content });
+  if (typeof message.content === "string") put(state.messages, wireHash(role, content), { role, content });
+  transcript.userRun.push(content);
+}
+
+export function addAssistantRow(state: ParserState, transcript: TranscriptState, message: JsonObject): void {
+  transcript.userRun = [];
+  const id = str(message.id);
+  if (id === undefined) return;
+  const content = [...(get(state.assistant, id) ?? []), ...(arr(message.content) ?? [])];
+  put(state.assistant, id, content);
+  put(state.messages, wireHash("assistant", content), { role: "assistant", content });
+}
+
+/** The message a tail hash names; joins the transcript's current run of user rows when nothing else matches. */
+export function resolve(state: ParserState, transcript: TranscriptState, hash: string): WireMessage | undefined {
+  const known = get(state.messages, hash);
+  if (known !== undefined) return known;
+  const run = transcript.userRun;
+  for (let start = 0; start < run.length - 1; start++) {
+    const content = run.slice(start).flat();
+    if (wireHash("user", content) === hash) return put(state.messages, hash, { role: "user", content });
   }
-  for (const content of assistant.values()) add("assistant", content);
-  return index;
+  return undefined;
 }
 
 /** Message content as blocks: a string is one text block. */
-function blocksOf(content: Json | undefined): Json[] {
+export function blocksOf(content: Json | undefined): Json[] {
   if (typeof content === "string") return [{ type: "text", text: content }];
   return arr(content) ?? [];
 }

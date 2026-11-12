@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { parseClaudeCodeSession } from "../../../src/adapters/claude-code/index.ts";
+import { blockCosts } from "../../../src/core/pricing.ts";
 import { mainRows, scenarios, transcriptsOf } from "../../fixtures.ts";
+import { runsAt } from "./helpers.ts";
 
 describe.each(scenarios())("cost of $version/$name", ({ name }) => {
   const graph = parseClaudeCodeSession(transcriptsOf(name));
@@ -33,9 +35,8 @@ describe.each(scenarios())("cost of $version/$name", ({ name }) => {
     "call %i: its blocks' cost shares and its framing add up to its input cost",
     (_, call) => {
       const cost = call.cost;
-      const shares = graph.callBlocks
-        .filter((cb) => cb.callId === call.id)
-        .reduce((sum, cb) => sum + (cb.costUsd ?? 0), 0);
+      const tokens = runsAt(graph, call).map((r) => r.tokens ?? 0);
+      const shares = call.usage && cost ? blockCosts(tokens, call.usage, cost).reduce((a, b) => a + b, 0) : 0;
       const framing = (call.framingTokens * (cost?.inputUsd ?? 0)) / (call.usage?.inputTokens || 1);
       expect(shares + framing).toBeCloseTo(
         (cost?.inputUsd ?? 0) + (cost?.cacheReadUsd ?? 0) + (cost?.cacheWriteUsd ?? 0),

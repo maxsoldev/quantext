@@ -18,6 +18,7 @@ describe("a manual compaction", () => {
         trigger: "manual",
         beforeTokens: 16778,
         afterTokens: 2865,
+        beforeCallId: graph.calls[2]?.id,
         summaryCallId: `${BOUNDARY}:summary`,
       },
     ]);
@@ -46,15 +47,12 @@ describe("a manual compaction", () => {
     expect(summary?.cost?.totalUsd).toBeCloseTo(1.1 * (0.0686002 - 0.0449442), 10);
   });
 
-  test("flags that the summarising request is not in the log, and keeps the context it was sent", () => {
+  test("flags that the summarising request is not in the log, and names the call whose context it summarised", () => {
     expect(summary?.issues).toEqual([
       { kind: "unresolved-request", detail: "the summarising request is not in the log, only its derived usage" },
     ]);
-    const before = graph.callBlocks.filter((cb) => cb.callId === graph.calls[2]?.id);
-    const sent = graph.callBlocks.filter((cb) => cb.callId === summary?.id);
-    expect(sent.slice(0, before.length).map((cb) => cb.blockHash)).toEqual(before.map((cb) => cb.blockHash));
-    expect(sent).toHaveLength(before.length + 1); // and the last response, a text
-    expect(sent.every((cb) => cb.tokens === undefined)).toBe(true);
+    expect(graph.compactions[0]?.beforeCallId).toBe(graph.calls[2]?.id);
+    expect(graph.callBlocks.filter((r) => r.lane === summary?.lane)).toEqual([]);
   });
 
   test("flags a derived input smaller than the context before the compaction", () => {

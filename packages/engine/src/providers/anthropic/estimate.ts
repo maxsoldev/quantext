@@ -2,7 +2,7 @@
  * Token estimates for Anthropic content blocks, used only to split an exact total (ADR 6). Text and JSON by
  * characters; images by Anthropic's formula from the width and height in the image header; documents are unknown.
  */
-import type { Block, JsonValue } from "@quantext/shared";
+import type { JsonValue } from "@quantext/shared";
 import type { Estimate, Estimator } from "../../core/estimate.ts";
 
 /**
@@ -21,20 +21,6 @@ const IMAGE_MAX_EDGE = 1568;
 
 /** The default estimator for Anthropic content. Pass another to `estimateRequest` to change it. */
 export const estimateBlock: Estimator = (block) => estimateContent(block.content);
-
-/**
- * Estimates for the Blocks of one request, in order. A deferred tool schema (`defer_loading`) is sent only when a
- * `tool_reference` in the request loads it, so until then it gets no tokens.
- */
-export function estimateRequest(blocks: readonly Block[], estimator: Estimator = estimateBlock): Estimate[] {
-  const referenced = new Set(blocks.flatMap((block) => toolReferences(block.content)));
-  return blocks.map((block) => {
-    const content = asObject(block.content);
-    const deferred = block.kind === "tool-schema" && content?.defer_loading === true;
-    if (deferred && !referenced.has(String(content?.name))) return { tokens: 0, method: "chars" };
-    return estimator(block);
-  });
-}
 
 function estimateContent(content: JsonValue): Estimate {
   const parts = partsOf(content);
@@ -148,13 +134,6 @@ function decodeBase64(base64: string): Uint8Array | undefined {
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) return undefined;
   const binary = atob(base64.slice(0, base64.length - (base64.length % 4)));
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
-}
-
-function toolReferences(content: JsonValue): string[] {
-  const block = asObject(content);
-  if (block === undefined) return [];
-  if (block.type === "tool_reference" && typeof block.tool_name === "string") return [block.tool_name];
-  return Array.isArray(block.content) ? block.content.flatMap(toolReferences) : [];
 }
 
 function asObject(value: JsonValue | undefined): { [key: string]: JsonValue } | undefined {

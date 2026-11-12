@@ -58,8 +58,18 @@ the skill.
 _Avoid_: origin, provenance
 
 **CallBlock**:
-One appearance of a Block in a Call, at a position in that Call's input.
+A run of one Block at one position in the Calls of one lane, while its place and tokens stay the same: from a first
+Call to a last Call (or on to the lane's latest Call). The input of Call N is every CallBlock that covers N.
 _Avoid_: occurrence, usage (Usage means token counts)
+
+**Lane**:
+The Calls of a Session that build on each other's context: one model, one purpose (the main loop, a side query).
+CallBlocks span the Calls of one lane.
+_Avoid_: thread, branch, stream
+
+**Group**:
+Blocks whose tokens were split by estimate from one exact total, so their sum is exact even where each share is not.
+_Avoid_: batch, cluster
 
 **ToolCall**:
 One use of a tool by the model: the tool, its input, and the Block that holds its result.
@@ -80,7 +90,8 @@ provider caches the request up to each breakpoint.
 _Avoid_: cache marker, cacheControl (that is the field that holds the paths)
 
 **Cached prefix**:
-The leading part of a Call's input that the model provider read from its cache instead of processing again.
+The leading part of a Call's input that the model provider read from its cache instead of processing again. A Block
+is in it only when it ends inside the cache read.
 _Avoid_: cache hit, warm part
 
 ## Numbers

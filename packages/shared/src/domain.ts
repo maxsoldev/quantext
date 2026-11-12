@@ -90,6 +90,17 @@ export interface Call {
   inferenceGeo?: string;
   cost?: Cost;
   /**
+   * The Calls of a Session that build on each other's context (one model, one purpose) form a lane; CallBlock runs
+   * span the Calls of one lane.
+   */
+  lane: string;
+  /** The number of Blocks in the input, once the request is split. */
+  blockCount?: number;
+  /** Positions of the Blocks that carry a cache breakpoint. */
+  cacheBreakpoints: number[];
+  /** The Cached prefix: the cache read in tokens, and the number of leading Blocks wholly inside it. */
+  cacheBoundary?: { tokens: number; position: number };
+  /**
    * Input tokens that belong to no Block: the end of the request after its last Block, known exactly when the last
    * Block carries the last cache breakpoint. The CallBlocks' tokens plus these add up to the input total.
    */
@@ -153,24 +164,28 @@ export interface Block {
 /** The part of a request a CallBlock is in. The provider reads the request in this order. */
 export type RequestSection = "tools" | "system" | "messages";
 
-/** One appearance of a Block in a Call's input. */
+/**
+ * A run of one Block at one position over consecutive Calls of one lane, with the same tokens: one record while
+ * the Block stays where it is. It appears in every Call of its Session and lane from `firstCall` to `lastCall`
+ * (by `Call.index`); `lastCall` is absent while the run goes on to the lane's latest Call.
+ */
 export interface CallBlock {
-  callId: string;
+  id: string;
+  sessionId: string;
+  lane: string;
   blockHash: string;
-  /** 0-based position in the Call's input: tool schemas, then system blocks, then messages. */
+  /** 0-based position in each Call's input: tool schemas, then system blocks, then messages. */
   position: number;
   section: RequestSection;
   /** The index of the message that holds the Block, for the messages section. */
   message?: number;
-  /** The Block carries a cache breakpoint. */
-  cacheBreakpoint: boolean;
-  /** The Block's share of the Call's input total; absent when the Call has no Usage. */
+  /** The Block's share of each Call's input total; absent for a Call with no Usage. */
   tokens?: number;
   basis?: TokenBasis;
-  /** Inside the Cached prefix: the part of the input the provider read from its cache. */
-  inCachedPrefix: boolean;
-  /** The Block's share of the Call's input cost in US dollars, by the cache part its tokens are in. */
-  costUsd?: number;
+  /** Blocks of one group were split from one exact total: their tokens add up to it. */
+  group?: string;
+  firstCall: number;
+  lastCall?: number;
 }
 
 /** One use of a tool by the model. */
@@ -204,7 +219,9 @@ export interface Compaction {
   /** The context size before and after, as the harness reports it. */
   beforeTokens?: number;
   afterTokens?: number;
-  /** The Call that wrote the summary, when its usage could be derived. */
+  /** The last Call before the compaction: its input is the context that was summarised. */
+  beforeCallId?: string;
+  /** The Call that wrote the summary; its usage is derived from running totals. */
   summaryCallId?: string;
 }
 
@@ -215,6 +232,12 @@ export interface IngestReport {
   /** Records that could not be read (bad JSON, missing fields): where (transcript and line) and why. */
   unreadable: { at: string; reason: string }[];
 }
+
+/**
+ * What one read of new input added or changed: new and updated entities (each in full, by id), and the report's
+ * new counts. Merging every delta in order gives the SessionGraph.
+ */
+export type SessionDelta = SessionGraph;
 
 /** Everything an adapter found in one Session and its subagent Sessions. */
 export interface SessionGraph {
