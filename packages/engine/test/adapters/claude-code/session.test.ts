@@ -77,3 +77,20 @@ describe("parseClaudeCodeSession on input it does not know", () => {
     expect(graph.report.unreadable).toEqual([{ at: "main:64", reason: expect.stringContaining("not JSON") }]);
   });
 });
+
+describe("parameters per Call", () => {
+  const graph = parseClaudeCodeSession(transcriptsOf("effort"));
+
+  test("keep the effort and the thinking mode of each Call, also when the model changes", () => {
+    expect(graph.calls.map((c) => [c.canonicalModel, c.params.effort, c.params.thinking, c.params.maxTokens])).toEqual([
+      ["claude-opus-5-5", "high", { type: "adaptive" }, 128000],
+      ["claude-opus-5-5", "low", { type: "adaptive" }, 128000],
+      ["claude-sonnet-4-5", undefined, { type: "enabled", budgetTokens: 31999 }, 32000],
+    ]);
+  });
+
+  test("price a Bedrock Sonnet id at the Sonnet list price", () => {
+    // Sonnet 4.5: 10 input, 12 944 cache write (5 minutes) and 323 output tokens.
+    expect(graph.calls[2]?.cost?.totalUsd).toBeCloseTo((10 * 3 + 12944 * 3.75 + 323 * 15) / 1e6, 12);
+  });
+});
