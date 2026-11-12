@@ -36,5 +36,11 @@ quality bar. Decisions that are hard to change are recorded in `docs/adr/`.
 
 ## Commits
 
-- One logical change per commit, imperative subject. No co-author lines.
-- Run `pnpm check` (lint, types, tests, layer check, secret scan) before each commit.
+- One logical change per commit. No co-author lines.
+- **Subject:** imperative, about 50 characters, at most 72, no period at the end. It says *what* changed.
+- **Body:** after one blank line, wrapped at 72. It says *why*, and anything a reviewer would not see in the diff
+  (a trade-off, a rejected option, a link to an ADR or a known issue). Leave it out only for trivial commits.
+- **Size:** keep a commit reviewable, as a rule under ~400 changed lines (lockfiles and recorded fixtures do not
+  count). A larger commit says in its body why it cannot be split.
+- Every commit passes `pnpm check` (lint, types, tests, layer check, secret scan) on its own. Do not amend or
+  rebase commits that are already pushed.
