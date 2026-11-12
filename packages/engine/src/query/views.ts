@@ -108,12 +108,18 @@ FROM priced p JOIN log_blocks b ON b.log = p.log AND b.hash = p.block_hash
 GROUP BY p.log, p.block_hash`;
 }
 
+/** No lifetime rows: the caller adds them (`lifetimes.ts`). */
+const NO_LIFETIME = `(SELECT NULL AS log, NULL AS block_hash, NULL AS tokens, NULL AS calls, NULL AS runs,
+  NULL AS lifetime_tokens, NULL AS cache_read_tokens, NULL AS cache_write_tokens, NULL AS input_tokens,
+  NULL AS cost_cache_read_usd, NULL AS cost_cache_write_usd, NULL AS cost_input_usd, NULL AS lifetime_cost_usd
+  WHERE 0)`;
+
 /**
- * Each tool use with its result Block's lifetime cost. `lifetime`: the lifetime rows to join (the view, or a
+ * Each tool use with its result Block's lifetime cost (null `lifetime`: none, the caller adds them). `lifetime`: the lifetime rows to join (the view, or a
  * Session's own); `where` filters the tool uses (`t`). `cut`: the input summary is the first 200 characters; false:
  * the whole input, for a caller that must redact it before it cuts it (demo mode).
  */
-export function toolOutputsSql(lifetime: string, where = "", cut = true): string {
+export function toolOutputsSql(lifetime: string | null, where = "", cut = true): string {
   const input =
     "coalesce(t.input, (SELECT json_extract(k.content, '$.input') FROM blocks k WHERE k.hash = t.block_hash))";
   return `
@@ -131,7 +137,7 @@ SELECT t.log, t.session_id, t.id AS tool_use_id, t.name AS tool, t.mcp_server, t
   l.cost_cache_read_usd, l.cost_cache_write_usd, l.cost_input_usd, l.lifetime_cost_usd
 FROM tool_calls t
 LEFT JOIN calls c ON c.log = t.log AND c.id = t.call_id
-LEFT JOIN ${lifetime} l ON l.log = t.log AND l.block_hash = t.result_block_hash
+LEFT JOIN ${lifetime ?? NO_LIFETIME} l ON l.log = t.log AND l.block_hash = t.result_block_hash
 ${where}`;
 }
 

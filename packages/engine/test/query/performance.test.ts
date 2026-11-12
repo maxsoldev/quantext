@@ -61,5 +61,32 @@ test(`on a ${CALLS}-call session: the context of its last Call, the session list
   expect(lifetime.ms).toBeLessThan(10_000);
   expect(timeline.result.items).toHaveLength(CALLS);
   expect(timeline.ms).toBeLessThan(1500);
-  expect(lifetimes.ms).toBeLessThan(5000);
+  expect(lifetimes.ms).toBeLessThan(500);
+});
+
+test("on a 10,000-call session: the lifetimes of its Blocks and tool outputs in under 1 s", {
+  timeout: 120_000,
+}, async () => {
+  const calls = 10_000;
+  const root = tempDir("qx-root-");
+  const dataDir = tempDir("qx-data-");
+  writeText(
+    join(root, "projects", "-synthetic", "00000000-0000-4000-8000-00000000beef.jsonl"),
+    syntheticSession(calls),
+  );
+  const store = await openStore({ dataDir });
+  await createIngest({ store, root }).ingestAll();
+  store.close();
+  const db = await openReader(dataDir, { setup: installViews });
+  onCleanup(() => db.close());
+  const q = createQuery({ db, codec: claudeCodeCodec });
+  const key = q.listSessions().items[0] ?? { log: 0, id: "" };
+  const blocks = timed(() => q.blockLifetimes(key));
+  const outputs = timed(() => q.toolOutputs(key));
+  console.log(
+    `${calls}-call session: blockLifetimes ${blocks.ms.toFixed(0)} ms, toolOutputs ${outputs.ms.toFixed(0)} ms`,
+  );
+  expect(blocks.result.items).toHaveLength(50);
+  expect(blocks.ms).toBeLessThan(1000);
+  expect(outputs.ms).toBeLessThan(1000);
 });

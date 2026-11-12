@@ -56,19 +56,21 @@ import {
   toolCallFromRow,
 } from "../store/index.ts";
 import { categoryOf, emptyCategories, isDeferred } from "./categories.ts";
+import type { LifetimeRow } from "./lifetimes.ts";
+import { lifetimes, PRICED_CALLS, PRICED_RUNS, pricedCall, pricedRun } from "./lifetimes.ts";
 import { previewOf } from "./preview.ts";
 import type { Redactor } from "./redact.ts";
 import { createRedactor, lastFolder, projectAllowed, trimSeparators } from "./redact.ts";
 import { API_VERSION } from "./sql.ts";
-import { cacheBreaksSql, installViews, lifetimeSql, toolOutputsSql } from "./views.ts";
+import { cacheBreaksSql, installViews, toolOutputsSql } from "./views.ts";
 
 const LIFETIME_SORTS: Record<NonNullable<LifetimeOptions["sort"]>, string> = {
   cost: "lifetime_cost_usd",
   tokens: "lifetime_tokens",
   calls: "calls",
 };
-/** One Session's lifetime rows: the filter is inside, so only its runs are read. */
-const SESSION_LIFETIME = lifetimeSql(true);
+/** One Session's tool uses, without lifetimes: `lifetimes.ts` gives those. */
+const SESSION_TOOLS = toolOutputsSql(null, "WHERE t.log = ? AND t.session_id = ?", false);
 const SESSION_BREAKS = cacheBreaksSql(true);
 
 export interface QueryOptions {
@@ -155,6 +157,9 @@ export function createQuery(options: QueryOptions): Query {
     }
     return s;
   };
+  /** Each Block's lifetime in one Session's Calls (`lifetimes.ts`: linear in its Calls and runs). */
+  const sessionLifetimes = (key: SessionKey) =>
+    lifetimes(q(PRICED_CALLS).all(key.log, key.id).map(pricedCall), q(PRICED_RUNS).all(key.log, key.id).map(pricedRun));
   /** The redactor, made again when the store has other projects: each project not allowed is a hidden one. */
   let redactor: { projects: string; redact: Redactor } | undefined;
   const redactorNow = (): Redactor => {
@@ -873,26 +878,44 @@ export function createQuery(options: QueryOptions): Query {
     blockLifetimes(key, options = {}) {
       const found = sessionProject(key);
       if (found === undefined) return { ...meta, items: [] };
-      const rows = db
-        .prepare(`${SESSION_LIFETIME} ORDER BY ${LIFETIME_SORTS[options.sort ?? "cost"]} DESC, block_hash LIMIT ?`)
-        .all(key.log, key.id, options.limit ?? 50);
-      const items = rows.map(
-        (r): BlockLifetime => ({
-          hash: String(r.block_hash),
-          kind: String(r.kind) as BlockKind,
-          source: sourceOf(r),
-          ...lifetimeOf(r),
-        }),
-      );
+      const sort = LIFETIME_SORTS[options.sort ?? "cost"] as keyof LifetimeRow;
+      const ranked = [...sessionLifetimes(key).values()]
+        .sort((a, b) => Number(b[sort] ?? 0) - Number(a[sort] ?? 0) || (a.block_hash < b.block_hash ? -1 : 1))
+        .slice(0, Math.max(0, options.limit ?? 50));
+      const blocks =
+        ranked.length === 0
+          ? []
+          : db
+              .prepare(`SELECT * FROM log_blocks WHERE log = ? AND hash IN (${ranked.map(() => "?").join(",")})`)
+              .all(key.log, ...ranked.map((r) => r.block_hash));
+      const byHash = new Map(blocks.map((b) => [String(b.hash), b]));
+      const items = ranked.map((r): BlockLifetime => {
+        const b = byHash.get(r.block_hash) ?? {};
+        return {
+          hash: r.block_hash,
+          kind: String(b.kind) as BlockKind,
+          source: sourceOf(b),
+          ...lifetimeOf(r as unknown as SqlRow),
+        };
+      });
       return { ...meta, items: hide(items, found.project) };
     },
     toolOutputs(key, options = {}) {
       const found = sessionProject(key);
       if (found === undefined) return { ...meta, items: [] };
-      const sql = toolOutputsSql(`(${SESSION_LIFETIME})`, "WHERE t.log = ? AND t.session_id = ?", false);
-      const rows = db
-        .prepare(`${sql} ORDER BY coalesce(${LIFETIME_SORTS[options.sort ?? "cost"]}, 0) DESC, tool_use_id LIMIT ?`)
-        .all(key.log, key.id, key.log, key.id, options.limit ?? 50);
+      const lives = sessionLifetimes(key);
+      const sort = LIFETIME_SORTS[options.sort ?? "cost"] as keyof LifetimeRow;
+      const rows = q(SESSION_TOOLS)
+        .all(key.log, key.id)
+        .map((t) => {
+          const l = t.result_block_hash === null ? undefined : lives.get(String(t.result_block_hash));
+          return l === undefined ? t : { ...t, ...(l as unknown as Record<string, SqlValue>) };
+        })
+        .sort(
+          (a, b) =>
+            Number(b[sort] ?? 0) - Number(a[sort] ?? 0) || (String(a.tool_use_id) < String(b.tool_use_id) ? -1 : 1),
+        )
+        .slice(0, Math.max(0, options.limit ?? 50));
       const items = rows.map((r) => {
         const o: ToolOutput = {
           toolUseId: String(r.tool_use_id),
