@@ -5,7 +5,11 @@
 import { sha256Sorted } from "../../../src/adapters/claude-code/hash.ts";
 import type { Json } from "../../../src/adapters/claude-code/json.ts";
 
-export function syntheticSession(calls: number): string {
+/**
+ * `sideEvery`: after every so many calls, a side call in another lane (another query source) that branches from
+ * the main loop's latest call and adds one question.
+ */
+export function syntheticSession(calls: number, sideEvery = 0): string {
   const session = "00000000-0000-4000-8000-00000000beef";
   const rows: object[] = [];
   const wire = (role: string, content: Json[]) => sha256Sorted({ role, content });
@@ -51,6 +55,40 @@ export function syntheticSession(calls: number): string {
     rows.push({ type: "assistant", sessionId: session, requestRef: id, timestamp: ts(i), message });
     const result: Json[] = [{ type: "tool_result", tool_use_id: `toolu_${i}`, content: `line ${i}\n`.repeat(20) }];
     rows.push({ type: "user", sessionId: session, timestamp: ts(i), message: { role: "user", content: result } });
+    if (sideEvery > 0 && i % sideEvery === sideEvery - 1) {
+      const question: Json[] = [{ type: "text", text: `Side question ${i}?` }];
+      rows.push({ type: "user", sessionId: session, timestamp: ts(i), message: { role: "user", content: question } });
+      const sideId = `side-${i}`;
+      const sideKeep = keep + tail.length;
+      rows.push({
+        type: "api-request",
+        sessionId: session,
+        id: sideId,
+        timestamp: ts(i),
+        querySource: "side_question",
+        shapeHash,
+        params: { model: "claude-opus-5-5", max_tokens: 1000 },
+        base: id,
+        keep: sideKeep,
+        tail: [wire("user", question)],
+        cacheControl: [{ path: ["messages", sideKeep, "content", 0], value: { type: "ephemeral" } }],
+      });
+      const sideUsage = {
+        input_tokens: 2,
+        cache_read_input_tokens: cached,
+        cache_creation_input_tokens: 10,
+        cache_creation: { ephemeral_5m_input_tokens: 10, ephemeral_1h_input_tokens: 0 },
+        output_tokens: 5,
+      };
+      const answer = {
+        id: `msg_side_${i}`,
+        role: "assistant",
+        model: "claude-opus-5-5",
+        content: [{ type: "text", text: "Yes." }],
+        usage: sideUsage,
+      };
+      rows.push({ type: "assistant", sessionId: session, requestRef: sideId, timestamp: ts(i), message: answer });
+    }
     base = id;
     keep += tail.length;
     tail = [wire("assistant", [use as unknown as Json]), wire("user", result)];
