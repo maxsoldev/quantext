@@ -5,7 +5,7 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
-import type { EngineFile, Health } from "@quantext/shared";
+import type { EngineFile, EngineStatus, Health } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
 import type { CliIo } from "../../src/cli/index.ts";
 import { EXIT, main } from "../../src/cli/index.ts";
@@ -25,6 +25,17 @@ interface Run {
   stop(): void;
   /** Move the injected clock on. */
   advance(ms: number): void;
+  /** Wait until the engine has checked for its idle time `n` more times and stayed. */
+  checked(n?: number): Promise<void>;
+}
+
+/** Wait until `ready()` holds (5 s at most), checking on each turn of the event loop. */
+async function until(ready: () => boolean | Promise<boolean>, what: string): Promise<void> {
+  const end = Date.now() + 5000;
+  while (!(await ready())) {
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((r) => setImmediate(r));
+  }
 }
 
 /** Start `qx serve` with these arguments, a clock of its own and a stop signal. */
@@ -34,6 +45,7 @@ function start(argv: string[], hooks: Partial<NonNullable<CliIo["serve"]>> = {})
   let clock = Date.parse("2026-11-12T00:00:00Z");
   const controller = new AbortController();
   const opened: string[] = [];
+  let checks = 0;
   const io: CliIo = {
     stdout: (t) => (out += t),
     stderr: (t) => (err += t),
@@ -46,6 +58,9 @@ function start(argv: string[], hooks: Partial<NonNullable<CliIo["serve"]>> = {})
       openUrl: (url) => opened.push(url),
       defaultPort: 0,
       lockWaitMs: 300,
+      onIdleCheck: () => {
+        checks++;
+      },
       ...hooks,
     },
   };
@@ -63,17 +78,26 @@ function start(argv: string[], hooks: Partial<NonNullable<CliIo["serve"]>> = {})
     advance: (ms) => {
       clock += ms;
     },
+    async checked(n = 2) {
+      const target = checks + n;
+      await until(() => checks >= target, "idle checks");
+    },
   };
 }
 
 /** A transcript root with the first half of the basic-tools fixture, and a way to append the rest. */
-function halfSession(): { root: string; appendRest(): void } {
+function halfSession(): { root: string; appendRest(): void; appendOne(): void } {
   const root = tempDir("qx-root-");
   const files = layout(root, "basic-tools");
   const lines = readFileSync(files.source, "utf8").split(/(?<=\n)/);
-  const half = Math.floor(lines.length / 2);
-  writeText(files.main, lines.slice(0, half).join(""));
-  return { root, appendRest: () => appendFileSync(files.main, lines.slice(half).join("")) };
+  let at = Math.floor(lines.length / 2);
+  writeText(files.main, lines.slice(0, at).join(""));
+  return {
+    root,
+    appendRest: () => appendFileSync(files.main, lines.slice(at).join("")),
+    /** The next line: a user's tool result, which changes the Session but adds no Call. */
+    appendOne: () => appendFileSync(files.main, lines[at++] ?? ""),
+  };
 }
 
 /** The engine file once it is written (5 s at most). */
@@ -90,10 +114,10 @@ async function engineFile(dataDir: string, other?: number): Promise<EngineFile> 
 }
 
 /** Open the event stream and wait for a frame whose text matches. */
-async function sse(port: number, match: RegExp, act: () => void): Promise<string> {
+async function sse(port: number, match: RegExp, act: () => void, query = ""): Promise<string> {
   const { request } = await import("node:http");
   return new Promise((resolve, reject) => {
-    const req = request({ host: "127.0.0.1", port, path: "/api/v1/events", agent: false }, (res) => {
+    const req = request({ host: "127.0.0.1", port, path: `/api/v1/events${query}`, agent: false }, (res) => {
       let text = "";
       res.on("data", (chunk: Buffer) => {
         const first = text === "";
@@ -138,11 +162,39 @@ describe("qx serve", () => {
       if (calls === 0) await new Promise((r) => setTimeout(r, 20));
     }
     expect(calls).toBeGreaterThan(0);
+    let status = (await get(file.port, "/api/v1/status")).json<EngineStatus>();
+    for (let i = 0; i < 200 && status.ingest.phase !== "live"; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      status = (await get(file.port, "/api/v1/status")).json<EngineStatus>();
+    }
+    expect(status).toMatchObject({ engine: { version: "0.0.0", pid: process.pid, demo: false }, streams: 0 });
+    const { ingest } = status;
+    expect(ingest).toMatchObject({ phase: "live", logsDone: ingest.logsTotal });
+    expect(ingest.bytesDone).toBe(ingest.bytesTotal);
     const frame = await sse(file.port, /^id: .*\nevent: calls\n/m, appendRest);
     expect(frame).toContain(`"id":"${ID}"`);
     run.stop();
     expect(await run.done).toBe(EXIT.ok);
     expect(existsSync(join(dataDir, "engine.json"))).toBe(false);
+  });
+
+  test("a write that changes a Session but adds no Call moves the stream's cursor with the store's", async () => {
+    const { root, appendOne } = halfSession();
+    const dataDir = tempDir("qx-data-");
+    start(["--root", root, "--data-dir", dataDir]);
+    const file = await engineFile(dataDir);
+    const cursorOf = async () => (await get(file.port, "/api/v1/sessions")).json<{ cursor: number; total: number }>();
+    let page = await cursorOf();
+    for (let i = 0; i < 200 && page.total === 0; i++) page = await cursorOf();
+    const before = page.cursor;
+    const frame = await sse(file.port, /^event: calls\n/m, appendOne);
+    const after = (await cursorOf()).cursor;
+    expect(after).toBeGreaterThan(before);
+    expect(frame).toContain(`id: ${after}.0`);
+    expect(frame).toContain('"added":[]');
+    const again = await sse(file.port, /^event: (ready|resync)\n/m, () => undefined, `?cursor=${after}`);
+    expect(again).toMatch(/^event: ready\n/m);
+    expect(again).toContain(`"cursor":${after}`);
   });
 
   test("a second start reuses the running engine, and opens it with --open", async () => {
@@ -206,6 +258,31 @@ describe("qx serve", () => {
     );
   });
 
+  test("never prints or opens what another process wrote: the URL comes from the port, text is made printable", async () => {
+    const dataDir = tempDir("qx-data-");
+    let version = "0.0.0";
+    const fake = createServer((_req, res) => {
+      const health: Health = { apiVersion: 1, ok: true, version, pid: 4242, startedAt: "", demo: false };
+      res.end(JSON.stringify(health));
+    });
+    await new Promise<void>((r) => fake.listen(0, "127.0.0.1", r));
+    onCleanup(() => new Promise<void>((r) => fake.close(() => r())));
+    const address = fake.address();
+    const port = typeof address === "object" && address !== null ? address.port : 0;
+    const file = { apiVersion: 1, version: "0.0.0", pid: 4242, port, url: "-a Calculator", startedAt: "" };
+    writeFileSync(join(dataDir, "engine.json"), JSON.stringify(file));
+    const reuse = start(["--root", tempDir("qx-root-"), "--data-dir", dataDir, "--open"]);
+    expect(await reuse.done).toBe(EXIT.ok);
+    expect(reuse.opened).toEqual([`http://127.0.0.1:${port}/`]);
+    expect(reuse.out()).toBe(`quantext engine already runs at http://127.0.0.1:${port}/ (pid 4242)\n`);
+    version = "9\u001b]0;evil\u0007\u001b[2J";
+    const other = start(["--root", tempDir("qx-root-"), "--data-dir", dataDir]);
+    expect(await other.done).toBe(EXIT.failed);
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what must not be printed
+    expect(other.err()).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f]/);
+    expect(other.err()).toContain("an engine of version 9?]0;evil??[2J (pid 4242)");
+  });
+
   test("fails when the store is locked and no engine answers", async () => {
     const dataDir = tempDir("qx-data-");
     const store = await openStore({ dataDir });
@@ -244,13 +321,15 @@ describe("qx serve", () => {
       );
       req.end();
     });
+    const streams = async () => (await get(file.port, "/api/v1/status")).json<EngineStatus>().streams;
+    await until(async () => (await streams()) === 1, "the stream");
     run.advance(3 * 60_000);
-    await new Promise((r) => setTimeout(r, 50));
+    await run.checked();
     expect(existsSync(join(dataDir, "engine.json"))).toBe(true); // a viewer is connected
     stream.destroy();
-    await new Promise((r) => setTimeout(r, 50));
+    await until(async () => (await streams()) === 0, "the stream to close");
     run.advance(60_000); // one minute after the viewer left: not yet
-    await new Promise((r) => setTimeout(r, 50));
+    await run.checked();
     expect(existsSync(join(dataDir, "engine.json"))).toBe(true);
     run.advance(60_000);
     expect(await run.done).toBe(EXIT.ok);
@@ -261,9 +340,10 @@ describe("qx serve", () => {
   test("with --live always, never stops for idle time", async () => {
     const dataDir = tempDir("qx-data-");
     const run = start(["--root", tempDir("qx-root-"), "--data-dir", dataDir, "--live", "always"]);
-    await engineFile(dataDir);
+    const file = await engineFile(dataDir);
     run.advance(24 * 60 * 60_000);
-    await new Promise((r) => setTimeout(r, 50));
+    // No idle check runs at all in this mode; the engine still answers after a day.
+    expect((await get(file.port, "/api/v1/status")).status).toBe(200);
     expect(existsSync(join(dataDir, "engine.json"))).toBe(true);
     run.stop();
     expect(await run.done).toBe(EXIT.ok);

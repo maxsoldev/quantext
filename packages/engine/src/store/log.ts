@@ -75,6 +75,8 @@ export interface WriteResult {
   /** The store's change cursor after the write: it grew when the write changed a Session. */
   cursor: number;
   calls: { sessionId: string; added: string[]; addedIndexes: number[]; updated: string[] }[];
+  /** Every Session the write changed (its Calls or anything else), in the order the deltas named them. */
+  sessions: string[];
 }
 
 export interface LogStore {
@@ -340,7 +342,12 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
               f.error ?? null,
             );
         }
-        return { log: id, cursor, calls: [...result].map(([sessionId, c]) => ({ sessionId, ...c })) };
+        return {
+          log: id,
+          cursor,
+          calls: [...result].map(([sessionId, c]) => ({ sessionId, ...c })),
+          sessions: [...touched],
+        };
       });
     },
     reset,

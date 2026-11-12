@@ -2,7 +2,7 @@
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { join } from "node:path";
-import type { IngestEvent } from "@quantext/shared";
+import type { CallsEvent } from "@quantext/shared";
 import { claudeCodeCodec } from "../../src/adapters/claude-code/index.ts";
 import type { Api, ApiOptions } from "../../src/api/index.ts";
 import { createApi } from "../../src/api/index.ts";
@@ -96,7 +96,13 @@ export async function engine(
   const api = createApi({
     query,
     staticDir,
-    info: { version: "0.0.0-test", pid: process.pid, startedAt: "2026-11-12T00:00:00.000Z", demo: false, dataDir },
+    info: {
+      version: "0.0.0-test",
+      pid: process.pid,
+      startedAt: "2026-11-12T00:00:00.000Z",
+      demo: queryOptions.demo !== undefined,
+      dataDir,
+    },
     onError: (error) => errors.push(error),
     ...options,
   });
@@ -106,7 +112,7 @@ export async function engine(
 }
 
 /** An ingest event as the store would number it. */
-export const callsEvent = (log: number, sessionId: string, cursor: number, index = 99): IngestEvent => ({
+export const callsEvent = (log: number, sessionId: string, cursor: number, index = 99): CallsEvent => ({
   kind: "calls",
   logId: log,
   cursor,

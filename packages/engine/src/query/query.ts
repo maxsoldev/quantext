@@ -29,6 +29,7 @@ import type {
   MemoryDocumentView,
   Meta,
   Page,
+  ProjectSummary,
   QueryReport,
   RequestLog,
   RequestSection,
@@ -92,6 +93,8 @@ export interface Query {
   /** Sessions whose id is `id` or starts with it, newest first. */
   findSessions(id: string): SessionKey[];
   getSession(key: SessionKey): SessionDetail | undefined;
+  /** The projects with main Sessions, latest first (`listSessions({ project })` takes the name it shows). */
+  listProjects(): Items<ProjectSummary>;
   /** Whether the Session exists and is visible (demo mode): one indexed lookup, for a 404 before a list. */
   hasSession(key: SessionKey): boolean;
   /** The store's change cursor now, as `Page.cursor` gives it. */
@@ -598,6 +601,24 @@ export function createQuery(options: QueryOptions): Query {
   return {
     changeCursor,
     hasSession: (key) => sessionProject(key) !== undefined,
+    listProjects() {
+      const rows = q(
+        `SELECT project, count(*) AS n, max(coalesce(ended, started)) AS last FROM sessions
+         WHERE parent_id IS NULL AND project IS NOT NULL GROUP BY project ORDER BY last IS NULL, last DESC, project`,
+      ).all();
+      const items = rows
+        .filter((r) => projectAllowed(String(r.project), allowed))
+        .map((r): ProjectSummary => {
+          const project = String(r.project);
+          const p: ProjectSummary = {
+            project: redacting ? lastFolder(project) : demo === undefined ? project : redactText(undefined)(project),
+            sessions: Number(r.n),
+          };
+          if (r.last !== null && r.last !== undefined) p.ended = String(r.last);
+          return p;
+        });
+      return { ...meta, items };
+    },
     listSessions(filter = {}) {
       // The cursor before the page: a write between them shows up again in the next changedSince, never lost.
       const cursor = changeCursor();

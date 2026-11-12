@@ -3,7 +3,7 @@ import { request } from "node:http";
 import type { Health } from "@quantext/shared";
 
 /** The engine's health at 127.0.0.1:`port`, or undefined when nothing answers as an engine in `timeoutMs`. */
-export function probeHealth(port: number, timeoutMs = 1000): Promise<Health | undefined> {
+export function probeHealth(port: number, timeoutMs = 3000): Promise<Health | undefined> {
   return new Promise((resolve) => {
     const req = request(
       { host: "127.0.0.1", port, path: "/health", headers: { host: `127.0.0.1:${port}` }, timeout: timeoutMs },

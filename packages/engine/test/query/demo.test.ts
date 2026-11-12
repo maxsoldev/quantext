@@ -197,6 +197,18 @@ describe("demo mode", () => {
     expect(q.visibleEvent({ kind: "memory", cursor: 9, projectDirs: ["/elsewhere"] })).toBeNull();
   });
 
+  test("lists only the allowed projects, by their folder name", async () => {
+    const q = await demo([PROJECTS["basic-tools"]]);
+    expect(q.listProjects().items.map((p) => p.project)).toEqual(["shop"]);
+    const all = await demo();
+    expect(
+      all
+        .listProjects()
+        .items.map((p) => p.project)
+        .sort(),
+    ).toEqual(["app", "secret", "shop"]);
+  });
+
   test("marks its responses as redacted, with images to blur", async () => {
     const q = await demo([PROJECTS.image]);
     const [s] = q.listSessions().items;

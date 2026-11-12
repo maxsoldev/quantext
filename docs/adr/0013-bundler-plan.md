@@ -24,7 +24,7 @@ contributor's machine).
 ## Build step 7
 
 `pnpm build` (`scripts/build-engine.ts`) runs one Rolldown build per entry: `dist/engine.js` (`qx`, with
-`qx serve`), `dist/sql-child.js` and `dist/sql-watchdog.js`, plus the viewer's files in `dist/web/`. The only
+`qx serve`), `dist/sql-child.js`, `dist/sql-watchdog.js` and `dist/query-worker.js`, plus the viewer's files in `dist/web/`. The only
 split points are the store's two drivers, so each entry has two small chunks (`<entry>-node-driver.js`,
 `<entry>-bun-driver.js`) that hold the one static import of `node:sqlite` or `bun:sqlite`: Bun resolves every
 `import()` in a file when it loads it, so `node:sqlite` must not be in a file Bun loads, and one file per entry

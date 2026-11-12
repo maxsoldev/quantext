@@ -1,4 +1,6 @@
 /** The JSON routes over HTTP: one per query method, the same bodies as the query layer, strict parameters. */
+
+import { connect } from "node:net";
 import type { ApiError, Page, SessionSummary } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
 import { engine, get } from "./client.ts";
@@ -41,6 +43,7 @@ describe("the JSON routes", () => {
       expect(reply.json().apiVersion).toBe(1);
     }
     expect((await get(port, "/api/v1/report")).json()).toEqual(JSON.parse(JSON.stringify(query.ingestReport())));
+    expect((await get(port, "/api/v1/projects")).json()).toEqual(JSON.parse(JSON.stringify(query.listProjects())));
     expect((await get(port, `/api/v1/session-keys?id=${ID(1)}`)).json()).toEqual({
       apiVersion: 1,
       items: [key],
@@ -166,5 +169,100 @@ describe("demo mode", () => {
       expect([path, (await get(port, path)).status]).toEqual([path, 404]);
     }
     expect((await get(port, `/api/v1/session-keys?id=${id}`)).json()).toEqual({ apiVersion: 1, items: [] });
+  });
+});
+
+describe("/api/v1/status", () => {
+  const status = {
+    phase: "catching-up" as const,
+    logsDone: 2,
+    logsTotal: 7,
+    bytesDone: 10,
+    bytesTotal: 99,
+    startedAt: "2026-11-12T00:00:01.000Z",
+    lastError: "projects/x.jsonl: EACCES",
+  };
+
+  test("tells the engine, its ingest and its streams", async () => {
+    const { port } = await engine(["basic-tools"], { ingestStatus: () => status });
+    expect((await get(port, "/api/v1/status")).json()).toEqual({
+      apiVersion: 1,
+      engine: { version: "0.0.0-test", pid: process.pid, startedAt: "2026-11-12T00:00:00.000Z", demo: false },
+      ingest: status,
+      streams: 0,
+    });
+  });
+
+  test("in demo mode, only that a read failed", async () => {
+    const info = { version: "0.0.0-test", pid: 1, startedAt: "2026-11-12T00:00:00.000Z", demo: true };
+    const { port } = await engine(["basic-tools"], { info, ingestStatus: () => status });
+    const reply = (await get(port, "/api/v1/status")).json<{ ingest: { lastError: string } }>();
+    expect(reply.ingest.lastError).toBe("a read failed (hidden in demo mode)");
+  });
+});
+
+describe("activity, for the idle exit", () => {
+  test("counts the requests it answers, not /health and not refused ones", async () => {
+    let clock = 1000;
+    const { port, api } = await engine(["basic-tools"], { now: () => clock });
+    const since = api.activity().lastActive;
+    clock = 2000;
+    await get(port, "/health");
+    await get(port, "/api/v1/sessions", { host: "evil.example" });
+    await get(port, "/api/v1/sessions", { origin: "https://evil.example" });
+    expect(api.activity().lastActive).toBe(since);
+    clock = 3000;
+    await get(port, "/api/v1/sessions");
+    expect(api.activity().lastActive).toBe(3000);
+  });
+
+  test("decides what is the API by the parsed path", async () => {
+    const { port } = await engine(["basic-tools"]);
+    // An absolute-form target names the API too: it is checked as the API, so a navigation from elsewhere is refused.
+    // Raw sockets: Bun's HTTP client hangs on a second absolute-form request on one connection.
+    const send = (headers: string) =>
+      new Promise<string>((resolve) => {
+        let out = "";
+        const socket = connect({ host: "127.0.0.1", port }, () =>
+          socket.write(
+            `GET http://127.0.0.1:${port}/api/v1/sessions HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
+              `Connection: close\r\n${headers}\r\n`,
+          ),
+        );
+        socket.on("data", (d: Buffer) => (out += d.toString("utf8")));
+        socket.on("close", () => resolve(out));
+      });
+    const navigation = "Sec-Fetch-Site: cross-site\r\nSec-Fetch-Mode: navigate\r\nSec-Fetch-Dest: document\r\n";
+    expect(await send(navigation)).toMatch(/^HTTP\/1\.1 403 /);
+    expect(await send("")).toMatch(/^HTTP\/1\.1 200 [\s\S]*"apiVersion":1/);
+  });
+});
+
+describe("caching of Blocks and media", () => {
+  test("an ETag by content, a 304 when it matches, and never the same tag in demo mode", async () => {
+    const { port, query } = await basic();
+    const [image] = query.findSessions(ID(3));
+    if (image === undefined) throw new Error("no image session");
+    const hash = query
+      .contextAt(image, 1)
+      ?.blocks.find((b) => b.source.filePath?.endsWith("diagram.png") && b.kind === "tool-result")?.hash;
+    const media = query.getBlock(hash ?? "", image.log)?.media[0]?.hash;
+    const demo = await engine(["basic-tools", "image"], {}, { demo: { redactPaths: true } });
+    for (const path of [`/api/v1/blocks/${image.log}/${hash}`, `/api/v1/blocks/${image.log}/${hash}/media/${media}`]) {
+      const first = await get(port, path);
+      const tag = String(first.headers.etag);
+      expect([path, first.headers["cache-control"], tag]).toEqual([
+        path,
+        "no-cache",
+        expect.stringMatching(/^"[\w.-]+"$/),
+      ]);
+      const again = await get(port, path, { "if-none-match": tag });
+      expect([path, again.status, again.body]).toEqual([path, 304, ""]);
+      expect((await get(port, path, { "if-none-match": '"other"' })).status).toBe(200);
+      const shown = await get(demo.port, path);
+      expect(shown.status).toBe(200);
+      expect(shown.headers.etag).not.toBe(tag);
+      expect((await get(demo.port, path, { "if-none-match": tag })).status).toBe(200);
+    }
   });
 });

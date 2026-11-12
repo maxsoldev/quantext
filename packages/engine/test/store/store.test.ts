@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import type { Store } from "../../src/store/index.ts";
@@ -19,6 +19,17 @@ const tables = (store: Store) =>
     .map((r) => r.name);
 
 describe("opening the store", () => {
+  test.skipIf(process.platform === "win32")("makes a new data folder and its files private to the user", async () => {
+    const dataDir = join(tempDir("qx-parent-"), "new", ".quantext");
+    const store = await openStore({ dataDir });
+    store.db.exec("CREATE TEMP TABLE t (x)"); // the WAL files exist once written
+    const mode = (path: string) => statSync(path).mode & 0o777;
+    expect(mode(dataDir)).toBe(0o700);
+    for (const name of ["quantext.db", "writer.lock", "writer.pid"])
+      expect([name, mode(join(dataDir, name))]).toEqual([name, 0o600]);
+    store.close();
+  });
+
   test("creates the database in the data folder and migrates an empty one to the current schema", async () => {
     const dir = tempDir();
     const store = await open(join(dir, "data"));

@@ -1,6 +1,7 @@
 /**
  * Bundle the engine with Rolldown (ADR 13) into `packages/engine/dist/`: `engine.js` (the `qx` command, with
- * `qx serve`), `sql-child.js` and `sql-watchdog.js` (the `qx sql` child and its watchdog thread), ESM with no
+ * `qx serve`), `sql-child.js` and `sql-watchdog.js` (the `qx sql` child and its watchdog thread),
+ * `query-worker.js` (the engine's thread for slow queries), ESM with no
  * imports but the runtimes' built-ins and their own driver chunks; and `web/`, the viewer's files. Fails if an
  * output imports anything else, so the bundle runs with no node_modules.
  */
@@ -16,6 +17,7 @@ const ENTRIES = {
   engine: "src/cli/qx.ts",
   "sql-child": "src/cli/sql-child.ts",
   "sql-watchdog": "src/cli/sql-watchdog.ts",
+  "query-worker": "src/cli/query-worker.ts",
 } as const;
 
 /** Built-ins stay imports: the store picks `node:sqlite` or `bun:sqlite` at run time (ADR 3). */
@@ -31,12 +33,20 @@ for (const [name, input] of Object.entries(ENTRIES)) {
     platform: "node",
     external: [BUILT_IN],
     logLevel: "warn",
-    output: { dir: dist, format: "esm", entryFileNames: "[name].js", chunkFileNames: `${name}-[name].js` },
+    // Hidden source maps: written next to each file for debugging, not named in it.
+    output: {
+      dir: dist,
+      format: "esm",
+      entryFileNames: "[name].js",
+      chunkFileNames: `${name}-[name].js`,
+      sourcemap: "hidden",
+    },
   });
-  for (const chunk of output) {
+  for (const chunk of output.filter((c) => c.type === "chunk")) {
     const file = join(dist, chunk.fileName);
     const imports = importsOf(readFileSync(file, "utf8"));
     const own = new Set(output.map((c) => `./${c.fileName}`));
+    if (/sourceMappingURL/.test(readFileSync(file, "utf8"))) throw new Error(`${chunk.fileName} names its source map`);
     const foreign = imports.filter((s) => !BUILT_IN.test(s) && !own.has(s));
     if (foreign.length > 0)
       throw new Error(`${chunk.fileName} imports ${foreign.join(", ")}: it must be self-contained`);

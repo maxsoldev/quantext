@@ -4,9 +4,9 @@
  * store's ContentLookup; each batch of complete lines is one transaction with the new snapshot and read position.
  */
 import type { FileHandle } from "node:fs/promises";
-import { open, readFile } from "node:fs/promises";
+import { open, readFile, stat } from "node:fs/promises";
 import { sep } from "node:path";
-import type { CallsEvent, IngestEvent, JsonValue, StoreCodec } from "@quantext/shared";
+import type { CallsEvent, IngestEvent, IngestProgress, JsonValue, StoreCodec } from "@quantext/shared";
 import type { ClaudeCodeParser, ParserState } from "../adapters/claude-code/index.ts";
 import { claudeCodeCodec, createClaudeCodeParser } from "../adapters/claude-code/index.ts";
 import type { FileMark, LogStore, Store, WriteResult } from "../store/index.ts";
@@ -31,6 +31,7 @@ interface Warm {
 
 interface Limits {
   batchBytes: number;
+  batchMs: number;
   restoreBytes: number;
   maxLineBytes: number;
 }
@@ -44,8 +45,10 @@ export interface IngestOptions {
   root: string;
   /** How the adapter's data maps to the store; the Claude Code codec by default. */
   codec?: StoreCodec;
-  /** About this many bytes are read, parsed and written per transaction. */
+  /** At most about this many bytes are read, parsed and written per transaction. */
   batchBytes?: number;
+  /** Batches are sized so each takes about this long (default 40 ms); `batchBytes` caps them. */
+  batchMs?: number;
   /**
    * After this many bytes of one log, the parser is made again from its snapshot and the store, so that a long
    * file does not keep its whole content in memory. Each log's pass also starts from the snapshot.
@@ -80,7 +83,8 @@ export interface Ingest {
   /** Read the projects' memory folders again (a memory document changed); returns what could not be read. */
   ingestMemory(): Promise<PathError[]>;
   /**
-   * Listen for every change event (Calls, memory, a log emptied), after its write; same rules as `onCalls`.
+   * Listen for every change event (Calls, memory, a log emptied), after its write; same rules as `onCalls`. A
+   * Session changed with no Call added or updated (a title, an event, its end) gives a `calls` event with empty lists.
    * Returns a function that stops listening.
    */
   onEvent(listener: (event: IngestEvent) => void): () => void;
@@ -89,6 +93,10 @@ export interface Ingest {
    * errors and does not stop ingest. Returns a function that stops listening.
    */
   onCalls(listener: (event: CallsEvent) => void): () => void;
+  /** The pass in progress, or the last one: logs and bytes read, of those it found new. Undefined before any. */
+  progress(): IngestProgress | undefined;
+  /** Listen for progress, after each batch and each log. Returns a function that stops listening. */
+  onProgress(listener: (progress: IngestProgress) => void): () => void;
 }
 
 export function createIngest(options: IngestOptions): Ingest {
@@ -96,10 +104,18 @@ export function createIngest(options: IngestOptions): Ingest {
   const codec = options.codec ?? claudeCodeCodec;
   const limits: Limits = {
     batchBytes: options.batchBytes ?? DEFAULT_BATCH_BYTES,
+    batchMs: options.batchMs ?? DEFAULT_BATCH_MS,
     restoreBytes: options.restoreBytes ?? DEFAULT_RESTORE_BYTES,
     maxLineBytes: options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES,
   };
   const listeners = new Set<(event: IngestEvent) => void>();
+  const progressListeners = new Set<(progress: IngestProgress) => void>();
+  let progress: IngestProgress | undefined;
+  const told = () => {
+    if (progress === undefined) return;
+    const now = { ...progress };
+    for (const listener of progressListeners) listener(now);
+  };
   /** The parsers of the logs read last, oldest first: a live log is read on without a restore. */
   const warmParsers = new Map<string, Warm>();
   let queue: Promise<unknown> = Promise.resolve();
@@ -120,9 +136,11 @@ export function createIngest(options: IngestOptions): Ingest {
       }
     }
   };
+  /** One event per Session the write changed: with no Calls listed when only the Session itself changed. */
   const emit = (log: string, result: WriteResult, summary: IngestSummary) => {
-    for (const { sessionId, added, addedIndexes, updated } of result.calls) {
-      if (added.length === 0 && updated.length === 0) continue;
+    const byId = new Map(result.calls.map((c) => [c.sessionId, c]));
+    for (const sessionId of new Set([...result.calls.map((c) => c.sessionId), ...result.sessions])) {
+      const { added = [], addedIndexes = [], updated = [] } = byId.get(sessionId) ?? {};
       const event: CallsEvent = {
         kind: "calls",
         logId: result.log,
@@ -149,6 +167,19 @@ export function createIngest(options: IngestOptions): Ingest {
       errors: [...errors],
       stopped: false,
     };
+    const current: IngestProgress = {
+      logsDone: 0,
+      logsTotal: logs.length,
+      bytesDone: 0,
+      bytesTotal: await newBytes(logs, store.fileOffsets()),
+      startedAt: new Date().toISOString(),
+    };
+    progress = current;
+    const step = () => {
+      current.bytesDone = summary.bytes;
+      current.bytesTotal = Math.max(current.bytesTotal, summary.bytes); // a file replaced meanwhile is read whole
+      told();
+    };
     for (const files of logs) {
       const log = store.log(files.main, HARNESS, codec);
       try {
@@ -162,7 +193,10 @@ export function createIngest(options: IngestOptions): Ingest {
           tell({ kind: "log-removed", logId: log.id, ...log.emptied }, files.main, summary.errors);
         }
         const removed = (event: IngestEvent) => tell(event, files.main, summary.errors);
-        const emitted = (result: WriteResult) => emit(files.main, result, summary);
+        const emitted = (result: WriteResult) => {
+          emit(files.main, result, summary);
+          step();
+        };
         await ingestLog(log, files, limits, summary, emitted, signal, warm, removed);
         if (warm.parser !== undefined) warmParsers.set(files.main, warm);
         for (const old of warmParsers.keys()) {
@@ -173,6 +207,8 @@ export function createIngest(options: IngestOptions): Ingest {
         summary.errors.push({ path: files.main, error: `ingest failed: ${describe(error)}` });
         markFailed(log, files.main, describe(error));
       }
+      current.logsDone++;
+      step();
     }
     return summary;
   };
@@ -211,9 +247,14 @@ export function createIngest(options: IngestOptions): Ingest {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    progress: () => (progress === undefined ? undefined : { ...progress }),
+    onProgress(listener) {
+      progressListeners.add(listener);
+      return () => progressListeners.delete(listener);
+    },
     onCalls(listener) {
       const calls = (event: IngestEvent) => {
-        if (event.kind === "calls") listener(event);
+        if (event.kind === "calls" && (event.added.length > 0 || event.updated.length > 0)) listener(event);
       };
       listeners.add(calls);
       return () => listeners.delete(calls);
@@ -228,6 +269,44 @@ interface Entry {
   handle?: FileHandle;
   stat?: FileStat;
   error?: string;
+}
+
+/** The smallest batch, and the time one batch should take: the event loop is blocked for about that long. */
+const MIN_BATCH_BYTES = 64 * 1024;
+export const DEFAULT_BATCH_MS = 40;
+
+/**
+ * Batch sizes bounded by time as well as bytes: after each batch the next is sized so it takes about `batchMs`
+ * (parse and write), between `MIN_BATCH_BYTES` and `batchBytes`. It starts small.
+ */
+function batchBudget(limits: Limits): { bytes: number; took(bytes: number, ms: number): void } {
+  const max = limits.batchBytes;
+  const min = Math.min(MIN_BATCH_BYTES, max);
+  const budget = {
+    bytes: Math.min(256 * 1024, max),
+    took(bytes: number, ms: number) {
+      if (bytes <= 0) return;
+      const next = ms <= 0 ? max : (bytes * limits.batchMs) / ms;
+      budget.bytes = Math.round(Math.max(min, Math.min(max, next)));
+    },
+  };
+  return budget;
+}
+
+/** The bytes of these logs' files beyond what the store has read: what a pass will read (a file gone counts 0). */
+async function newBytes(logs: readonly LogFiles[], offsets: ReadonlyMap<string, number>): Promise<number> {
+  let total = 0;
+  for (const files of logs) {
+    const paths = [files.main, ...files.subagents.flatMap((a) => (a.meta === undefined ? [a.path] : [a.path, a.meta]))];
+    for (const path of paths) {
+      try {
+        total += Math.max(0, (await stat(path)).size - (offsets.get(path) ?? 0));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; // the pass reports it
+      }
+    }
+  }
+  return total;
 }
 
 async function ingestLog(
@@ -245,6 +324,7 @@ async function ingestLog(
     if (agent.meta !== undefined) entries.push({ path: agent.meta, transcript: agent.name, kind: "meta" });
     entries.push({ path: agent.path, transcript: agent.name, kind: "transcript" });
   }
+  const budget = batchBudget(limits);
   try {
     for (const entry of entries) await openEntry(entry);
     let marks = new Map(log.files().map((m) => [m.path, m]));
@@ -310,9 +390,10 @@ async function ingestLog(
       let offset = old?.offset ?? 0;
       let print = old?.fingerprint;
       let read = false;
-      const pieces = completeLines(entry.handle, offset, stat.size, limits.batchBytes, limits.maxLineBytes);
+      const pieces = completeLines(entry.handle, offset, stat.size, () => budget.bytes, limits.maxLineBytes);
       for await (const piece of pieces) {
         if (signal?.aborted) break;
+        const started = performance.now();
         // A skipped line is an empty line to the parser (so later lines keep their numbers), and is reported.
         const delta = parserNow().push("text" in piece ? piece.text : "\n", entry.transcript);
         if ("skipped" in piece) {
@@ -326,6 +407,9 @@ async function ingestLog(
         print = await fingerprint(entry.handle, offset);
         // Until the read reaches the end, the mark says the file ends here: a restart reads on from it.
         write(delta, { ...mark(offset, print), size: offset }, bytes);
+        budget.took(bytes, performance.now() - started);
+        // Let the server answer between batches: a long catch-up must not stall /health or the viewer.
+        await new Promise((resolve) => setImmediate(resolve));
       }
       if (read) summary.files++;
       if (signal?.aborted) {

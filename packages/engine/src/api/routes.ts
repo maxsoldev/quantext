@@ -7,8 +7,12 @@ import type { SessionKey } from "@quantext/shared";
 import type { Query } from "../query/index.ts";
 import type { Params } from "./params.ts";
 import { badRequest, checkText, integer, notFound, queryParams } from "./params.ts";
+import type { Offload } from "./server.ts";
 
-export type Reply = { kind: "json"; body: unknown } | { kind: "media"; mediaType: string; bytes: Uint8Array };
+/** `tag`: what names the content for good (a Block's log and hash); the server makes it an ETag. */
+export type Reply =
+  | { kind: "json"; body: unknown; tag?: string }
+  | { kind: "media"; mediaType: string; bytes: Uint8Array; tag: string };
 
 /** Images a browser shows inline; anything else (an SVG, a PDF) is sent as a download, never rendered here. */
 const INLINE_MEDIA = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -26,7 +30,7 @@ interface Route {
   /** Literal segments, or `:name` for a parameter. */
   path: string[];
   params: string[];
-  run(query: Query, p: Record<string, string>, q: Params): Reply;
+  run(query: Query, p: Record<string, string>, q: Params, offload: Offload): Reply | Promise<Reply>;
 }
 
 const json = (body: unknown): Reply => ({ kind: "json", body });
@@ -124,31 +128,35 @@ const ROUTES: Route[] = [
   {
     path: [...SESSION, "tool-outputs"],
     params: ["sort", "limit"],
-    run: (query, p, q) => json(query.toolOutputs(session(query, p), lifetime(q))),
+    run: async (query, p, q, offload) => json(await offload("toolOutputs", session(query, p), lifetime(q))),
   },
   {
     path: [...SESSION, "blocks"],
     params: ["sort", "limit"],
-    run: (query, p, q) => json(query.blockLifetimes(session(query, p), lifetime(q))),
+    run: async (query, p, q, offload) => json(await offload("blockLifetimes", session(query, p), lifetime(q))),
   },
   { path: [...SESSION, "compactions"], params: [], run: (query, p) => json(query.compactions(session(query, p))) },
   { path: [...SESSION, "cache-breaks"], params: [], run: (query, p) => json(query.cacheBreaks(session(query, p))) },
   {
     path: ["blocks", ":log", ":hash"],
     params: [],
-    run: (query, p) => found(query.getBlock(hash(p.hash ?? "", "hash"), integer(p.log ?? "", "log", 0, MAX_LOG))),
+    run(query, p) {
+      const [h, log] = [hash(p.hash ?? "", "hash"), integer(p.log ?? "", "log", 0, MAX_LOG)];
+      return { ...found(query.getBlock(h, log)), tag: `${log}-${h}` };
+    },
   },
   {
     path: ["blocks", ":log", ":hash", "media", ":media"],
     params: [],
     run(query, p) {
-      const media = query.getMedia(
+      const [h, log, m] = [
         hash(p.hash ?? "", "hash"),
         integer(p.log ?? "", "log", 0, MAX_LOG),
         hash(p.media ?? "", "media"),
-      );
+      ];
+      const media = query.getMedia(h, log, m);
       if (media === undefined) throw notFound();
-      return { kind: "media", mediaType: media.mediaType, bytes: media.bytes };
+      return { kind: "media", mediaType: media.mediaType, bytes: media.bytes, tag: `${log}-${h}-${m}` };
     },
   },
   {
@@ -161,10 +169,16 @@ const ROUTES: Route[] = [
     },
   },
   { path: ["report"], params: [], run: (query) => json(query.ingestReport()) },
+  { path: ["projects"], params: [], run: (query) => json(query.listProjects()) },
 ];
 
 /** The reply for the decoded segments after `/api/v1/`; 404 for no route. */
-export function route(query: Query, segments: readonly string[], search: URLSearchParams): Reply {
+export function route(
+  query: Query,
+  segments: readonly string[],
+  search: URLSearchParams,
+  offload: Offload,
+): Reply | Promise<Reply> {
   for (const r of ROUTES) {
     if (r.path.length !== segments.length) continue;
     const p: Record<string, string> = {};
@@ -176,7 +190,7 @@ export function route(query: Query, segments: readonly string[], search: URLSear
       }
       return part === segment;
     });
-    if (match) return r.run(query, p, queryParams(search, r.params));
+    if (match) return r.run(query, p, queryParams(search, r.params), offload);
   }
   throw notFound("no such route");
 }

@@ -52,12 +52,14 @@ export async function* completeLines(
   handle: FileHandle,
   offset: number,
   size: number,
-  batchBytes: number,
+  batchBytes: number | (() => number),
   maxLineBytes = Number.POSITIVE_INFINITY,
 ): AsyncGenerator<Piece> {
   let position = offset;
   while (position < size) {
-    let length = Math.min(batchBytes, size - position);
+    // A function: the caller sizes each piece as it goes (by the time the last one took).
+    const batch = typeof batchBytes === "function" ? batchBytes() : batchBytes;
+    let length = Math.min(batch, size - position);
     let buffer = await readAt(handle, position, length);
     let newline = buffer.lastIndexOf(0x0a);
     while (newline < 0 && position + length < size && length < maxLineBytes) {
@@ -66,7 +68,7 @@ export async function* completeLines(
       newline = buffer.lastIndexOf(0x0a);
     }
     if (newline < 0 && length >= maxLineBytes && position + length < size) {
-      const end = await nextNewline(handle, position + length, size, batchBytes);
+      const end = await nextNewline(handle, position + length, size, batch);
       if (end === undefined) return; // the long line is still being written
       yield { skipped: end - position, start: position, end };
       position = end;

@@ -3,7 +3,7 @@
  * held in an exclusive transaction for as long as the store is open. The OS releases it when the process ends,
  * also when it is killed, so there is no stale lock and no pid check. The pid file only tells who holds it.
  */
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { RawDatabase } from "./driver.ts";
 import { openRaw } from "./driver.ts";
 
@@ -31,7 +31,8 @@ export async function acquireLock(path: string, pidPath: string): Promise<Lock> 
     rmSync(path, { force: true }); // a lock file of an older engine (JSON): no SQLite lock can be held on it
     db = await hold(path, pidPath);
   }
-  writeFileSync(pidPath, String(process.pid));
+  writeFileSync(pidPath, String(process.pid), { mode: 0o600 });
+  if (process.platform !== "win32") chmodSync(path, 0o600);
   return {
     release() {
       rmSync(pidPath, { force: true });

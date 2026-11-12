@@ -6,7 +6,7 @@
  */
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { DemoOptions, EngineFile } from "@quantext/shared";
+import type { DemoOptions, EngineFile, IngestStatus } from "@quantext/shared";
 import { claudeCodeCodec } from "../adapters/claude-code/index.ts";
 import type { Api } from "../api/index.ts";
 import { createApi } from "../api/index.ts";
@@ -15,9 +15,10 @@ import { createIngest, watchTranscripts } from "../ingest/index.ts";
 import { createQuery, installViews } from "../query/index.ts";
 import type { SqlDriver, Store } from "../store/index.ts";
 import { openReader, openStore, StoreLockedError } from "../store/index.ts";
-import { engineUrl, readEngineFile, removeEngineFile, writeEngineFile } from "./engine-file.ts";
+import { engineUrl, printable, readEngineFile, removeEngineFile, writeEngineFile } from "./engine-file.ts";
 import { openUrl } from "./open-url.ts";
 import { probeHealth } from "./probe.ts";
+import { createQueryWorker } from "./query-worker-pool.ts";
 
 const API_VERSION = 1;
 /** The engine's port when it is free (ADR 25); else any free port, named in `engine.json`. */
@@ -49,6 +50,8 @@ export interface ServeHooks {
   now?: () => number;
   /** How often to check for the idle time (default 15 s). */
   idleCheckMs?: number;
+  /** Called after each idle check that did not stop the engine (tests wait on it). */
+  onIdleCheck?: () => void;
   openUrl?: (url: string) => void;
   staticDir?: string;
   defaultPort?: number;
@@ -59,14 +62,14 @@ export interface ServeHooks {
 type Running = { kind: "same"; file: EngineFile } | { kind: "other"; file: EngineFile; version: string };
 
 /** An engine that answers at the port `engine.json` names, with the pid it names. */
-async function running(dataDir: string, version: string): Promise<Running | undefined> {
-  const file = readEngineFile(dataDir);
+async function running(dataDir: string, version: string, warn: (m: string) => void): Promise<Running | undefined> {
+  const file = readEngineFile(dataDir, warn);
   if (file === undefined) return undefined;
   const health = await probeHealth(file.port);
   if (health === undefined || health.pid !== file.pid) return undefined; // stale: that engine is gone
   return health.version === version && health.apiVersion === API_VERSION
     ? { kind: "same", file }
-    : { kind: "other", file, version: health.version };
+    : { kind: "other", file, version: printable(health.version).slice(0, 64) };
 }
 
 /** Run the engine until it is stopped; returns the exit code. */
@@ -78,6 +81,7 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
       url,
     );
 
+  const warn = (message: string) => hooks.err(`qx: ${message}\n`);
   /** Another engine answers: reuse it (0), or say why not (1). */
   const reuse = (found: Running): number => {
     if (found.kind === "other") {
@@ -92,7 +96,7 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
     return 0;
   };
 
-  const before = await running(dataDir, version);
+  const before = await running(dataDir, version, warn);
   if (before !== undefined) return reuse(before);
 
   let store: Store;
@@ -103,7 +107,7 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
     // Another engine is starting, or `qx ingest` runs: wait a little for an engine to answer.
     const until = now() + (hooks.lockWaitMs ?? 5000);
     while (now() < until) {
-      const found = await running(dataDir, version);
+      const found = await running(dataDir, version, warn);
       if (found !== undefined) return reuse(found);
       await new Promise((r) => setTimeout(r, 100));
     }
@@ -117,6 +121,7 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
   let reader: SqlDriver | undefined;
   let api: Api | undefined;
   let watcher: Watcher | undefined;
+  let worker: { close(): Promise<void> } | undefined;
   let idle: ReturnType<typeof setInterval> | undefined;
   let catchUp: Promise<unknown> = Promise.resolve();
   try {
@@ -130,15 +135,42 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
       ...(options.host === undefined ? {} : { host: options.host }),
     });
     const ingest = createIngest({ store, root: options.root });
+    let phase: IngestStatus["phase"] = "catching-up";
+    let lastError: string | undefined;
+    const ingestStatus = (): IngestStatus => ({
+      phase,
+      ...(ingest.progress() ?? { logsDone: 0, logsTotal: 0, bytesDone: 0, bytesTotal: 0, startedAt }),
+      ...(lastError === undefined ? {} : { lastError }),
+    });
+    /** Report a failed read on stderr and in the status. */
+    const failed = (message: string) => {
+      lastError = message;
+      hooks.err(`qx: ${message}\n`);
+    };
+    const slow = createQueryWorker({
+      dataDir,
+      home: options.home,
+      ...(options.demo === undefined ? {} : { demo: options.demo }),
+      ...(options.user === undefined ? {} : { user: options.user }),
+      ...(options.host === undefined ? {} : { host: options.host }),
+    });
+    worker = slow;
     const engineApi = createApi({
       query,
       now,
+      offload: slow.run,
+      ingestStatus,
       staticDir: hooks.staticDir ?? defaultStaticDir(),
       info: { version, pid: process.pid, startedAt, demo: options.demo !== undefined, dataDir },
       onError: (e) => hooks.err(`qx: ${e instanceof Error ? e.message : String(e)}\n`),
     });
     api = engineApi;
     ingest.onEvent((event) => engineApi.publish(event));
+    ingest.onProgress(() => engineApi.publishIngest(ingestStatus()));
+    const enter = (next: IngestStatus["phase"]) => {
+      phase = next;
+      engineApi.publishIngest(ingestStatus());
+    };
     const port = await listen(engineApi, options.port, hooks.defaultPort ?? DEFAULT_PORT);
     const url = engineUrl(port);
     writeEngineFile(dataDir, { apiVersion: API_VERSION, version, pid: process.pid, port, url, startedAt });
@@ -157,23 +189,26 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
         idle = setInterval(() => {
           const { streams, lastActive } = engineApi.activity();
           if (streams === 0 && now() - lastActive >= idleMs) done(`idle for ${options.idleMinutes} min`);
+          else hooks.onIdleCheck?.();
         }, hooks.idleCheckMs ?? 15_000);
       }
     });
 
     // Catch up, then watch; a stop ends the pass after its batch, and the next start goes on from there.
     catchUp = ingest.ingestAll({ signal: stopping.signal }).then((summary) => {
-      for (const e of summary.errors) hooks.err(`qx: ${e.path}: ${e.error}\n`);
+      for (const e of summary.errors) failed(`${e.path}: ${e.error}`);
       if (!stopping.signal.aborted) {
+        enter("live");
         watcher = watchTranscripts({
           ingest,
           root: options.root,
-          onError: (e) => hooks.err(`qx: live ingest failed: ${e instanceof Error ? e.message : String(e)}\n`),
+          onError: (e) => failed(`live ingest failed: ${e instanceof Error ? e.message : String(e)}`),
         });
       }
     });
-    catchUp.catch((e: unknown) => hooks.err(`qx: ingest failed: ${e instanceof Error ? e.message : String(e)}\n`));
+    catchUp.catch((e: unknown) => failed(`ingest failed: ${e instanceof Error ? e.message : String(e)}`));
     const why = await stopped;
+    enter("stopping");
     hooks.out(`quantext engine stopping (${why})\n`);
     return 0;
   } finally {
@@ -182,6 +217,7 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
     await catchUp.catch(() => undefined); // reported above
     await watcher?.stop();
     await api?.close();
+    await worker?.close();
     reader?.close();
     store.close();
     removeEngineFile(dataDir, process.pid);

@@ -5,7 +5,7 @@
  */
 import type { SessionKey } from "./query.ts";
 
-/** Calls one write added or updated in one Session. */
+/** Calls one write added or updated in one Session; both lists are empty when only the Session itself changed. */
 export interface CallsEvent {
   kind: "calls";
   /** The log's id in the store: with `sessionId`, the Session's key. */
@@ -39,6 +39,7 @@ export type IngestEvent = CallsEvent | MemoryEvent | LogRemovedEvent;
 
 /** A change event as a reader may see it: no local paths, nothing of a hidden project. */
 export type VisibleEvent =
+  /** Empty `added` and `updated`: the Session changed (its end, title, events) with no Call added or updated. */
   | {
       kind: "calls";
       cursor: number;

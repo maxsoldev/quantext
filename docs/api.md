@@ -12,7 +12,9 @@ All are GET (or HEAD). `:log` and `:id` are a Session's key (`SessionKey`); `:n`
 | Route | Query method | Parameters |
 |---|---|---|
 | `/health` | | `Health`: `ok`, `version`, `apiVersion`, `pid`, `startedAt`, `demo`, `dataDir` (not in demo mode) |
+| `/api/v1/status` | | `EngineStatus`: `engine` (`version`, `pid`, `startedAt`, `demo`), `ingest` (`phase`: `catching-up`, `live`, `stopping`; `logsDone`, `logsTotal`, `bytesDone`, `bytesTotal` of the pass in progress or the last one, its `startedAt`, `lastError`: in demo mode only that one failed), `streams` |
 | `/api/v1/sessions` | `listSessions` | `project`, `search` (≤ 200), `sort` (`ended` `started` `cost` `calls`), `order` (`asc` `desc`), `changedSince`, `limit` (1–500, default 50), `offset` |
+| `/api/v1/projects` | `listProjects` | `Items<ProjectSummary>`: `project` (as Sessions show it; its folder name in demo mode), `sessions`, `ended`, latest first |
 | `/api/v1/session-keys` | `findSessions` | `id` (an id or its prefix) |
 | `/api/v1/sessions/:log/:id` | `getSession` | |
 | `/api/v1/sessions/:log/:id/calls` | `listCalls` | `lane`, `afterIndex`, `limit` (1–5000) |
@@ -43,10 +45,11 @@ demo mode), Call, Block or media; 403 `forbidden-host`, `forbidden-origin`, `for
 
 | Event | id | data |
 |---|---|---|
-| `calls` | `<cursor>.<n>` | `VisibleEvent` of kind `calls`: `cursor`, `session`, `added` (`id`, `index`), `updated` |
+| `calls` | `<cursor>.<n>` | `VisibleEvent` of kind `calls`: `cursor`, `session`, `added` (`id`, `index`), `updated`. One per Session each write changed; both lists empty when only the Session changed (its end, title, events), so the stream's cursor keeps up with the store's |
 | `memory` | `<cursor>.<n>` | `{ kind, cursor, projects }` |
 | `log-removed` | `<cursor>.<n>` | `{ kind, cursor, logId }` (its Sessions are read again from the start) |
 | `resync` | `<cursor>` | `SseResync`: `cursor`, `since`. Read `/api/v1/sessions?changedSince=<since>` again |
+| `ingest` | none | `SseIngest`: the `ingest` part of `/api/v1/status`, at most once a second while it changes, the latest last; not replayed |
 | `ready` | `<cursor>` | `SseReady`: `cursor`, `replayed`. After the replay; live events follow |
 
 `<cursor>` is the store's change cursor after the write, `<n>` the event's place among the events of that write.
