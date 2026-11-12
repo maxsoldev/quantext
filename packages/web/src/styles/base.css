@@ -129,6 +129,9 @@ pre,
   min-width: 0;
   flex: 1;
   color: var(--ink-2);
+  font-weight: 600;
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--rule);
 }
 .crumbs .sep {
   color: var(--rule-strong);

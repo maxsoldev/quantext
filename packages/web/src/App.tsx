@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useRoute } from "./nav.tsx";
 import { SessionList } from "./pages/SessionList.tsx";
+import { SessionPage } from "./pages/SessionPage.tsx";
 import { LiveStatus } from "./ui/LiveStatus.tsx";
 import { Tooltip } from "./ui/Tooltip.tsx";
 import type { Theme } from "./ui/theme.ts";
@@ -27,6 +28,11 @@ export function App() {
           <span className="brand-mark" aria-hidden="true" />
           Quantext
         </Link>
+        {route.page !== "sessions" && (
+          <nav className="crumbs" aria-label="Breadcrumb">
+            <Link to={{ page: "sessions" }}>All sessions</Link>
+          </nav>
+        )}
         <div className="masthead-end">
           <LiveStatus />
           <button
@@ -41,7 +47,7 @@ export function App() {
       </header>
       <main className="page" id="main">
         {route.page === "sessions" && <SessionList route={route} />}
-        {route.page === "session" && <p>Session {route.key.id}</p>}
+        {route.page === "session" && <SessionPage key={`${route.key.log}/${route.key.id}`} route={route} />}
         {route.page === "not-found" && (
           <section className="empty">
             <h1>No page at this address</h1>

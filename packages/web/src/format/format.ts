@@ -82,7 +82,9 @@ export function duration(ms: number): string {
   if (s < 60) return `${Math.round(s)} s`;
   const m = Math.floor(s / 60);
   if (m < 60) return `${m} min ${Math.round(s - 60 * m)} s`;
-  return `${Math.floor(m / 60)} h ${m % 60} min`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h} h ${m % 60} min`;
+  return `${Math.floor(h / 24)} days ${h % 24} h`;
 }
 
 const dateTime = new Intl.DateTimeFormat("en-GB", {

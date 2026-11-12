@@ -6,7 +6,7 @@ import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { Page } from "@playwright/test";
 import { test as base } from "@playwright/test";
 
@@ -16,6 +16,8 @@ const FIXTURES = join(repo, "fixtures", "claude-code", "2.1.322");
 
 export interface Engine {
   url: string;
+  /** The viewer's URL of a scenario's main Session. */
+  sessionUrl(scenario: string): Promise<string>;
   /** The transcript of a scenario's main Session in the temp root. */
   transcript(scenario: string): string;
   stop(): Promise<void>;
@@ -58,8 +60,18 @@ export async function startEngine(options: EngineOptions = {}): Promise<Engine> 
     const file = join(dataDir, "engine.json");
     return existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as { port: number }).port : undefined;
   });
+  const url = `http://127.0.0.1:${port}`;
+  // The engine listens before it has read the logs: wait for the catch-up, so every test starts from all of them.
+  await waitLive(url);
   return {
-    url: `http://127.0.0.1:${port}`,
+    url,
+    async sessionUrl(scenario) {
+      const id = basename(mainTranscript(join(FIXTURES, scenario)), ".jsonl");
+      const body = (await (await fetch(`${url}/api/v1/session-keys?id=${id}`)).json()) as { items: { log: number }[] };
+      const key = body.items[0];
+      if (!key) throw new Error(`no Session ${id}`);
+      return `${url}/s/${key.log}/${id}`;
+    },
     transcript: (s) => mainTranscript(join(root, "projects", `-fixture-${s}`)),
     stop: () => stop(child, work),
   };
@@ -81,6 +93,16 @@ function mainTranscript(dir: string): string {
   const name = readdirSync(dir).find((n) => n.endsWith(".jsonl"));
   if (name === undefined) throw new Error(`no transcript in ${dir}`);
   return join(dir, name);
+}
+
+async function waitLive(url: string): Promise<void> {
+  const end = Date.now() + 15_000;
+  for (;;) {
+    const status = (await (await fetch(`${url}/api/v1/status`)).json()) as { ingest: { phase: string } };
+    if (status.ingest.phase === "live") return;
+    if (Date.now() > end) throw new Error("the engine did not finish its catch-up");
+    await new Promise((r) => setTimeout(r, 50));
+  }
 }
 
 async function stop(child: ChildProcess, work: string): Promise<void> {

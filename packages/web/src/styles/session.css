@@ -1,0 +1,290 @@
+/* The session page: head, figures, the timeline card, the scrubber. */
+.session-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.session-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: var(--space-5);
+}
+.session-name {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 70ch;
+}
+.session-name p {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.figures {
+  display: flex;
+  gap: var(--space-6);
+  margin: 0;
+}
+.figures div {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+}
+.figures dt {
+  font-size: var(--t-small);
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.figures dd {
+  margin: 0;
+  font-size: var(--t-h2);
+  font-weight: 700;
+  line-height: 1.1;
+}
+.figures dd .num {
+  font-variant-numeric: normal;
+}
+.figures dd.models-inline {
+  font-size: var(--t-lead);
+}
+.lanes {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.lanes legend {
+  float: left;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-right: var(--space-2);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-m);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-5);
+  align-items: flex-start;
+}
+.legends {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  align-items: flex-start;
+  width: 100%;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: var(--space-1) var(--space-4);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--t-small);
+  color: var(--ink-2);
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex: none;
+}
+.break-swatch {
+  background: var(--warning);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  border-radius: 0;
+}
+
+/* The chart. */
+.timeline {
+  position: relative;
+  width: 100%;
+}
+.timeline svg {
+  display: block;
+  cursor: crosshair;
+}
+.timeline .grid {
+  stroke: var(--grid);
+  stroke-width: 1;
+}
+.timeline .baseline {
+  stroke: var(--rule-strong);
+  stroke-width: 1;
+}
+.timeline .tick {
+  fill: var(--ink-3);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.timeline .panel-label {
+  fill: var(--ink-2);
+  font-size: 14px;
+  font-weight: 700;
+}
+.cat-unrebuilt {
+  fill: var(--rule-strong);
+  background: var(--rule-strong);
+}
+.compaction-mark rect {
+  fill: var(--ink);
+}
+.compaction-mark text {
+  fill: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+.break-mark {
+  fill: var(--warning);
+  stroke: var(--surface);
+  stroke-width: 2;
+  cursor: help;
+}
+.cursor rect {
+  fill: var(--ink);
+  opacity: 0.08;
+}
+.cursor.selected rect {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 2;
+  opacity: 1;
+}
+.cursor-label {
+  fill: var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+}
+.chart-tip {
+  position: absolute;
+  top: 24px;
+  z-index: 5;
+  width: 280px;
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-m);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.14);
+  font-size: var(--t-small);
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.chart-tip-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--t-body);
+}
+.chart-tip-total b {
+  font-size: var(--t-body);
+}
+.tip-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.tip-rows li {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+.chart-tip-hint {
+  border-top: 1px solid var(--rule);
+  padding-top: var(--space-2);
+}
+
+/* The scrubber: stuck to the bottom of the window, so it stays at hand below the chart and the context. */
+.scrubber {
+  position: sticky;
+  bottom: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 calc(-1 * var(--space-6)) calc(-1 * var(--space-7));
+  padding: var(--space-2) var(--space-6);
+  background: var(--surface);
+  border-top: 1px solid var(--rule-strong);
+  box-shadow: 0 -4px 16px rgb(0 0 0 / 0.06);
+}
+.scrubber input[type="range"] {
+  flex: 1;
+  accent-color: var(--ink);
+  height: 28px;
+}
+.scrubber button {
+  min-width: 40px;
+  font-size: var(--t-lead);
+  line-height: 1;
+}
+.scrubber-pos {
+  font-size: var(--t-lead);
+  white-space: nowrap;
+}
+.keys {
+  font-size: var(--t-small);
+  white-space: nowrap;
+}
+
+.compaction-swatch {
+  width: 3px;
+  background: var(--ink);
+  border-radius: 0;
+}
+.card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3) var(--space-5);
+}
+.session-name p a {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+/* A short window (a 720px projector): tighter head, so the chart and scrubber fit. */
+@media (max-height: 800px) {
+  .page {
+    padding-top: var(--space-4);
+    gap: var(--space-4);
+  }
+  .session-page {
+    gap: var(--space-4);
+  }
+  .session-name h1 {
+    font-size: var(--t-h2);
+  }
+  .figures dd {
+    font-size: var(--t-lead);
+  }
+  .card {
+    padding: var(--space-3) var(--space-4);
+  }
+}
