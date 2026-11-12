@@ -1,22 +1,29 @@
 /** The Quantext mod: a footer label and nudges from in-process usage, /clear-tool-outputs, /quantext view. */
 import type { Register } from "claude-code";
-import { inputOf, readLive, statusLabel, updateLive } from "./live.ts";
+import { EMPTY, inputOf, readLive, statusLabel, updateLive } from "./live.ts";
+import { cacheExpiryNudge, contextNudge } from "./nudges.ts";
 
 export const register: Register = (on) => {
   on("session.measure", async ($, e, next) => {
     const r = await next(e);
+    const ctx = e.context.tokens;
+    const nudge = ctx === undefined ? undefined : contextNudge(await readLive($), ctx);
     await updateLive($, (l) => ({
       ...l,
-      ctx: e.context.tokens ?? l.ctx,
+      ctx: ctx ?? l.ctx,
       ...(e.cost === undefined ? {} : { usd: e.cost.usd }),
+      bigCtxNudged: l.bigCtxNudged || nudge !== undefined,
     }));
+    if (nudge !== undefined) $.ui.toast(nudge);
     return r;
   });
 
   on("turn.step", async function* ($, e, next) {
+    const startedAt = await $.clock.now();
     const r = yield* next(e);
     const u = r.usage;
     if (u === null || e.agentId !== undefined) return r; // subagents have their own caches: count the main loop
+    const nudge = cacheExpiryNudge(await readLive($), u, startedAt);
     const endedAt = await $.clock.now();
     await updateLive($, (l) => ({
       ...l,
@@ -25,6 +32,22 @@ export const register: Register = (on) => {
       lastEndAt: endedAt,
       lastCtx: inputOf(u),
     }));
+    if (nudge !== undefined) $.ui.toast(nudge);
+    return r;
+  });
+
+  on("session.compact", async ($, e, next) => {
+    const r = await next(e);
+    if (e.agentId === undefined && e.trigger !== "precompute" && r.messages !== undefined) {
+      await updateLive($, (l) => ({ ...l, bigCtxNudged: false }));
+    }
+    return r;
+  });
+
+  // A /clear ends this conversation and goes on with a new one: start its figures over.
+  on("session.end", async ($, e, next) => {
+    const r = await next(e);
+    if (e.reason === "clear") await updateLive($, () => EMPTY);
     return r;
   });
 
