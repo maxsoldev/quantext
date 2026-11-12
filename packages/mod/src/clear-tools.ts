@@ -1,47 +1,53 @@
 /**
- * The three clear commands: `/clear-tool-outputs`, `/clear-tool-calls` and `/clear-tools` (both in one
- * compaction, so the prompt cache is written once, not twice). Each runs as `/compact <kind> keep N`, which the
- * mod's `session.compact` hook answers with no model call.
+ * `/clear-tools [outputs] [keep N]`: stub old tool calls (inputs) and old tool outputs in one compaction, so the
+ * prompt cache is written once; `outputs` stubs only the outputs. It runs as `/compact tools [outputs] keep N`,
+ * which the mod's `session.compact` hook answers with no model call.
  */
 import type { SessionMessage } from "claude-code";
 import { clearToolCalls } from "./clear-tool-calls.ts";
 import { clearToolOutputs } from "./clear-tool-outputs.ts";
 import { tokens } from "./format.ts";
 
-export type ClearKind = "tool-outputs" | "tool-calls" | "tools";
+export const USAGE = "Usage: /clear-tools [outputs] [keep N]";
 
-/** Each command: its name, the `/compact` word it queues, and the words for what it clears. */
-export const CLEAR_COMMANDS = [
-  { name: "clear-tool-outputs", kind: "tool-outputs", what: "tool outputs" },
-  { name: "clear-tool-calls", kind: "tool-calls", what: "tool calls" },
-  { name: "clear-tools", kind: "tools", what: "tool calls and outputs" },
-] as const satisfies readonly { name: string; kind: ClearKind; what: string }[];
+/** What to clear: only outputs, or calls and outputs; `keep` is how many of the last ones stay whole. */
+export type ClearArgs = { outputsOnly: boolean; keep: number };
 
-/** Reads `keep N`, `N` or nothing (keep 0); undefined when the text is something else. */
-export function parseKeep(args: string): number | undefined {
-  const m = /^\s*(?:keep\s+)?(\d+)?\s*$/i.exec(args);
-  return m ? Number(m[1] ?? 0) : undefined;
+/** Reads `[outputs] [keep N]` (`keep` may be left out before N); a reason when the words are something else. */
+export function parseClearArgs(args: string): ClearArgs | { error: string } {
+  const words = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const outputsOnly = words[0] === "outputs";
+  const rest = outputsOnly ? words.slice(1) : words;
+  const hasKeep = rest[0] === "keep";
+  const n = hasKeep ? rest[1] : rest[0];
+  const extra = rest[hasKeep ? 2 : 1];
+  if (n !== undefined && !/^\d+$/.test(n))
+    return { error: hasKeep ? `keep needs a whole number, not "${n}"` : `unknown word "${n}"` };
+  if (hasKeep && n === undefined) return { error: "keep needs a whole number" };
+  if (extra !== undefined) return { error: `unknown word "${extra}"` };
+  return { outputsOnly, keep: Number(n ?? 0) };
 }
 
-/** The kind and N of `/compact <kind> [keep N]`; undefined for any other compaction. */
-export function clearRequest(instructions: string | undefined): { kind: ClearKind; keep: number } | undefined {
-  const asked = /^\s*(tool-outputs|tool-calls|tools)\b(.*)$/is.exec(instructions ?? "");
-  const keep = asked ? parseKeep(asked[2] ?? "") : undefined;
-  return asked && keep !== undefined ? { kind: asked[1]?.toLowerCase() as ClearKind, keep } : undefined;
+/** The `/compact` arguments that run `a`. */
+export const compactArgs = (a: ClearArgs): string => `tools ${a.outputsOnly ? "outputs " : ""}keep ${a.keep}`;
+
+/** What `a` clears, in words. */
+export const clearWhat = (a: Pick<ClearArgs, "outputsOnly">): string =>
+  a.outputsOnly ? "tool outputs" : "tool calls and outputs";
+
+/** The request in `/compact tools [outputs] [keep N]`; undefined for any other compaction. */
+export function clearRequest(instructions: string | undefined): ClearArgs | undefined {
+  const asked = /^\s*tools\b(.*)$/is.exec(instructions ?? "");
+  const a = asked ? parseClearArgs(asked[1] ?? "") : undefined;
+  return a && !("error" in a) ? a : undefined;
 }
 
-/** Clears what `kind` names, keeping the last `keep` of each; `note` is the toast that says what it did. */
-export function clearTools(messages: readonly SessionMessage[], kind: ClearKind, keep: number) {
-  const calls = kind === "tool-outputs" ? undefined : clearToolCalls(messages, keep);
-  const outputs = kind === "tool-calls" ? undefined : clearToolOutputs(calls?.messages ?? messages, keep);
-  const parts = [
-    ...(calls ? [`${calls.cleared} tool calls`] : []),
-    ...(outputs ? [`${outputs.cleared} tool outputs`] : []),
-  ];
-  const chars = (calls?.chars ?? 0) + (outputs?.chars ?? 0);
-  const kept = keep > 0 ? `, kept the last ${keep}` : "";
-  return {
-    messages: outputs?.messages ?? calls?.messages ?? messages,
-    note: `Cleared ${parts.join(" and ")} (~${tokens(chars / 4)} tokens)${kept}`,
-  };
+/** Clears what `a` asks for, keeping the last `a.keep` of each; `note` is the toast that says what it did. */
+export function clearTools(messages: readonly SessionMessage[], a: ClearArgs) {
+  const calls = a.outputsOnly ? undefined : clearToolCalls(messages, a.keep);
+  const outputs = clearToolOutputs(calls?.messages ?? messages, a.keep);
+  const parts = [...(calls ? [`${calls.cleared} tool calls`] : []), `${outputs.cleared} tool outputs`];
+  const chars = (calls?.chars ?? 0) + outputs.chars;
+  const kept = a.keep > 0 ? `, kept the last ${a.keep}` : "";
+  return { messages: outputs.messages, note: `Cleared ${parts.join(" and ")} (~${tokens(chars / 4)} tokens)${kept}` };
 }

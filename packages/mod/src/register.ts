@@ -1,21 +1,22 @@
-/** The Quantext mod: a footer label and nudges from in-process usage, the /clear-tool-* commands, /quantext view. */
+/** The Quantext mod: a footer label and nudges from in-process usage, /clear-tools, /quantext view. */
 import type { EngineInterface, Register } from "claude-code";
-import type { ClearKind } from "./clear-tools.ts";
-import { CLEAR_COMMANDS, clearRequest, clearTools, parseKeep } from "./clear-tools.ts";
+import type { ClearArgs } from "./clear-tools.ts";
+import { clearRequest, clearTools, clearWhat, compactArgs, parseClearArgs, USAGE } from "./clear-tools.ts";
 import { EMPTY, inputOf, readLive, statusLabel, updateLive } from "./live.ts";
 import { cacheExpiryNudge, contextNudge } from "./nudges.ts";
 import { openViewer } from "./viewer.ts";
 
 /**
- * Queues `/compact <kind> keep N`, which the session.compact hook answers. `$.session.compact()` would
+ * Queues `/compact tools [outputs] keep N`, which the session.compact hook answers. `$.session.compact()` would
  * skip that hook and get Claude Code's summary; `$.command.run` queues the command as if typed.
  */
-async function clearNow($: EngineInterface, name: string, kind: ClearKind, keep: number): Promise<void> {
+async function clearNow($: EngineInterface, a: ClearArgs): Promise<void> {
+  const args = compactArgs(a);
   try {
-    await $.command.run({ command: "compact", args: `${kind} keep ${keep}` });
+    await $.command.run({ command: "compact", args });
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
-    $.ui.toast(`${name} failed: ${why}; try /compact ${kind}`);
+    $.ui.toast(`/clear-tools failed: ${why}; try /compact ${args}`);
   }
 }
 
@@ -48,12 +49,12 @@ function remeasureSoon($: EngineInterface): void {
 export const register: Register = (on) => {
   on("session.start", async ($, e, next) => {
     const started = await next(e);
-    for (const c of CLEAR_COMMANDS)
-      await $.command.register({
-        name: c.name,
-        description: `Clear old ${c.what} from the context and keep all else (also: /compact ${c.kind})`,
-        argumentHint: "[keep N]",
-      });
+    await $.command.register({
+      name: "clear-tools",
+      description:
+        "Clear old tool calls and outputs, no summary. outputs: only outputs; keep N: leave the last N (also: /compact tools)",
+      argumentHint: "[outputs] [keep N]",
+    });
     await $.command.register({
       name: "quantext",
       description: "Quantext: open the live context viewer (starts the engine when it is not running)",
@@ -63,13 +64,13 @@ export const register: Register = (on) => {
     return started;
   });
 
-  for (const c of CLEAR_COMMANDS)
-    on("command.run", { command: c.name }, async ($, e) => {
-      const keep = parseKeep(e.args);
-      if (keep === undefined) return { text: `Usage: /${c.name} [keep N]` };
-      $.clock.after(0, () => void clearNow($, c.name, c.kind, keep)); // Claude Code refuses a compaction inside command.run
-      return { text: keep > 0 ? `Clearing ${c.what}, keeping the last ${keep}…` : `Clearing ${c.what}…` };
-    });
+  on("command.run", { command: "clear-tools" }, async ($, e) => {
+    const a = parseClearArgs(e.args);
+    if ("error" in a) return { text: `/clear-tools: ${a.error}. ${USAGE}` };
+    $.clock.after(0, () => void clearNow($, a)); // Claude Code refuses a compaction inside command.run
+    const what = clearWhat(a);
+    return { text: a.keep > 0 ? `Clearing ${what}, keeping the last ${a.keep}…` : `Clearing ${what}…` };
+  });
 
   on("session.measure", async ($, e, next) => {
     const r = await next(e);
@@ -114,13 +115,13 @@ export const register: Register = (on) => {
     return { text: "quantext: opening the viewer…" };
   });
 
-  // Answers the clear commands and `/compact <kind> [keep N]` in Claude Code's place: no summary.
+  // Answers `/compact tools [outputs] [keep N]` (queued by /clear-tools) in Claude Code's place: no summary.
   on("session.compact", async ($, e, next) => {
     const asked = e.agentId === undefined ? clearRequest(e.instructions) : undefined;
     let r: Awaited<ReturnType<typeof next>>;
     if (asked === undefined) r = await next(e);
     else {
-      const cleared = clearTools(e.messages, asked.kind, asked.keep);
+      const cleared = clearTools(e.messages, asked);
       $.ui.toast(cleared.note);
       r = { messages: cleared.messages };
     }
@@ -132,8 +133,7 @@ export const register: Register = (on) => {
   }).catch((_$, e, next) => {
     // A failed clear must not fall back to a paid summary; any other failure leaves it to Claude Code.
     const asked = e.agentId === undefined ? clearRequest(e.instructions) : undefined;
-    const what = CLEAR_COMMANDS.find((c) => c.kind === asked?.kind)?.what;
-    return what && !next.called ? { skip: `quantext: clearing ${what} failed` } : next(e);
+    return asked && !next.called ? { skip: `quantext: clearing ${clearWhat(asked)} failed` } : next(e);
   });
 
   // A /clear ends this conversation and goes on with a new one: start its figures over.

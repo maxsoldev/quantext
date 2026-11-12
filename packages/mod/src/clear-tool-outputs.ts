@@ -1,6 +1,6 @@
 /**
- * `/clear-tool-outputs [keep N]`: replace old tool outputs with the stub Claude Code's own microcompact writes,
- * and keep everything else, in place of a summary. It runs as `/compact tool-outputs keep N` (`clear-tools.ts`).
+ * The outputs half of `/clear-tools`: replace old tool outputs with the stub Claude Code's own microcompact
+ * writes, and keep everything else, in place of a summary (`clear-tools.ts`).
  */
 import type { SessionMessage } from "claude-code";
 

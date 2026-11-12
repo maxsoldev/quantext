@@ -1,7 +1,7 @@
 /**
- * `/clear-tool-calls [keep N]`: replace the input of old tool calls with a short stub, so the model's own Write
- * contents, Bash heredocs and Agent briefs leave the context. Each call keeps its name and id, so it still pairs
- * with its result. Deterministic: no model call. It runs as `/compact tool-calls keep N`.
+ * The calls half of `/clear-tools`: replace the input of old tool calls with a short stub, so the model's own
+ * Write contents, Bash heredocs and Agent briefs leave the context. Each call keeps its name and id, so it still
+ * pairs with its result. Deterministic: no model call (`clear-tools.ts`).
  */
 import type { SessionMessage, ToolUseSummary } from "claude-code";
 import { tokens } from "./format.ts";
