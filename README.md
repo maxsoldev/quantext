@@ -16,7 +16,12 @@ agents through SQL and a CLI. Nothing leaves the machine.
   pnpm install
   pnpm check        # lint, types, tests, layer check, scans
   pnpm check:bun    # the runtime-specific checks under Bun
+  pnpm build        # the viewer (Vite) and the engine bundle, with the viewer in dist/web
+  pnpm e2e          # build, then the viewer's Playwright tests (once: pnpm exec playwright install chromium)
   ```
+
+  Viewer development: run an engine (`pnpm qx serve …`), then `QX_ENGINE=http://127.0.0.1:<port> pnpm -F
+  @quantext/web dev`; Vite proxies `/api` and `/health` to it.
 
   An older global pnpm may fail to switch itself to the pinned version. Then run `corepack pnpm …` instead.
 

@@ -236,9 +236,12 @@ function processSignal(controller: AbortController): AbortSignal {
   return controller.signal;
 }
 
-/** The viewer's files: `web/` next to the bundled engine, else the placeholder folder in the repo. */
+/**
+ * The viewer's files: `web/` next to the bundled engine; from source, the viewer's Vite build when there is one,
+ * else the placeholder folder in the repo.
+ */
 export function defaultStaticDir(): string {
-  for (const candidate of ["./web/", "../../static/"]) {
+  for (const candidate of ["./web/", "../../../web/dist/", "../../static/"]) {
     const dir = fileURLToPath(new URL(candidate, import.meta.url));
     if (existsSync(`${dir}index.html`)) return dir;
   }

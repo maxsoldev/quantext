@@ -2,16 +2,20 @@
  * Bundle the engine with Rolldown (ADR 13) into `packages/engine/dist/`: `engine.js` (the `qx` command, with
  * `qx serve`), `sql-child.js` and `sql-watchdog.js` (the `qx sql` child and its watchdog thread),
  * `query-worker.js` (the engine's thread for slow queries), ESM with no
- * imports but the runtimes' built-ins and their own driver chunks; and `web/`, the viewer's files. Fails if an
- * output imports anything else, so the bundle runs with no node_modules.
+ * imports but the runtimes' built-ins and their own driver chunks; and `web/`, the viewer's files, copied from
+ * the Vite build in `packages/web/dist/` (`pnpm build` runs it first). Fails if an output imports anything else, so
+ * the bundle runs with no node_modules, or if the viewer is not built.
  */
-import { chmodSync, cpSync, readFileSync, rmSync, statSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { build } from "rolldown";
 import { parseAst } from "rolldown/parseAst";
 
 const engine = join(import.meta.dirname, "..", "packages", "engine");
 const dist = join(engine, "dist");
+const web = join(import.meta.dirname, "..", "packages", "web", "dist");
+if (!existsSync(join(web, "index.html")))
+  throw new Error("no packages/web/dist/index.html: run the viewer's build first");
 
 const ENTRIES = {
   engine: "src/cli/qx.ts",
@@ -54,7 +58,7 @@ for (const [name, input] of Object.entries(ENTRIES)) {
   }
 }
 chmodSync(join(dist, "engine.js"), 0o755);
-cpSync(join(engine, "static"), join(dist, "web"), { recursive: true });
+cpSync(web, join(dist, "web"), { recursive: true });
 console.log("dist/web/");
 
 /** Every specifier a module imports, statically or with `import()`. */
