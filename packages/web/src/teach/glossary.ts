@@ -175,4 +175,5 @@ export const ISSUE_WORDS: Record<CallIssue["kind"], string> = {
   "no-price": "No list price for the model: the call has no cost",
   "price-assumption": "The cost rests on an assumption the log cannot confirm (cache lifetime, long-context price)",
   "estimate-clamped": "A block's estimated share was raised to its lower bound",
+  "unlocated-attachment": "A text the harness attached is in no message of the request",
 };

@@ -272,8 +272,13 @@ const V4 = `
 ALTER TABLE calls ADD COLUMN response TEXT;
 `;
 
+/** The parts of a Block that holds several attached texts, as JSON (ADR 29). */
+const V5 = `
+ALTER TABLE log_blocks ADD COLUMN parts TEXT;
+`;
+
 /** Migration i (0-based) takes the schema from version i to version i + 1. */
-const MIGRATIONS: readonly string[] = [V1, V2, V3, V4];
+const MIGRATIONS: readonly string[] = [V1, V2, V3, V4, V5];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
 

@@ -14,10 +14,11 @@ import type {
   ToolCall,
 } from "@quantext/shared";
 import type { Estimate } from "../../core/estimate.ts";
+import type { Attached } from "./attached.ts";
 import type { Json, JsonObject } from "./json.ts";
 
 /** The format of ParserState: a snapshot of another version is refused. */
-export const STATE_VERSION = 4;
+export const STATE_VERSION = 5;
 
 export interface ParserState {
   version: typeof STATE_VERSION;
@@ -58,8 +59,8 @@ export interface ParserState {
   /** Hashes of compaction summary texts, and of skill texts with the skill's name. */
   summaries: Record<string, 1>;
   skills: Record<string, string>;
-  /** Texts the harness attached (by text hash), with the attachment's type and file, newest last (bounded). */
-  attachments: Record<string, { type: string; path?: string }>;
+  /** Texts the harness attached and no new Block holds yet, newest last (bounded). */
+  attached: Attached[];
   /** Subagents: the tool use that started each agent id; the agent id and meta tool use of each transcript. */
   agentToolUse: Record<string, string>;
   transcriptAgent: Record<string, string>;
@@ -178,7 +179,7 @@ export function emptyState(): ParserState {
     compactions: {},
     summaries: {},
     skills: {},
-    attachments: {},
+    attached: [],
     agentToolUse: {},
     transcriptAgent: {},
     metaToolUse: {},

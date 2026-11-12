@@ -21,9 +21,11 @@ import { addCounts } from "../../core/graph.ts";
 import { reasoningShown } from "../../providers/anthropic/content.ts";
 import { estimateBlock } from "../../providers/anthropic/estimate.ts";
 import { canonicalModel, MAX_CONTEXT_WINDOW } from "../../providers/anthropic/pricing.ts";
+import type { Attached } from "./attached.ts";
+import { holds, remember } from "./attached.ts";
 import { Changes } from "./changes.ts";
 import type { Classifier } from "./classify.ts";
-import { attachedTextHash, blockHash, createClassifier, textHash, toolSource } from "./classify.ts";
+import { blockHash, createClassifier, textHash, toolSource } from "./classify.ts";
 import type { Json, JsonObject } from "./json.ts";
 import { arr, num, obj, str } from "./json.ts";
 import { laneOf, splitCall } from "./lane.ts";
@@ -64,8 +66,6 @@ export const HARNESS = "claude-code";
 
 /** Rows that can bring a missing part of a waiting request. */
 const WIRE_ROWS = new Set(["api-request-blob", "api-request-shape", "api-request", "user", "assistant"]);
-/** Attached texts remembered until a Block with that text is classified, newest first. */
-const MAX_ATTACHMENTS = 64;
 /** Open ToolCalls kept in the snapshot, newest first. */
 const MAX_OPEN_TOOL_CALLS = 64;
 /** Calls kept waiting for a missing part; older ones stay unresolved. */
@@ -299,25 +299,49 @@ class Rows {
   }
 
   /**
-   * The texts an attachment row says the harness rendered: a Block with exactly that text gets the attachment as
-   * its source when it is classified. A row that renders nothing holds nothing for the domain.
+   * The texts an attachment row says the harness rendered: a new Block that holds them gets them as its parts
+   * when it is classified. A row that renders nothing holds nothing for the domain.
    */
   private attachment(data: JsonObject): void {
     const attachment = obj(data.attachment);
-    const parts = (arr(data.rendered) ?? []).flatMap((p) => str(obj(p)?.content) ?? []);
+    const texts = (arr(data.rendered) ?? []).flatMap((p) => str(obj(p)?.content) ?? []).filter((t) => t.trim() !== "");
     const type = str(attachment?.type);
-    if (type === undefined || parts.length === 0) {
+    if (type === undefined || texts.length === 0) {
       countIgnored(this.changes().report, "attachment");
       return;
     }
     const path = str(attachment?.filename) ?? str(attachment?.path);
-    for (const text of parts) {
-      const hash = attachedTextHash(text);
-      delete this.state.attachments[hash]; // newest last
-      put(this.state.attachments, hash, path === undefined ? { type } : { type, path });
+    for (const text of texts) {
+      const added: Attached = { type, text, transcript: this.name };
+      if (path !== undefined) added.path = path;
+      this.state.attached = remember(this.state.attached, added);
     }
-    const hashes = Object.keys(this.state.attachments);
-    for (const old of hashes.slice(0, Math.max(0, hashes.length - MAX_ATTACHMENTS))) delete this.state.attachments[old];
+  }
+
+  /**
+   * The attached texts of this transcript that no request checked yet must be in a message of this request; one
+   * that is in none gets an issue on the Call, and is not looked for again. With a message missing, none is blamed.
+   */
+  private locateAttached(call: Call, spec: CallSpec, missing: boolean): void {
+    const open = this.state.attached.filter((a) => a.transcript === this.name && a.checked === undefined);
+    if (open.length === 0) return;
+    if (missing) {
+      for (const a of open) a.checked = 1;
+      return;
+    }
+    const texts = spec.tail.flatMap((hash) =>
+      (resolve(this.store, this.t, hash)?.content ?? []).flatMap((c) => str(obj(c)?.text) ?? []),
+    );
+    for (const a of open) {
+      if (texts.some((t) => holds(t, a))) a.checked = 1;
+      else {
+        call.issues.push({
+          kind: "unlocated-attachment",
+          detail: `the ${a.type} attachment is in no message of the request`,
+        });
+        this.state.attached = this.state.attached.filter((x) => x !== a);
+      }
+    }
   }
 
   /** A title (the user's own wins over the harness's) or an agent name for the Session. */
@@ -440,6 +464,7 @@ class Rows {
     this.settle(spec);
     const missing = this.missing(spec);
     call.issues.push(...missing);
+    this.locateAttached(call, spec, missing.length > 0);
     if (!this.blocked(id, missing)) {
       call.issues.push({ kind: "no-usage", detail: "the log has no response with usage for this call yet" });
       put(this.state.pending, id, 1);

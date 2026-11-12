@@ -121,7 +121,7 @@ the mod sandbox accepts no other imports besides relative paths.
 |---|---|---|
 | `Session` | session or subagent | id, parent id, harness, harness version, project, cwd, started, ended |
 | `Call` | LLM request | session, index, lane, ts, model, params, shape hash, input / cache read / cache write / output / reasoning tokens, framing tokens, cache boundary, cache breakpoints, cost, issues |
-| `Block` | unique content (by hash) | kind (tool schema, system, user, reminder, assistant, reasoning, tool call, tool result, image, document, summary), source (tool name, file path, MCP server, skill), content |
+| `Block` | unique content (by hash) | kind (tool schema, system, user, reminder, assistant, reasoning, tool call, tool result, image, document, summary), source (tool name, file path, MCP server, skill), content, parts (attached texts merged into it; ADR 29) |
 | `CallBlock` | run of a block at one position over the calls of one lane | position, section, tokens, token basis (exact / derived / estimate), group, first call, last call |
 | `ToolCall` | tool use | call, name, input, result block, error, duration |
 | `Compaction` | compaction | session, before / after tokens, trigger |

@@ -84,6 +84,12 @@ Where a Block's content came from, as far as the log tells: the tool, the file i
 the skill, the kind of context the harness attached.
 _Avoid_: origin, provenance
 
+**Block part**:
+A span of one Block's text that one source added, with a label for people: a harness may merge several attached
+texts (a skill listing, the deferred tools, the environment) into one Block. The parts of a Block cover its text
+end to end; their tokens are estimates that add up to the Block's.
+_Avoid_: segment, sub-block, piece
+
 **CallBlock**:
 A run of one Block at one position in the Calls of one lane, while its place and tokens stay the same: from a first
 Call to a last Call (or on to the lane's latest Call). The input of Call N is every CallBlock that covers N.

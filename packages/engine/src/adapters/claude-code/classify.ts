@@ -2,9 +2,10 @@
  * Turn shapes and messages into Blocks with kind, source and estimate, once per content: a message or shape is
  * classified the first time a request holds it, then taken from a cache. A Block is reported when first seen.
  */
-import type { Block, BlockKind, BlockSource, RequestSection } from "@quantext/shared";
+import type { Block, BlockKind, BlockPart, BlockSource, RequestSection } from "@quantext/shared";
 import type { Estimate, Estimator } from "../../core/estimate.ts";
 import { blockText, isDeferredSchema, KNOWN_CONTENT_TYPES, toolReferences } from "../../providers/anthropic/content.ts";
+import { partsOf } from "./attached.ts";
 import { sha256Sorted } from "./hash.ts";
 import type { Json, JsonObject } from "./json.ts";
 import { obj, str } from "./json.ts";
@@ -60,8 +61,9 @@ export function createClassifier(store: Content, sink: BlockSink, estimator: Est
   const ref = (role: string, content: Json, contentIndex: number): BlockRef => {
     const hash = blockHash(role, content);
     const fresh = !store.seen(hash);
-    const { kind, source, unknownType } = classify(role, obj(content) ?? {}, store, fresh);
+    const { kind, source, parts, unknownType } = classify(role, obj(content) ?? {}, store, fresh);
     const block: Block = { hash, kind, source, text: blockText(content), content };
+    if (parts !== undefined) block.parts = parts;
     if (fresh) {
       store.markSeen(hash);
       sink(block, unknownType);
@@ -128,6 +130,7 @@ export function blockHash(role: string, content: Json): string {
 interface Classified {
   kind: BlockKind;
   source: BlockSource;
+  parts?: BlockPart[];
   unknownType?: string;
 }
 
@@ -136,7 +139,7 @@ function classify(role: string, block: JsonObject, store: Content, fresh: boolea
   if (role === "tools") return { kind: "tool-schema", source: toolSource(str(block.name)) };
   const type = str(block.type) ?? "";
   if (!KNOWN_CONTENT_TYPES.has(type)) return { kind: roleKind(role), source: {}, unknownType: type };
-  if (role === "system") return { kind: "system", source: {} };
+  if (role === "system") return attached({ kind: "system", source: {} }, str(block.text) ?? "", store.state);
   switch (type) {
     case "thinking":
     case "redacted_thinking":
@@ -161,14 +164,27 @@ function classify(role: string, block: JsonObject, store: Content, fresh: boolea
   }
 }
 
-/** A user-role text, with the source of the attachment that rendered it, when one did (exact text only). */
+/** A user-role text: a reminder when the harness attached all of it. */
 function userText(text: string, state: ParserState, fresh: boolean): Classified {
   const plain = plainUserText(text, state, fresh);
-  const attached = get(state.attachments, attachedTextHash(text));
-  if (attached === undefined || plain.kind === "summary") return plain;
-  const source: BlockSource = { ...plain.source, attachment: attached.type };
-  if (source.filePath === undefined && attached.path !== undefined) source.filePath = attached.path;
-  return { kind: "reminder", source };
+  if (plain.kind === "summary") return plain;
+  const out = attached(plain, text, state);
+  return out.parts?.every((p) => p.source.attachment !== undefined) ? { ...out, kind: "reminder" } : out;
+}
+
+/**
+ * A text with the parts the harness attached to it, when it attached any: one attached text that is all of it
+ * gives the Block its source. The same attached text may be sent again in another Block, so it stays.
+ */
+function attached(plain: Classified, text: string, state: ParserState): Classified {
+  const located = partsOf(text, state.attached);
+  if (located === undefined) return plain;
+  const { parts } = located;
+  const [only] = parts;
+  if (parts.length > 1 || only === undefined) return { ...plain, parts };
+  const source: BlockSource = { ...plain.source, ...only.source };
+  if (plain.source.filePath !== undefined) source.filePath = plain.source.filePath;
+  return { kind: plain.kind, source, parts };
 }
 
 function plainUserText(text: string, state: ParserState, fresh: boolean): Classified {
@@ -189,11 +205,6 @@ function plainUserText(text: string, state: ParserState, fresh: boolean): Classi
     return { kind: "reminder", source: last !== undefined && last.tool === result[1] ? last : toolSource(result[1]) };
   }
   return { kind: "reminder", source: {} };
-}
-
-/** The key of an attached text: the text without white space around it (the harness may add a newline). */
-export function attachedTextHash(text: string): string {
-  return textHash(text.trim());
 }
 
 /** The key under which the state remembers a text (summaries, skills). */

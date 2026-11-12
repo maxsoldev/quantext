@@ -186,7 +186,8 @@ export interface CallIssue {
     | "unreconciled-tokens"
     | "no-price"
     | "price-assumption"
-    | "estimate-clamped";
+    | "estimate-clamped"
+    | "unlocated-attachment";
   detail: string;
 }
 
@@ -231,6 +232,20 @@ export interface Block {
   text: string;
   /** The content as sent to the model provider (one content block, tool schema or system block). */
   content: JsonValue;
+  /** The spans of `text` that the harness attached, when it attached any: they cover `text` end to end, in order. */
+  parts?: BlockPart[];
+}
+
+/**
+ * A span of a Block's text that one source added: a harness may merge several attached texts into one Block.
+ * A span no attachment accounts for is a part with an empty source. Offsets are UTF-16 code units of `Block.text`.
+ */
+export interface BlockPart {
+  start: number;
+  end: number;
+  /** A short name for people: "Skill listing", "Environment", "Other text". */
+  label: string;
+  source: BlockSource;
 }
 
 /** The part of a request a CallBlock is in. The provider reads the request in this order. */

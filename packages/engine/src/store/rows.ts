@@ -5,6 +5,7 @@
 import type {
   Block,
   BlockKind,
+  BlockPart,
   BlockSource,
   Call,
   CallBlock,
@@ -206,16 +207,18 @@ export function call(r: SqlRow): Call {
   return c;
 }
 
-export const LOG_BLOCK_COLUMNS = ["hash", "kind", "tool", "file_path", "mcp_server", "skill", "attachment"];
+export const LOG_BLOCK_COLUMNS = ["hash", "kind", "tool", "file_path", "mcp_server", "skill", "attachment", "parts"];
 
-/** A Block's classification in one log: its kind and source. Its content is stored once, by hash. */
+/** A Block's classification in one log: its kind, source and parts. Its content is stored once, by hash. */
 export function logBlockRow(b: Block): SqlValue[] {
-  return [b.hash, b.kind, ...sourceRow(b.source)].map(nul);
+  return [b.hash, b.kind, ...sourceRow(b.source), b.parts === undefined ? undefined : JSON.stringify(b.parts)].map(nul);
 }
 
 /** A Block from its log row and its content; the display text is derived from the content. */
 export function block(r: SqlRow, content: JsonValue, display: string): Block {
-  return { hash: text(r.hash), kind: text(r.kind) as BlockKind, source: source(r), text: display, content };
+  const b: Block = { hash: text(r.hash), kind: text(r.kind) as BlockKind, source: source(r), text: display, content };
+  if (r.parts !== null && r.parts !== undefined) b.parts = json<BlockPart[]>(r.parts);
+  return b;
 }
 
 export const RUN_COLUMNS = [

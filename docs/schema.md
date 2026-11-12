@@ -1,4 +1,4 @@
-# Store schema (version 4)
+# Store schema (version 5)
 
 The engine keeps everything in one SQLite database, `~/.quantext/quantext.db` (WAL mode). Only the engine writes
 it, under the writer lock `~/.quantext/writer.lock` (an OS file lock, ADR 22). The decisions behind this schema
@@ -85,7 +85,7 @@ version logs only usage, so its Calls are usage-only and have no Blocks; `partia
 | `unit_read_usd`, `unit_rest_usd` | Set by the store: the price of one cache-read token, and of one other input token (the cache write, or plain input when the Call wrote none); NULL without a price |
 | `cache_boundary_offset` | The tokens of those leading Blocks, set by the store when it writes the Call: the Block at the boundary has `cache_read_tokens - cache_boundary_offset` of its tokens in the cache read |
 | `framing_tokens` | Input tokens after the last Block; the Call's runs plus these add up to its input total |
-| `issues` | JSON list of `{kind, detail}`, sorted by kind and detail: `no-request` (a usage-only Call), `missing-message` (a gap Block stands for a message, or the message came after the Call was split), `derived-usage-invalid` (a summarising Call whose derived input is 0 or less: it has no usage), `unresolved-request`, `no-usage`, `unreconciled-tokens`, `no-price`, `price-assumption`, `estimate-clamped` |
+| `issues` | JSON list of `{kind, detail}`, sorted by kind and detail: `no-request` (a usage-only Call), `missing-message` (a gap Block stands for a message, or the message came after the Call was split), `derived-usage-invalid` (a summarising Call whose derived input is 0 or less: it has no usage), `unresolved-request`, `no-usage`, `unreconciled-tokens`, `no-price`, `price-assumption`, `estimate-clamped`, `unlocated-attachment` (an attached text that no message of the request holds) |
 | `turn_duration_ms` | On the last Call of a turn: how long the turn took |
 | `response` | JSON: the Response, `{blocks: [{hash, kind, reasoning?, toolUseId?}], stopReason?}`; each `hash` is a row of `blocks` (the same Block the next Call sends back); NULL when the log holds no answer yet |
 
@@ -107,8 +107,10 @@ its bytes are in `media`. A content block that no Call has used yet is only here
 The Blocks a log reported, with that log's classification: `(log, hash)`, `kind` (the Block kind, also `gap`:
 a stand-in for a message that is not in the log), and the Block source `tool`, `file_path`, `mcp_server`,
 `skill`, `attachment` (the kind of context the harness attached, in its own words, when an attachment row
-rendered exactly this text: `file`, `skill_listing`, `session_context`, …). The display text of a Block is not
-stored: the engine derives it from the content.
+rendered all of this text: `file`, `skill_listing`, `session_context`, …), and `parts`: JSON
+`[{start, end, label, source}]`, the spans of the display text that attached texts cover, end to end in order
+(a span no attachment accounts for has `label` "Other text" and an empty `source`); NULL when nothing attached is
+in it (ADR 29). The display text of a Block is not stored: the engine derives it from the content.
 
 ### `call_blocks`
 
@@ -288,6 +290,7 @@ Options that are not needed yet, with what they would bring:
 - **2**: `project_memory`; the index `calls_lane`.
 - **3**: `calls.cache_boundary_offset`, `unit_read_usd`, `unit_rest_usd` (in `calls_lane`), `sessions.changed_seq`, `change_cursor`.
 - **4**: `calls.response`.
+- **5**: `log_blocks.parts`.
 
 ## Changing the schema
 
