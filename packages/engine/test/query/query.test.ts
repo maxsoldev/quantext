@@ -74,6 +74,20 @@ describe("listSessions", () => {
     expect(s).toMatchObject({ requestLog: "present", project: "/fixture-0000000000000000/repo", live: false });
   });
 
+  test("counts a summarising call's derived spend in the totals, but not its input in the max context", async () => {
+    const q = await query(["compaction"]);
+    const [s] = q.listSessions().items;
+    // The summarising call is real spend: the harness's own total includes it.
+    expect(s?.cost.totalUsd).toBeCloseTo(harnessTotals("compaction").costUsd * 1.1, 6);
+    // Max context is the largest input the log reports for one request (assistant rows' own usage).
+    const logged = mainRows("compaction").flatMap((r) => {
+      const u = (r.message as { usage?: Record<string, number> } | undefined)?.usage;
+      if (r.type !== "assistant" || u === undefined) return [];
+      return [(u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)];
+    });
+    expect(s?.maxContextTokens).toBe(Math.max(...logged));
+  });
+
   test("sorts, pages, filters by project and searches ids", async () => {
     const q = await query();
     const byCalls = q.listSessions({ sort: "calls", order: "desc", limit: 2 });

@@ -32,6 +32,8 @@ const CACHE_WRITE_1H = 2;
 const PREMIUM = 1.1;
 /** Above this prompt size a `[1m]` model before Claude 4.6 may have a long-context price that is not modelled. */
 const LONG_CONTEXT = 200_000;
+/** The largest context window of any Claude model (1M tokens): no single request can send more input. */
+export const MAX_CONTEXT_WINDOW = 1_000_000;
 
 const p = (input: number, output: number, cacheRead: number, more: Partial<ModelPrice> = {}): ModelPrice => ({
   input,

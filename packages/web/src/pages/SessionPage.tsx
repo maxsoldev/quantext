@@ -116,7 +116,7 @@ export function SessionPage({ route }: { route: SessionRoute }) {
               <button
                 type="button"
                 className="tip-anchor num"
-                data-tip={`At list prices, from each call's exact usage.\n${CACHE_PARTS.map((p) => `${p.label}: ${usd(partCost(s.cost, p.key))}`).join("\n")}${s.unpricedCalls ? `\n${s.unpricedCalls} calls have no price and are not counted.` : ""}`}
+                data-tip={`At list prices, from each call's usage. A compaction's summarising call counts too: its usage is derived from the harness's running totals (it is real spend).\n${CACHE_PARTS.map((p) => `${p.label}: ${usd(partCost(s.cost, p.key))}`).join("\n")}${s.unpricedCalls ? `\n${s.unpricedCalls} calls have no price and are not counted.` : ""}`}
               >
                 {usd(s.cost.totalUsd)}
               </button>
@@ -125,7 +125,10 @@ export function SessionPage({ route }: { route: SessionRoute }) {
           <div>
             <dt>Max context</dt>
             <dd>
-              <Tokens n={s.maxContextTokens} note="The largest input of one call, from its usage." />
+              <Tokens
+                n={s.maxContextTokens}
+                note="The largest input of one call, from its exact usage. Summarising calls (derived usage) are left out."
+              />
             </dd>
           </div>
           <div>

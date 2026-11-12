@@ -108,4 +108,16 @@ describe("a manual compaction", () => {
     expect(call?.issues.map((i) => i.kind)).toEqual(["derived-usage-invalid", "unresolved-request"]);
     expect(call?.issues[0]?.detail).toMatch(/^the running totals give an input of -?\d+ tokens/);
   });
+
+  test("gets no usage and no cost when its derived input is larger than any context window can hold", () => {
+    // Seen on real data: one summarising call derived 18M input tokens and $15.70.
+    const call = withInputChange((b) => b + 6_000_000);
+    expect(call?.usage).toBeUndefined();
+    expect(call?.cost).toBeUndefined();
+    expect(call?.issues.map((i) => i.kind)).toEqual(["derived-usage-invalid", "unresolved-request"]);
+    expect(call?.issues[0]?.detail).toBe(
+      "the running totals give an input of 18000000 tokens for the summarising call, more than 1500000 " +
+        "(1.5 × the larger of the context before the compaction and the largest context window); it has no usage",
+    );
+  });
 });
