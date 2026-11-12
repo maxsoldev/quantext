@@ -16,7 +16,9 @@ quality bar. Decisions that are hard to change are recorded in `docs/adr/`.
 - **No silent failure.** No empty `catch`. Unknown input is counted and reported. Numbers that do not reconcile are
   flagged.
 - **UI work** uses the `frontend-design` and `dataviz` skills, and Playwright (tests in `e2e/`, plus the Playwright
-  browser to look at the result while building).
+  browser to look at the result while building). The browser tools have no short time limit: race every
+  `browser_evaluate` script against a timer (e.g. `Promise.race` with 10 s) and never await a condition that may not
+  come. Put measurements in an e2e test, which has its own timeout. One stuck evaluate once cost 30 minutes.
 
 ## Code
 
