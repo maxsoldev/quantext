@@ -62,9 +62,39 @@ describe("findLayerViolations", () => {
   });
 
   test("cli is the composition root and may import every layer", () => {
-    const layers = ["core", "adapters", "store", "ingest", "query", "api"];
+    const layers = ["core", "providers", "adapters", "store", "ingest", "query", "api"];
     const text = layers.map((layer) => `import * as ${layer} from "../${layer}/index.ts";`).join("\n");
     expect(findLayerViolations([engine("cli", text)])).toEqual([]);
+  });
+
+  test("providers sit on core and are pure: no built-ins, no packages", () => {
+    const files = [
+      engine(
+        "providers",
+        [
+          'import { reconcile } from "../../core/index.ts";',
+          'import type { Call } from "@quantext/shared";',
+          'import { createHash } from "node:crypto";',
+          'import { x } from "../../adapters/index.ts";',
+        ].join("\n"),
+        "anthropic/index.ts",
+      ),
+    ];
+    expect(findLayerViolations(files).map((v) => [v.line, v.reason])).toEqual([
+      [3, "providers import nothing outside core and providers (no built-ins, no packages)"],
+      [4, "providers may not import adapters"],
+    ]);
+  });
+
+  test("adapters, ingest and cli may import providers; core, store, query and api may not", () => {
+    const text = 'import { price } from "../providers/anthropic/index.ts";\n';
+    const layers = ["core", "adapters", "store", "ingest", "query", "api", "cli"];
+    expect(findLayerViolations(layers.map((layer) => engine(layer, text))).map((v) => v.reason)).toEqual([
+      "core may not import providers",
+      "store may not import providers",
+      "query may not import providers",
+      "api may not import providers",
+    ]);
   });
 
   test("api reads only through query, and query never sees adapters or ingest", () => {
@@ -96,7 +126,7 @@ describe("findLayerViolations", () => {
     expect(findLayerViolations(files).map((v) => [v.file, v.reason])).toEqual([
       [
         "packages/engine/src/main.ts",
-        "file is outside the engine layers (core, adapters, store, ingest, query, api, cli)",
+        "file is outside the engine layers (core, providers, adapters, store, ingest, query, api, cli)",
       ],
       ["packages/engine/src/cli/index.ts", "import target is outside the engine layers"],
     ]);

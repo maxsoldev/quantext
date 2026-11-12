@@ -41,9 +41,9 @@ describe("a manual compaction", () => {
     });
   });
 
-  test("prices the summarising Call as the harness's running cost changed", () => {
-    // cost-state totalCostUSD went from 0.0449442 to 0.0686002 over the compaction.
-    expect(summary?.cost?.totalUsd).toBeCloseTo(0.0686002 - 0.0449442, 10);
+  test("prices the summarising Call as the harness's running cost changed, plus the regional 10%", () => {
+    // cost-state totalCostUSD (list price) went from 0.0449442 to 0.0686002 over the compaction.
+    expect(summary?.cost?.totalUsd).toBeCloseTo(1.1 * (0.0686002 - 0.0449442), 10);
   });
 
   test("flags that the summarising request is not in the log, and keeps the context it was sent", () => {

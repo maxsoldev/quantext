@@ -4,7 +4,7 @@
  * between, and checked against the context size before the compaction.
  */
 import type { Call, Compaction, Usage } from "@quantext/shared";
-import { canonicalModel, priceUsage } from "../../core/pricing.ts";
+import { canonicalModel, priceCall } from "../../providers/anthropic/pricing.ts";
 import type { JsonObject } from "./json.ts";
 import { arr, num, obj, str } from "./json.ts";
 import type { WireRequest } from "./rebuild.ts";
@@ -67,16 +67,16 @@ function summaryCall(
     index: 0,
     ts,
     model: derived.model,
-    params: { betas: [] },
+    params: {},
     usage: derived.usage,
     framingTokens: 0,
     issues: [{ kind: "unresolved-request", detail }],
   };
   const canonical = canonicalModel(derived.model);
   if (canonical !== undefined) call.canonicalModel = canonical;
-  const cost = canonical === undefined ? undefined : priceUsage(derived.usage, canonical);
+  const { cost, issues } = priceCall(derived.usage, { model: derived.model });
   if (cost !== undefined) call.cost = cost;
-  else call.issues.push({ kind: "no-price", detail: `no list price for model ${derived.model}` });
+  call.issues.push(...issues);
   if (previous?.shapeHash !== undefined) call.shapeHash = previous.shapeHash;
   const input = derived.usage.inputTokens + derived.usage.cacheReadTokens + derived.usage.cacheWriteTokens;
   if (before !== undefined && input < before) {
@@ -121,14 +121,17 @@ function derivedUsage(rows: readonly Row[], at: number, calls: readonly Call[]):
 function delta(after: JsonObject, before: JsonObject): Usage {
   const d = (key: string) => (num(after[key]) ?? 0) - (num(before[key]) ?? 0);
   const usage: Usage = { basis: "derived", inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 };
-  for (const [field, key] of Object.entries(COUNTERS)) usage[field as keyof typeof COUNTERS] = d(key);
+  for (const [field, key] of Object.entries(COUNTERS)) {
+    // A counter missing on either side stays unknown (a time-to-live split), not 0.
+    if (after[key] !== undefined && before[key] !== undefined) usage[field as keyof typeof COUNTERS] = d(key);
+  }
   return usage;
 }
 
 function subtract(usage: Usage, logged: Usage | undefined): void {
   if (logged === undefined) return;
   for (const field of Object.keys(COUNTERS) as (keyof typeof COUNTERS)[]) {
-    usage[field] = (usage[field] ?? 0) - (logged[field] ?? 0);
+    if (usage[field] !== undefined) usage[field] = (usage[field] ?? 0) - (logged[field] ?? 0);
   }
 }
 

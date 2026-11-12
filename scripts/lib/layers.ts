@@ -26,17 +26,25 @@ interface ImportRef {
 /**
  * Engine layers, bottom to top, and the layers each one may import. Mirrors docs/ARCHITECTURE.md "Layers".
  * core is a shared kernel: every layer may import it. It imports nothing outside itself except types from
- * @quantext/shared, where the domain and API types live (as every package may).
+ * @quantext/shared, where the domain and API types live (as every package may). providers hold what one model
+ * provider defines (content blocks, prices); they sit on core and are pure as well.
  * cli is the composition root: it may import every layer below it.
  */
 const ENGINE_LAYERS: Record<string, readonly string[]> = {
   core: [],
-  adapters: ["core"],
+  providers: ["core"],
+  adapters: ["core", "providers"],
   store: ["core"],
-  ingest: ["core", "adapters", "store"],
+  ingest: ["core", "providers", "adapters", "store"],
   query: ["core", "store"],
   api: ["core", "query"],
-  cli: ["core", "adapters", "store", "ingest", "query", "api"],
+  cli: ["core", "providers", "adapters", "store", "ingest", "query", "api"],
+};
+
+/** Layers that are pure: they import no built-ins and no packages, only other engine layers and shared types. */
+const PURE_LAYERS: Record<string, string> = {
+  core: "core imports nothing outside core (no built-ins, no packages)",
+  providers: "providers import nothing outside core and providers (no built-ins, no packages)",
 };
 
 /** Workspace packages and which other workspace packages each one may import. */
@@ -116,7 +124,8 @@ function checkImport(path: string, pkg: string, fromLayer: string | undefined, r
     return fromLayer === undefined ? undefined : checkEngineImport(fromLayer, target);
   }
   const isShared = specifier === `${WORKSPACE_SCOPE}shared` || specifier.startsWith(`${WORKSPACE_SCOPE}shared/`);
-  if (fromLayer === "core" && !isShared) return "core imports nothing outside core (no built-ins, no packages)";
+  const pure = fromLayer === undefined ? undefined : PURE_LAYERS[fromLayer];
+  if (pure !== undefined && !isShared) return pure;
   if (specifier.startsWith(WORKSPACE_SCOPE)) {
     const [name = ""] = specifier.slice(WORKSPACE_SCOPE.length).split("/");
     if (!PACKAGE_DEPS[pkg]?.includes(name)) return `${pkg} may not import @quantext/${name}`;
