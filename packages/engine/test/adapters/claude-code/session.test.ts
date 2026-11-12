@@ -62,18 +62,35 @@ describe("parseClaudeCodeSession on basic-tools", () => {
   });
 
   test("reports no unknown records for a known transcript", () => {
-    expect(graph.report).toEqual({ unknownRecords: {}, unreadable: [] });
+    expect(graph.report).toEqual({ unknownRecords: [], unreadable: [] });
   });
 });
 
 describe("parseClaudeCodeSession on input it does not know", () => {
   const known = transcriptsOf("basic-tools").main;
 
+  test("counts row types named like object properties as any other type", () => {
+    const extra = ['{"type":"constructor"}', '{"type":"__proto__"}', '{"type":"__proto__"}', '{"type":"toString"}'];
+    const graph = parseClaudeCodeSession({ main: `${known}${extra.join("\n")}\n`, subagents: [] });
+    expect(graph.report.unknownRecords).toEqual([
+      { kind: "constructor", count: 1 },
+      { kind: "__proto__", count: 2 },
+      { kind: "toString", count: 1 },
+    ]);
+  });
+
+  test("reports a line nested too deep as unreadable, and reads the lines after it", () => {
+    const deep = `{"type":"user","message":${"[".repeat(200_000)}${"]".repeat(200_000)}}`;
+    const graph = parseClaudeCodeSession({ main: `${deep}\n${known}`, subagents: [] });
+    expect(graph.report.unreadable).toEqual([{ at: "main:1", reason: expect.stringContaining("nested deeper than") }]);
+    expect(graph.calls).toHaveLength(8);
+  });
+
   test("counts unknown row types and unreadable lines, and still reads the rest", () => {
     const extra = ['{"type":"brand-new-row","sessionId":"x"}', "{not json", '{"type":"brand-new-row"}'].join("\n");
     const graph = parseClaudeCodeSession({ main: `${known}${extra}\n`, subagents: [] });
     expect(graph.calls).toHaveLength(8);
-    expect(graph.report.unknownRecords).toEqual({ "brand-new-row": 2 });
+    expect(graph.report.unknownRecords).toEqual([{ kind: "brand-new-row", count: 2 }]);
     expect(graph.report.unreadable).toEqual([{ at: "main:64", reason: expect.stringContaining("not JSON") }]);
   });
 });

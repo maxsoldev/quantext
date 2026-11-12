@@ -35,7 +35,7 @@ describe.each(scenarios())("blocks of $version/$name", ({ name }) => {
   });
 
   test("no content block type is unknown", () => {
-    expect(graph.report.unknownRecords).toEqual({});
+    expect(graph.report.unknownRecords).toEqual([]);
   });
 });
 
@@ -131,7 +131,7 @@ describe("content blocks the adapter does not know", () => {
       '"role":"system","content":[{"type":"brand_new"',
     );
     const graph = parseClaudeCodeSession({ main: odd, subagents: [] });
-    expect(graph.report.unknownRecords).toEqual({ "content block brand_new": 1 });
+    expect(graph.report.unknownRecords).toEqual([{ kind: "content block brand_new", count: 1 }]);
     expect(blocksOfCall(graph, 0)[16]?.kind).toBe("system");
   });
 });

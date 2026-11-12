@@ -12,7 +12,7 @@ import { contentNotes } from "./notes.ts";
 import type { WireRequest } from "./rebuild.ts";
 import { rebuildRequests } from "./rebuild.ts";
 import type { Row } from "./rows.ts";
-import { readRows } from "./rows.ts";
+import { countUnknown, readRows } from "./rows.ts";
 import { sessionIdOf, sessionOf } from "./session.ts";
 import { toolCallsOf } from "./tool-calls.ts";
 
@@ -33,7 +33,7 @@ export interface ParseOptions {
  * and unreadable lines are counted in `report`, never dropped in silence.
  */
 export function parseClaudeCodeSession(input: ClaudeCodeTranscripts, options: ParseOptions = {}): SessionGraph {
-  const report: IngestReport = { unknownRecords: {}, unreadable: [] };
+  const report: IngestReport = { unknownRecords: [], unreadable: [] };
   const mainRows = readRows("main", input.main, report);
   const agents = input.subagents.map((agent, i) => ({
     rows: readRows(`subagent-${i}`, agent.text, report),
@@ -89,7 +89,7 @@ function readSession(
     for (const { block, unknownType } of entries) {
       if (context.blocks.has(block.hash)) continue;
       context.blocks.set(block.hash, block);
-      if (unknownType !== undefined) count(context.report, `content block ${unknownType}`);
+      if (unknownType !== undefined) countUnknown(context.report, `content block ${unknownType}`);
     }
     return { call, request, entries };
   });
@@ -138,8 +138,4 @@ function parseMeta(meta: string | undefined): unknown {
   } catch {
     return undefined; // A broken meta file only loses the link; the agent id in the tool result still gives it.
   }
-}
-
-function count(report: IngestReport, kind: string): void {
-  report.unknownRecords[kind] = (report.unknownRecords[kind] ?? 0) + 1;
 }

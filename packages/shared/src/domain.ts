@@ -197,8 +197,8 @@ export interface Compaction {
 
 /** Input that the adapter could not map, counted so that nothing is dropped in silence. */
 export interface IngestReport {
-  /** Unknown record kinds, by the harness's own name, with their counts. */
-  unknownRecords: Record<string, number>;
+  /** Unknown record kinds, by the harness's own name, with their counts, in the order first seen. */
+  unknownRecords: { kind: string; count: number }[];
   /** Records that could not be read (bad JSON, missing fields): where (transcript and line) and why. */
   unreadable: { at: string; reason: string }[];
 }

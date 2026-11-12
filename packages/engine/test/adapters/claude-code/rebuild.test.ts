@@ -6,7 +6,7 @@ import { readRows } from "../../../src/adapters/claude-code/rows.ts";
 import { scenarios, transcriptsOf } from "../../fixtures.ts";
 
 function requestsOf(transcripts: ClaudeCodeTranscripts) {
-  const report = { unknownRecords: {}, unreadable: [] };
+  const report = { unknownRecords: [], unreadable: [] };
   const all = [
     readRows("main", transcripts.main, report),
     ...transcripts.subagents.map((s, i) => readRows(`subagent-${i}`, s.text, report)),

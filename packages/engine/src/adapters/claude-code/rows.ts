@@ -47,13 +47,26 @@ export function readRows(name: string, text: string, report: IngestReport): Row[
     } else if (isKnown(kind)) {
       rows.push({ at, type: kind, data });
     } else {
-      report.unknownRecords[kind] = (report.unknownRecords[kind] ?? 0) + 1;
+      countUnknown(report, kind);
     }
   });
   return rows;
 }
 
+/** Add one to the count of an unknown record kind. Any string is a safe kind, also `__proto__`. */
+export function countUnknown(report: IngestReport, kind: string): void {
+  const entry = report.unknownRecords.find((e) => e.kind === kind);
+  if (entry === undefined) report.unknownRecords.push({ kind, count: 1 });
+  else entry.count++;
+}
+
+/** Lines longer than this, or nested deeper, are reported as unreadable instead of parsed. */
+const MAX_LINE_CHARS = 64 * 1024 * 1024;
+const MAX_DEPTH = 256;
+
 function parseLine(line: string): JsonObject | string {
+  if (line.length > MAX_LINE_CHARS) return `line is longer than ${MAX_LINE_CHARS} characters`;
+  if (nestingDepth(line) > MAX_DEPTH) return `JSON is nested deeper than ${MAX_DEPTH} levels`;
   let value: unknown;
   try {
     value = JSON.parse(line);
@@ -73,4 +86,24 @@ function kindOf(data: JsonObject): string | undefined {
 function isKnown(kind: string): boolean {
   if (kind.startsWith("system/")) return KNOWN_SYSTEM_SUBTYPES.has(kind.slice("system/".length));
   return KNOWN_TYPES.has(kind);
+}
+
+/** The deepest bracket nesting of a JSON text, outside strings. Stops counting once past the limit. */
+function nestingDepth(text: string): number {
+  let depth = 0;
+  let max = 0;
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (inString) {
+      if (c === 92)
+        i++; // backslash: skip the escaped character
+      else if (c === 34) inString = false;
+    } else if (c === 34) inString = true;
+    else if (c === 91 || c === 123) {
+      if (++depth > max) max = depth;
+      if (max > MAX_DEPTH) return max;
+    } else if (c === 93 || c === 125) depth--;
+  }
+  return max;
 }
