@@ -33,12 +33,20 @@ for (const [name, input] of Object.entries(ENTRIES)) {
     platform: "node",
     external: [BUILT_IN],
     logLevel: "warn",
-    output: { dir: dist, format: "esm", entryFileNames: "[name].js", chunkFileNames: `${name}-[name].js` },
+    // Hidden source maps: written next to each file for debugging, not named in it.
+    output: {
+      dir: dist,
+      format: "esm",
+      entryFileNames: "[name].js",
+      chunkFileNames: `${name}-[name].js`,
+      sourcemap: "hidden",
+    },
   });
-  for (const chunk of output) {
+  for (const chunk of output.filter((c) => c.type === "chunk")) {
     const file = join(dist, chunk.fileName);
     const imports = importsOf(readFileSync(file, "utf8"));
     const own = new Set(output.map((c) => `./${c.fileName}`));
+    if (/sourceMappingURL/.test(readFileSync(file, "utf8"))) throw new Error(`${chunk.fileName} names its source map`);
     const foreign = imports.filter((s) => !BUILT_IN.test(s) && !own.has(s));
     if (foreign.length > 0)
       throw new Error(`${chunk.fileName} imports ${foreign.join(", ")}: it must be self-contained`);

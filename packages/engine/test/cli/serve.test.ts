@@ -25,6 +25,17 @@ interface Run {
   stop(): void;
   /** Move the injected clock on. */
   advance(ms: number): void;
+  /** Wait until the engine has checked for its idle time `n` more times and stayed. */
+  checked(n?: number): Promise<void>;
+}
+
+/** Wait until `ready()` holds (5 s at most), checking on each turn of the event loop. */
+async function until(ready: () => boolean | Promise<boolean>, what: string): Promise<void> {
+  const end = Date.now() + 5000;
+  while (!(await ready())) {
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((r) => setImmediate(r));
+  }
 }
 
 /** Start `qx serve` with these arguments, a clock of its own and a stop signal. */
@@ -34,6 +45,7 @@ function start(argv: string[], hooks: Partial<NonNullable<CliIo["serve"]>> = {})
   let clock = Date.parse("2026-11-12T00:00:00Z");
   const controller = new AbortController();
   const opened: string[] = [];
+  let checks = 0;
   const io: CliIo = {
     stdout: (t) => (out += t),
     stderr: (t) => (err += t),
@@ -46,6 +58,9 @@ function start(argv: string[], hooks: Partial<NonNullable<CliIo["serve"]>> = {})
       openUrl: (url) => opened.push(url),
       defaultPort: 0,
       lockWaitMs: 300,
+      onIdleCheck: () => {
+        checks++;
+      },
       ...hooks,
     },
   };
@@ -62,6 +77,10 @@ function start(argv: string[], hooks: Partial<NonNullable<CliIo["serve"]>> = {})
     stop: () => controller.abort(),
     advance: (ms) => {
       clock += ms;
+    },
+    async checked(n = 2) {
+      const target = checks + n;
+      await until(() => checks >= target, "idle checks");
     },
   };
 }
@@ -302,13 +321,15 @@ describe("qx serve", () => {
       );
       req.end();
     });
+    const streams = async () => (await get(file.port, "/api/v1/status")).json<EngineStatus>().streams;
+    await until(async () => (await streams()) === 1, "the stream");
     run.advance(3 * 60_000);
-    await new Promise((r) => setTimeout(r, 50));
+    await run.checked();
     expect(existsSync(join(dataDir, "engine.json"))).toBe(true); // a viewer is connected
     stream.destroy();
-    await new Promise((r) => setTimeout(r, 50));
+    await until(async () => (await streams()) === 0, "the stream to close");
     run.advance(60_000); // one minute after the viewer left: not yet
-    await new Promise((r) => setTimeout(r, 50));
+    await run.checked();
     expect(existsSync(join(dataDir, "engine.json"))).toBe(true);
     run.advance(60_000);
     expect(await run.done).toBe(EXIT.ok);
@@ -319,9 +340,10 @@ describe("qx serve", () => {
   test("with --live always, never stops for idle time", async () => {
     const dataDir = tempDir("qx-data-");
     const run = start(["--root", tempDir("qx-root-"), "--data-dir", dataDir, "--live", "always"]);
-    await engineFile(dataDir);
+    const file = await engineFile(dataDir);
     run.advance(24 * 60 * 60_000);
-    await new Promise((r) => setTimeout(r, 50));
+    // No idle check runs at all in this mode; the engine still answers after a day.
+    expect((await get(file.port, "/api/v1/status")).status).toBe(200);
     expect(existsSync(join(dataDir, "engine.json"))).toBe(true);
     run.stop();
     expect(await run.done).toBe(EXIT.ok);

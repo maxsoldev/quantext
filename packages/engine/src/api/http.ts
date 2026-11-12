@@ -8,12 +8,13 @@ import { HttpError } from "./params.ts";
 
 const API_VERSION = 1;
 
-/** The viewer's pages: scripts, styles and data only from the engine; no inline script, no frames. */
+/** The viewer's pages: scripts, styles and data only from the engine; no inline script or style, no frames. */
 export const HTML_CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self'",
-  "img-src 'self'",
+  // Images the viewer makes itself (a chart exported, a thumbnail): data: and blob: URLs, never another origin.
+  "img-src 'self' data: blob:",
   "font-src 'self'",
   "connect-src 'self'",
   "object-src 'none'",

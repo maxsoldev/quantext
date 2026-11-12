@@ -50,6 +50,8 @@ export interface ServeHooks {
   now?: () => number;
   /** How often to check for the idle time (default 15 s). */
   idleCheckMs?: number;
+  /** Called after each idle check that did not stop the engine (tests wait on it). */
+  onIdleCheck?: () => void;
   openUrl?: (url: string) => void;
   staticDir?: string;
   defaultPort?: number;
@@ -187,6 +189,7 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
         idle = setInterval(() => {
           const { streams, lastActive } = engineApi.activity();
           if (streams === 0 && now() - lastActive >= idleMs) done(`idle for ${options.idleMinutes} min`);
+          else hooks.onIdleCheck?.();
         }, hooks.idleCheckMs ?? 15_000);
       }
     });
