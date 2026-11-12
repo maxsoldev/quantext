@@ -2,7 +2,8 @@
  * Smoke test of the bundled engine (`pnpm build` first): on each runtime, start `dist/engine.js serve` on a free
  * port over a copy of half a fixture session, read /health and a Session, open the event stream, append the rest
  * of the session and wait for its `calls` event, run `qx sql` beside it, check that a second start reuses the
- * engine, then SIGTERM it: exit 0 and no engine.json. Usage: smoke-engine.ts [--runtime node|bun]...
+ * engine, then SIGTERM it: exit 0 and no engine.json. engine.json and /health name the root package.json's
+ * version. Usage: smoke-engine.ts [--runtime node|bun]...
  * No egress: every process runs with the network tripwire (lib/egress-trap.ts) and with HTTP(S)_PROXY set to a
  * local sink; the test fails if the trap logs an attempt or the sink sees a connection (SECURITY.md).
  */
@@ -30,6 +31,7 @@ const repo = join(import.meta.dirname, "..");
 const ENGINE = join(repo, "packages", "engine", "dist", "engine.js");
 const FIXTURE = join(repo, "fixtures", "claude-code", "2.1.322", "basic-tools");
 const TIMEOUT_MS = 20_000;
+const RELEASE = (JSON.parse(readFileSync(join(repo, "package.json"), "utf8")) as { version: string }).version;
 
 const { values } = parseArgs({ options: { runtime: { type: "string", multiple: true } } });
 const runtimes = values.runtime ?? ["node", "bun"];
@@ -61,11 +63,16 @@ async function smoke(runtime: string): Promise<void> {
   try {
     const file = await until(() => {
       const path = join(dataDir, "engine.json");
-      return existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as { port: number; pid: number }) : undefined;
+      const text = existsSync(path) ? readFileSync(path, "utf8") : undefined;
+      return text === undefined ? undefined : (JSON.parse(text) as { port: number; pid: number; version: string });
     }, "engine.json");
-    assert.equal(file.pid, engine.child.pid);
-    const health = JSON.parse(await get(file.port, "/health")) as { ok: boolean; pid: number; apiVersion: number };
-    assert.deepEqual([health.ok, health.pid, health.apiVersion], [true, engine.child.pid, 1]);
+    assert.deepEqual([file.pid, file.version], [engine.child.pid, RELEASE]);
+    const health = JSON.parse(await get(file.port, "/health")) as Record<string, unknown>;
+    assert.deepEqual(
+      [health.ok, health.pid, health.apiVersion, health.version],
+      [true, engine.child.pid, 1, RELEASE],
+      "/health names the release version of the root package.json",
+    );
 
     const session = await until(async () => {
       const page = JSON.parse(await get(file.port, "/api/v1/sessions")) as { items: { log: number; id: string }[] };

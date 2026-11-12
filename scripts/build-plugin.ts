@@ -1,7 +1,8 @@
 /**
  * Build the Claude Code plugin into `dist/plugin/` (ADR 27): the mod as written (Claude Code loads its
  * TypeScript itself), the bundled engine from `pnpm build` in `engine/` with the viewer in `engine/web/`, and a
- * manifest versioned from the root package.json. The repo-root `.claude-plugin/marketplace.json` points here.
+ * manifest and engine versioned from the root package.json (ADR 30). The repo-root
+ * `.claude-plugin/marketplace.json` points here.
  * Fails when a file the plugin needs is missing. Usage: `pnpm build:plugin`, which runs `pnpm build` first
  * (the viewer, then the engine); this script only assembles what is built.
  */
@@ -15,13 +16,13 @@ const engineDist = join(repo, "packages", "engine", "dist");
 const out = join(repo, "dist", "plugin");
 
 const json = (path: string) => JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+// The release version has one source, the root package.json (ADR 30): the manifest and the engine both take it.
 const { version } = json(join(repo, "package.json"));
-const engineVersion = json(join(repo, "packages", "engine", "package.json")).version;
-if (typeof version !== "string" || typeof engineVersion !== "string") throw new Error("a package.json has no version");
+if (typeof version !== "string") throw new Error("the root package.json has no version");
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, ".claude-plugin"), { recursive: true });
-const manifest = { ...json(join(mod, ".claude-plugin", "plugin.json")), version };
+const manifest: Record<string, unknown> = { ...json(join(mod, ".claude-plugin", "plugin.json")), version };
 writeFileSync(join(out, ".claude-plugin", "plugin.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 for (const dir of ["hooks", "src", "types"]) cpSync(join(mod, dir), join(out, dir), { recursive: true });
 cpSync(join(repo, "LICENSE"), join(out, "LICENSE"));
@@ -32,7 +33,7 @@ execFileSync(process.execPath, [noticesScript, "--notices", join(out, "THIRD_PAR
 // The engine without its source maps; package.json makes its .js files ES modules and names its version,
 // which the mod compares with the running engine's /health.
 cpSync(engineDist, join(out, "engine"), { recursive: true, filter: (src) => !src.endsWith(".map") });
-const enginePackage = { name: "quantext-engine", private: true, type: "module", version: engineVersion };
+const enginePackage = { name: "quantext-engine", private: true, type: "module", version };
 writeFileSync(join(out, "engine", "package.json"), `${JSON.stringify(enginePackage, null, 2)}\n`);
 
 const required = [
@@ -55,4 +56,4 @@ for (const name of readdirSync(engineDist).filter((n) => n.endsWith(".js"))) {
   if (!existsSync(join(out, "engine", name))) throw new Error(`dist/plugin/engine lacks ${name}`);
 }
 if (!readdirSync(join(out, "engine")).some((n) => n.endsWith("-node-driver.js"))) throw new Error("no driver chunks");
-console.log(`dist/plugin/  quantext ${version} (engine ${engineVersion})`);
+console.log(`dist/plugin/  quantext ${version}`);

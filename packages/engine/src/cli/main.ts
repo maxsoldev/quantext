@@ -6,7 +6,6 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import type { LifetimeOptions, SessionKey, SqlResult } from "@quantext/shared";
-import packageJson from "../../package.json" with { type: "json" };
 import { claudeCodeCodec } from "../adapters/claude-code/index.ts";
 import { claudeConfigDir, createIngest } from "../ingest/index.ts";
 import type { Query } from "../query/index.ts";
@@ -24,6 +23,7 @@ import {
 } from "./print.ts";
 import type { ServeHooks } from "./serve.ts";
 import { DEFAULT_IDLE_MINUTES, DEFAULT_PORT, serve } from "./serve.ts";
+import { VERSION } from "./version.ts";
 
 /** 0: done. 1: failed (no store, a store or SQL error). 2: wrong use (arguments, a rejected statement). 3: not found. */
 export const EXIT = { ok: 0, failed: 1, usage: 2, notFound: 3 } as const;
@@ -107,7 +107,7 @@ export async function main(argv: readonly string[], io: CliIo): Promise<number> 
     }
     const { values, positionals } = parsed;
     if (values.version === true) {
-      io.stdout(`qx ${packageJson.version} (store schema ${SCHEMA_VERSION})\n`);
+      io.stdout(`qx ${VERSION} (store schema ${SCHEMA_VERSION})\n`);
       return EXIT.ok;
     }
     if (values.help === true) {
@@ -329,7 +329,7 @@ async function serveCommand(values: Values, args: string[], dataDir: string, io:
     {
       dataDir,
       root: values.root ?? claudeConfigDir(io.env, io.home),
-      version: packageJson.version,
+      version: VERSION,
       ...(port === undefined ? {} : { port }),
       live,
       idleMinutes,

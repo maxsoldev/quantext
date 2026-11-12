@@ -211,6 +211,19 @@ describe("findLayerViolations", () => {
     ]);
   });
 
+  test("only the engine's cli may import the root package.json, the source of the release version", () => {
+    const root = 'import p from "../../../../package.json" with { type: "json" };\nexport const v = p.version;\n';
+    const files = [
+      engine("cli", root, "version.ts"),
+      engine("api", root, "version.ts"),
+      engine("cli", 'import p from "../../../../tsconfig.json" with { type: "json" };\n', "other.ts"),
+    ];
+    expect(findLayerViolations(files).map((v) => [v.file, v.specifier])).toEqual([
+      ["packages/engine/src/api/version.ts", "../../../../package.json"],
+      ["packages/engine/src/cli/other.ts", "../../../../tsconfig.json"],
+    ]);
+  });
+
   test("a file that does not parse is a violation, not a crash", () => {
     const [violation] = findLayerViolations([engine("core", "export const = ;\n")]);
     expect(violation?.reason).toMatch(/^cannot parse: /);

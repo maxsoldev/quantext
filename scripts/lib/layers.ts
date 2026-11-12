@@ -119,6 +119,8 @@ function checkImport(path: string, pkg: string, fromLayer: string | undefined, r
   }
   if (specifier.startsWith(".")) {
     const target = posix.normalize(posix.join(posix.dirname(path), specifier));
+    // The release version has one source, the root package.json; the engine's cli reads it (ADR 30).
+    if (target === "package.json" && pkg === "engine" && fromLayer === "cli") return undefined;
     if (packageOf(target) !== pkg)
       return "a relative import may not leave its package; import @quantext/<name> instead";
     return fromLayer === undefined ? undefined : checkEngineImport(fromLayer, target);
