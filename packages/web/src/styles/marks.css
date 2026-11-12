@@ -55,3 +55,15 @@
   fill: var(--cache-output);
   background: var(--cache-output);
 }
+/* Billing parts wear one hue ramp (by price per token) and a hatch, so they never read as a context category. */
+.swatch.cache-cacheRead,
+.swatch.cache-cacheWrite,
+.swatch.cache-input,
+.swatch.cache-output,
+.split-part[class*="cache-"] {
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent 0 3px,
+    color-mix(in srgb, var(--surface) 55%, transparent) 3px 4.5px
+  );
+}

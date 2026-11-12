@@ -1,6 +1,7 @@
 /* Context at call N: head, the context bar, the block list, the category table, the block panel. */
 .context-card {
   gap: var(--space-4);
+  container-type: inline-size;
 }
 .context-card.stale {
   opacity: 0.6;
@@ -113,6 +114,12 @@
   grid-template-columns: minmax(0, 1fr) 320px;
   gap: var(--space-5);
   align-items: start;
+}
+/* A narrow card (side by side with What changed): the category table goes under the block list. */
+@container (max-width: 760px) {
+  .context-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* The block list. */

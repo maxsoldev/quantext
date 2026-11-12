@@ -2,7 +2,7 @@
  * One Session: its numbers, the timeline of one lane, a scrubber over its Calls, and the context of the selected
  * Call. The selected Call is in the URL (`?call=<number>`, 1-based; see `callNumber`); with none, the page follows the lane's latest Call.
  */
-import type { CallContext, ContextDiff, SessionKey, SessionSummary } from "@quantext/shared";
+import type { CallContext, ContextDiff, SessionKey, SessionSummary, TimelineCall } from "@quantext/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client.ts";
 import { laneNames, laneView, mainLane } from "../chart/lane.ts";
@@ -185,29 +185,42 @@ export function SessionPage({ route }: { route: SessionRoute }) {
                     </fieldset>
                   )}
                 </div>
-                <div className="legends">
-                  <Legend />
-                  <BillingLegend noUsage={view.calls.some((c) => !c.usage)} />
-                </div>
               </div>
-              <TimelineChart view={view} selected={place} onSelect={select} onBreak={showDiff} />
+              <TimelineChart
+                view={view}
+                selected={place}
+                onSelect={select}
+                onBreak={showDiff}
+                legends={{
+                  top: <Legend calls={view.calls} />,
+                  bottom: <BillingLegend noUsage={view.calls.some((c) => !c.usage)} />,
+                }}
+              />
             </section>
           ) : (
             <p className="muted">This session has no calls yet.</p>
           )}
-          {callIndex !== undefined && view && (
-            <DiffCard
-              sessionKey={key}
-              ctx={call.ctx.value}
-              diff={call.diff}
-              prev={call.prev.value}
-              breaks={view.breaks}
-              onGoTo={goTo}
-            />
-          )}
-          {callIndex !== undefined && (
-            <ContextAt sessionKey={key} call={callIndex} ctx={call.ctx} openHash={route.block} onOpened={clearBlock} />
-          )}
+          <div className="call-cards">
+            {callIndex !== undefined && view && (
+              <DiffCard
+                sessionKey={key}
+                ctx={call.ctx.value}
+                diff={call.diff}
+                prev={call.prev.value}
+                breaks={view.breaks}
+                onGoTo={goTo}
+              />
+            )}
+            {callIndex !== undefined && (
+              <ContextAt
+                sessionKey={key}
+                call={callIndex}
+                ctx={call.ctx}
+                openHash={route.block}
+                onOpened={clearBlock}
+              />
+            )}
+          </div>
           {view && view.calls.length > 0 && (
             <Scrubber
               place={place}
@@ -310,10 +323,12 @@ function partCost(c: { cacheReadUsd: number; cacheWriteUsd: number; inputUsd: nu
         : c.outputUsd;
 }
 
-function Legend() {
+/** The categories this lane's Calls hold, in request order (a colour always names the same category). */
+function Legend({ calls }: { calls: readonly TimelineCall[] }) {
+  const present = CATEGORIES.filter((c) => calls.some((x) => x.categories[c.key] > 0));
   return (
     <ul className="legend" aria-label="Context categories">
-      {CATEGORIES.map((c) => (
+      {present.map((c) => (
         <li key={c.key}>
           <button type="button" className="tip-anchor legend-item" data-tip={c.explain}>
             <span className={`swatch cat-${c.key}`} aria-hidden="true" />
@@ -325,6 +340,9 @@ function Legend() {
   );
 }
 
+/** Price per token against plain input, as the billing ramp encodes it (lighter is cheaper). */
+const PRICE: Record<string, string> = { cacheRead: "0.05–0.1×", input: "1×", cacheWrite: "1.25–2×" };
+
 function BillingLegend({ noUsage }: { noUsage: boolean }) {
   return (
     <ul className="legend billing-legend" aria-label="Billing parts">
@@ -332,7 +350,7 @@ function BillingLegend({ noUsage }: { noUsage: boolean }) {
         <li key={p.key}>
           <button type="button" className="tip-anchor legend-item" data-tip={p.explain}>
             <span className={`swatch cache-${p.key}`} aria-hidden="true" />
-            {p.label}
+            {p.label} <span className="muted num">{PRICE[p.key]}</span>
           </button>
         </li>
       ))}

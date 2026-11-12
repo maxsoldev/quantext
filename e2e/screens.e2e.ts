@@ -35,6 +35,16 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // The chart, the context bar and the strips together: the timeline card scrolled to the top.
+    name: "call",
+    both: true,
+    go: async (page, engine) => {
+      await page.goto(`${await engine.sessionUrl("basic-tools")}?call=4`);
+      await expect(page.getByTestId("context-bar")).toBeVisible();
+      await page.evaluate(`document.querySelector(".timeline-card")?.scrollIntoView({ block: "start" })`);
+    },
+  },
+  {
     name: "context",
     both: true,
     go: async (page, engine) => {
