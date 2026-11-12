@@ -141,6 +141,23 @@ export interface SessionDetail extends Meta {
   events: SessionEvent[];
   compactions: CompactionDetail[];
   subagents: SessionSummary[];
+  /** An estimate of the calls of the harness that no transcript holds; never part of the exact totals. */
+  unlogged: UnloggedEstimate;
+}
+
+/**
+ * An upper estimate of Claude Code's subagent progress summaries: billed model calls written to no transcript. It
+ * assumes they were on (`CLAUDE_CODE_DISABLE_AGENT_PROGRESS_SUMMARIES` unset), which a transcript cannot show.
+ * Priced like each subagent's own Calls.
+ */
+export interface UnloggedEstimate {
+  calls: number;
+  cacheReadTokens: number;
+  costUsd: number;
+  /** Summaries of subagents with no priced Call: counted, but not in `costUsd`. */
+  unpricedCalls: number;
+  /** Subagents (at any depth) with at least one summary. */
+  subagents: number;
 }
 
 /** The parameters of a Call that every provider has; the provider's own are in `CallDetail.raw`. */

@@ -66,6 +66,7 @@ import { previewOf } from "./preview.ts";
 import { API_VERSION } from "./sql.ts";
 import { SUB_JOIN, subtreeSql, TOTAL_COST, totalsOf } from "./totals.ts";
 import { markTurns } from "./turns.ts";
+import { estimateUnlogged, tracesOf, UNLOGGED_SQL } from "./unlogged.ts";
 import { cacheBreaksSql, installViews, toolOutputsSql } from "./views.ts";
 
 const LIFETIME_SORTS: Record<NonNullable<LifetimeOptions["sort"]>, string> = {
@@ -707,6 +708,7 @@ export function createQuery(options: QueryOptions): Query {
         events,
         compactions: compactionsOf(key, false),
         subagents,
+        unlogged: estimateUnlogged(tracesOf(q(UNLOGGED_SQL).all(key.log, key.id))),
       };
     },
     listCalls(key, options = {}) {
