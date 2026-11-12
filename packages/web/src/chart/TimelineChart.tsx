@@ -233,8 +233,8 @@ const Layers = memo(function Layers({
         cls={(k) => (k === "unrebuilt" ? "cat-unrebuilt" : `cat-${k}`)}
       />
       <Marks stack={bottom} y={yBottom} band={band} xOf={xOf} cls={(k) => `cache-${k}`} />
-      {/* The billing texture: one hatch over every billing mark, so a cache part never reads as a category. */}
-      <Marks stack={bottom} y={yBottom} band={band} xOf={xOf} cls={() => "bill-hatch"} />
+      {/* The billing texture: a hatch over every billing mark, so a cache part never reads as a category. */}
+      <Marks stack={bottom} y={yBottom} band={band} xOf={xOf} cls={(k) => `bill-hatch bill-${k}`} />
       {view.calls.map((c, p) =>
         c.usage ? null : (
           <rect
@@ -357,12 +357,22 @@ function Marks<K extends string>({
   );
 }
 
-/** The billing texture: one hatch over every billing mark. */
+/**
+ * The billing textures, one per part, so cache read and cache write differ by more than lightness:
+ * read is single diagonal lines, uncached input is dots, write is a cross-hatch.
+ */
 function BillPatterns() {
   return (
     <defs>
-      <pattern id="bill-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <pattern id="bill-cacheRead" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
         <line x1="0" y1="0" x2="0" y2="6" />
+      </pattern>
+      <pattern id="bill-input" width="5" height="5" patternUnits="userSpaceOnUse">
+        <circle cx="2.5" cy="2.5" r="1.1" />
+      </pattern>
+      <pattern id="bill-cacheWrite" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <line x1="0" y1="0" x2="0" y2="6" />
+        <line x1="0" y1="0" x2="6" y2="0" />
       </pattern>
     </defs>
   );

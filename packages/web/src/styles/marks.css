@@ -67,3 +67,16 @@
     color-mix(in srgb, var(--surface) 55%, transparent) 3px 4.5px
   );
 }
+/* Per-part textures, as in the chart: uncached input is dots, cache write a cross-hatch (read keeps the diagonal). */
+.swatch.cache-input,
+.split-part.cache-input {
+  background-image: radial-gradient(color-mix(in srgb, var(--surface) 60%, transparent) 1px, transparent 1.3px);
+  background-size: 4px 4px;
+  background-position: 1px 1px;
+}
+.swatch.cache-cacheWrite,
+.split-part.cache-cacheWrite {
+  background-image:
+    repeating-linear-gradient(45deg, transparent 0 3px, color-mix(in srgb, var(--surface) 55%, transparent) 3px 4.5px),
+    repeating-linear-gradient(-45deg, transparent 0 3px, color-mix(in srgb, var(--surface) 55%, transparent) 3px 4.5px);
+}

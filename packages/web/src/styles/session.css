@@ -213,15 +213,28 @@
 .panel-foot .legend {
   gap: 2px 10px;
 }
-/* The billing texture over the billing marks (and their swatches): see tokens.css. */
+/* The billing textures over the billing marks, one per part (swatches: marks.css; colours: tokens.css). */
 .bill-hatch {
-  fill: url(#bill-hatch);
   pointer-events: none;
 }
-#bill-hatch line {
+.bill-cacheRead {
+  fill: url(#bill-cacheRead);
+}
+.bill-input {
+  fill: url(#bill-input);
+}
+.bill-cacheWrite {
+  fill: url(#bill-cacheWrite);
+}
+#bill-cacheRead line,
+#bill-cacheWrite line {
   stroke: var(--surface);
   stroke-width: 1.5;
   opacity: 0.55;
+}
+#bill-input circle {
+  fill: var(--surface);
+  opacity: 0.6;
 }
 .chart-tip {
   position: absolute;
