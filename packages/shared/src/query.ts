@@ -211,7 +211,10 @@ export interface CallContext extends Meta {
   totalTokens: number;
 }
 
-/** What changed at Call N against the previous Call of its lane: Blocks by content and position. */
+/**
+ * What changed at Call N against the previous Call of its lane, or the previous Call in time when that one ran on
+ * another model: Blocks by content and position.
+ */
 export interface ContextDiff extends Meta {
   call: number;
   /** The previous Call of the lane; absent for the lane's first Call. */
@@ -220,6 +223,8 @@ export interface ContextDiff extends Meta {
   removed: ContextBlock[];
   /** Entries kept from the previous Call that are not in this Call's Cached prefix: written to the cache again. */
   uncached: ContextBlock[];
+  /** The previous Call ran on another model (in another lane): nothing of its cache could be read. */
+  modelSwitch?: true;
   /** The first position that differs from the previous Call. */
   firstChange?: number;
   /** Cache read tokens lost against the previous Call (0 when it did not drop). */
@@ -380,4 +385,24 @@ export interface ToolOutput extends Lifetime {
   /** The Calls (by index) its result stayed in. */
   firstCall?: number;
   lastCall?: number;
+}
+
+/** Why the cache read dropped: the first that fits, in this order. */
+export type CacheBreakReason = "compaction" | "model-switch" | "ttl" | "prefix-change";
+
+/** A Call whose cache read dropped against the previous Call (`ContextDiff` tells what changed). */
+export interface CacheBreak {
+  index: number;
+  lane: string;
+  ts: string;
+  model: string;
+  previous: { index: number; ts: string; model: string; cacheReadTokens: number };
+  gapSeconds: number;
+  cacheReadTokens: number;
+  dropTokens: number;
+  cacheWriteTokens: number;
+  /** Where the Cached prefix ended, and the Block there. */
+  breakPosition?: number;
+  breakBlock?: { hash: string; kind: BlockKind; tool?: string };
+  reason: CacheBreakReason;
 }

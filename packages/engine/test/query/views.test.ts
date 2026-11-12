@@ -107,12 +107,17 @@ describe("the views against the query layer", () => {
     }
   });
 
-  test("v_cache_breaks has each Call whose cache read dropped against the previous Call of its lane", async () => {
+  test("v_cache_breaks has each Call whose cache read dropped against the Call before it", async () => {
     const { q, sessions, rows } = await setup();
     const expected = sessions.flatMap((s) => {
       const calls = q.listCalls(s).items.filter((c) => c.usage !== undefined);
-      return calls.flatMap((c) => {
-        const prev = calls.filter((p) => p.lane === c.lane && p.index < c.index).at(-1);
+      return calls.flatMap((c, i) => {
+        const inLane = calls.filter((p) => p.lane === c.lane && p.index < c.index).at(-1);
+        const before = calls[i - 1];
+        // The previous Call in time when it ran on another model, else the previous Call of the lane.
+        const switched =
+          before !== undefined && before.model !== c.model && (inLane === undefined || before.index > inLane.index);
+        const prev = switched ? before : inLane;
         const drop = (prev?.usage?.cacheReadTokens ?? 0) - (c.usage?.cacheReadTokens ?? 0);
         return prev !== undefined && drop > 0
           ? [
@@ -127,8 +132,13 @@ describe("the views against the query layer", () => {
           : [];
       });
     });
-    expect(rows("SELECT session_id, idx, prev_idx, drop_tokens, break_position FROM v_cache_breaks")).toEqual(expected);
-    expect(expected.length).toBeGreaterThan(0);
+    const byKey = (a: Record<string, unknown>) => `${a.session_id}:${a.idx}`;
+    const sorted = <T extends Record<string, unknown>>(xs: T[]) =>
+      [...xs].sort((a, b) => (byKey(a) < byKey(b) ? -1 : 1));
+    expect(sorted(rows("SELECT session_id, idx, prev_idx, drop_tokens, break_position FROM v_cache_breaks"))).toEqual(
+      sorted(expected),
+    );
+    expect(expected.length).toBe(2);
   });
 });
 

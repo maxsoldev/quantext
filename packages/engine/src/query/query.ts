@@ -7,6 +7,8 @@ import type {
   BlockDetail,
   BlockKind,
   BlockLifetime,
+  CacheBreak,
+  CacheBreakReason,
   CallContext,
   CallDetail,
   CallIssue,
@@ -54,7 +56,7 @@ import { categoryOf, emptyCategories, isDeferred } from "./categories.ts";
 import type { Redactor } from "./redact.ts";
 import { createRedactor, lastFolder, projectAllowed, trimSeparators } from "./redact.ts";
 import { API_VERSION } from "./sql.ts";
-import { installViews, lifetimeSql, toolOutputsSql } from "./views.ts";
+import { cacheBreaksSql, installViews, lifetimeSql, toolOutputsSql } from "./views.ts";
 
 const LIFETIME_SORTS: Record<NonNullable<LifetimeOptions["sort"]>, string> = {
   cost: "lifetime_cost_usd",
@@ -63,6 +65,7 @@ const LIFETIME_SORTS: Record<NonNullable<LifetimeOptions["sort"]>, string> = {
 };
 /** One Session's lifetime rows: the filter is inside, so only its runs are read. */
 const SESSION_LIFETIME = lifetimeSql(true);
+const SESSION_BREAKS = cacheBreaksSql(true);
 
 export interface QueryOptions {
   /** A connection to the store (read-only is enough); the views are made on it when missing. */
@@ -101,6 +104,8 @@ export interface Query {
   toolCalls(key: SessionKey): Items<ToolCallSummary>;
   /** The compactions, with what was removed and kept (two contexts each, so only here, not in `getSession`). */
   compactions(key: SessionKey): Items<CompactionDetail>;
+  /** The Calls whose cache read dropped, with the reason (`v_cache_breaks`). */
+  cacheBreaks(key: SessionKey): Items<CacheBreak>;
   /** The Session's Blocks by their lifetime cost in its own Calls. */
   blockLifetimes(key: SessionKey, options?: LifetimeOptions): Items<BlockLifetime>;
   /** The Session's tool uses by their result's lifetime cost. */
@@ -408,14 +413,25 @@ export function createQuery(options: QueryOptions): Query {
     };
     return { ...hide(result, found.project), ...meta };
   };
-  const previousInLane = (key: SessionKey, lane: string, index: number): number | undefined => {
-    const r = q("SELECT max(idx) AS idx FROM calls WHERE log = ? AND session_id = ? AND lane = ? AND idx < ?").get(
+  /**
+   * The Call to compare Call `index` with: the previous Call of its lane, or the previous Call in time when that one
+   * ran on another model (the cache is per model). `modelSwitch` says which.
+   */
+  const previousOf = (key: SessionKey, call: CallSummary): { index: number; modelSwitch: boolean } | undefined => {
+    const inLane = q("SELECT max(idx) AS idx FROM calls WHERE log = ? AND session_id = ? AND lane = ? AND idx < ?").get(
       key.log,
       key.id,
-      lane,
-      index,
-    );
-    return r?.idx === null || r === undefined ? undefined : Number(r.idx);
+      call.lane,
+      call.index,
+    )?.idx;
+    const before = q(
+      "SELECT idx, model FROM calls WHERE log = ? AND session_id = ? AND idx < ? AND usage_basis IS NOT NULL ORDER BY idx DESC LIMIT 1",
+    ).get(key.log, key.id, call.index);
+    const lane = inLane === null || inLane === undefined ? undefined : Number(inLane);
+    if (before !== undefined && before.model !== call.model && (lane === undefined || Number(before.idx) > lane)) {
+      return { index: Number(before.idx), modelSwitch: true };
+    }
+    return lane === undefined ? undefined : { index: lane, modelSwitch: false };
   };
 
   /**
@@ -681,7 +697,8 @@ export function createQuery(options: QueryOptions): Query {
     contextDiff(key, index) {
       const now = context(key, index);
       if (now === undefined) return undefined;
-      const previous = previousInLane(key, now.lane, index);
+      const prev = previousOf(key, now.call);
+      const previous = prev?.index;
       const was = previous === undefined ? undefined : context(key, previous);
       // The same content at the same position: what the provider could read from the cache.
       const runKey = (b: ContextBlock) => `${b.position}:${b.hash ?? ""}`;
@@ -700,6 +717,7 @@ export function createQuery(options: QueryOptions): Query {
         cacheReadDrop: Math.max(0, (was?.call.usage?.cacheReadTokens ?? 0) - (now.call.usage?.cacheReadTokens ?? 0)),
       };
       if (previous !== undefined) diff.previous = previous;
+      if (prev?.modelSwitch === true) diff.modelSwitch = true;
       if (changed.length > 0) diff.firstChange = Math.min(...changed);
       return diff;
     },
@@ -772,6 +790,37 @@ export function createQuery(options: QueryOptions): Query {
       return { ...meta, items: hide(out, found.project) };
     },
     compactions: (key) => ({ ...meta, items: compactionsOf(key, true) }),
+    cacheBreaks(key) {
+      const found = sessionProject(key);
+      if (found === undefined) return { ...meta, items: [] };
+      const rows = q(`${SESSION_BREAKS} ORDER BY idx`).all(key.log, key.id);
+      const items = rows.map((r) => {
+        const b: CacheBreak = {
+          index: Number(r.idx),
+          lane: String(r.lane),
+          ts: String(r.ts),
+          model: String(r.model),
+          previous: {
+            index: Number(r.prev_idx),
+            ts: String(r.prev_ts),
+            model: String(r.prev_model),
+            cacheReadTokens: Number(r.prev_cache_read_tokens),
+          },
+          gapSeconds: Number(r.gap_seconds),
+          cacheReadTokens: Number(r.cache_read_tokens),
+          dropTokens: Number(r.drop_tokens),
+          cacheWriteTokens: Number(r.cache_write_tokens),
+          reason: String(r.reason) as CacheBreakReason,
+        };
+        if (r.break_position !== null) b.breakPosition = Number(r.break_position);
+        if (r.break_block_hash !== null) {
+          b.breakBlock = { hash: String(r.break_block_hash), kind: String(r.break_kind) as BlockKind };
+          if (r.break_tool !== null) b.breakBlock.tool = String(r.break_tool);
+        }
+        return b;
+      });
+      return { ...meta, items: hide(items, found.project) };
+    },
     blockLifetimes(key, options = {}) {
       const found = sessionProject(key);
       if (found === undefined) return { ...meta, items: [] };

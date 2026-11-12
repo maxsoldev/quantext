@@ -64,7 +64,7 @@ async function demo(projects?: string[]): Promise<Query> {
 function everything(q: Query): string {
   const out: unknown[] = [q.listSessions(), q.ingestReport(), q.projectMemory("shop")];
   for (const s of q.listSessions().items) {
-    out.push(q.getSession(s), q.toolCalls(s), q.compactions(s), q.callTimeline(s));
+    out.push(q.getSession(s), q.toolCalls(s), q.compactions(s), q.callTimeline(s), q.cacheBreaks(s));
     out.push(q.blockLifetimes(s), q.toolOutputs(s));
     for (const c of q.listCalls(s).items) {
       const ctx = q.contextAt(s, c.index);

@@ -5,7 +5,7 @@
 import { describe, expect, test } from "vitest";
 import { claudeCodeCodec } from "../../src/adapters/claude-code/index.ts";
 import type { Query } from "../../src/query/index.ts";
-import { createQuery } from "../../src/query/index.ts";
+import { createQuery, runSql } from "../../src/query/index.ts";
 import { mainRows } from "../fixtures.ts";
 import { ingested } from "./corpus.ts";
 
@@ -349,5 +349,48 @@ describe("for the live viewer", () => {
     const full = q.getBlock(block?.hash ?? "", s.log);
     expect(full && "content" in full).toBe(false);
     expect(full?.raw.content).toBeDefined();
+  });
+});
+
+describe("cache breaks", () => {
+  test("after a compaction, and when the model changes (compared with the previous Call in time)", async () => {
+    const q = await query(["compaction", "effort"]);
+    expect(q.cacheBreaks(key(q, 5)).items.map((b) => [b.index, b.previous.index, b.reason])).toEqual([
+      [4, 2, "compaction"],
+    ]);
+    const effort = key(q, 7);
+    const calls = q.listCalls(effort).items;
+    const switched = calls.find((c, i) => i > 0 && c.model !== calls[i - 1]?.model);
+    const breaks = q.cacheBreaks(effort).items;
+    expect(breaks.map((b) => b.reason)).toContain("model-switch");
+    const b = breaks.find((x) => x.reason === "model-switch");
+    expect(b).toMatchObject({ index: switched?.index, previous: { index: (switched?.index ?? 0) - 1 } });
+    const diff = q.contextDiff(effort, switched?.index ?? -1);
+    expect(diff).toMatchObject({ previous: (switched?.index ?? 0) - 1, modelSwitch: true });
+    // Nothing was read from the cache: what the new model got of the old request is written again.
+    expect(diff?.uncached.length).toBeGreaterThan(0);
+    expect(diff?.uncached.every((x) => !x.inCachedPrefix)).toBe(true);
+  });
+
+  test("names a long pause (the cache's time to live) and a changed prefix", async () => {
+    const at = (s: number) => new Date(Date.parse("2026-11-12T00:26:10Z") + s * 1000).toISOString();
+    const { db } = await ingested(["basic-tools"], undefined, (w) => {
+      const set = w.prepare("UPDATE calls SET cache_read_tokens = ?, ts = ? WHERE idx = ?");
+      set.run(100, at(400), 3); // 400 s after call 2: the 5-minute cache ran out
+      set.run(50, at(410), 4); // 10 s later: something early in the request changed
+      w.prepare("UPDATE calls SET ts = ? WHERE idx = 2").run(at(0));
+      w.prepare("UPDATE calls SET ts = ? WHERE idx IN (5, 6, 7)").run(at(420));
+    });
+    const q = createQuery({ db, codec: claudeCodeCodec });
+    const breaks = q.cacheBreaks(key(q, 1)).items;
+    expect(breaks.map((b) => [b.index, b.reason, b.gapSeconds])).toEqual([
+      [3, "ttl", 400],
+      [4, "prefix-change", 10],
+    ]);
+    const view = runSql(db, "SELECT idx, reason FROM v_cache_breaks ORDER BY idx").rows;
+    expect(view).toEqual([
+      { idx: 3, reason: "ttl" },
+      { idx: 4, reason: "prefix-change" },
+    ]);
   });
 });

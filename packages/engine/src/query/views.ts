@@ -65,10 +65,10 @@ FROM call_blocks r JOIN log_blocks b ON b.log = r.log AND b.hash = r.block_hash`
 /**
  * The lifetime cost of each Block of a log: a run's tokens count for each Call of its lane in its range. Per Call,
  * a Block wholly inside the Cached prefix is priced at the Call's price per cache-read token; the Block at the
- * boundary has the rest of the cache read (\`cache_read_tokens\` less the store's \`cache_boundary_offset\`); the
+ * boundary has the rest of the cache read (`cache_read_tokens` less the store's `cache_boundary_offset`); the
  * rest of a Block at the price of the cache write, or of plain input when the Call wrote no cache. This is core's
- * \`blockCosts\` for every Call whose input tokens are its framing tokens. A run is priced as read in all its
- * Calls, then corrected for the Calls where it lies at or after the boundary. \`session\`: only one Session's runs
+ * `blockCosts` for every Call whose input tokens are its framing tokens. A run is priced as read in all its
+ * Calls, then corrected for the Calls where it lies at or after the boundary. `session`: only one Session's runs
  * are read; the query then takes (log, session id).
  */
 export function lifetimeSql(session = false): string {
@@ -109,8 +109,8 @@ GROUP BY p.log, p.block_hash`;
 }
 
 /**
- * Each tool use with its result Block's lifetime cost. \`lifetime\`: the lifetime rows to join (the view, or a
- * Session's own); \`where\` filters the tool uses (\`t\`).
+ * Each tool use with its result Block's lifetime cost. `lifetime`: the lifetime rows to join (the view, or a
+ * Session's own); `where` filters the tool uses (`t`).
  */
 export function toolOutputsSql(lifetime: string, where = ""): string {
   return `
@@ -137,24 +137,60 @@ const LIFETIME = `CREATE TEMP VIEW v_block_lifetime_cost AS ${lifetimeSql()}`;
 
 const TOOL_OUTPUTS = `CREATE TEMP VIEW v_tool_outputs AS ${toolOutputsSql("v_block_lifetime_cost")}`;
 
-const CACHE_BREAKS = `
-CREATE TEMP VIEW v_cache_breaks AS
-SELECT x.log, x.session_id, x.lane, x.idx, x.call_id, x.ts, x.model, x.prev_idx, x.prev_ts,
+/**
+ * Calls whose cache read dropped against the previous Call: of their lane, or the previous Call in time when that one
+ * ran on another model (the cache belongs to a model). The reason, first that fits: a compaction between them, a
+ * model switch, a pause longer than the cache's time to live (5 minutes, or 1 hour when the previous Call wrote
+ * its cache for an hour), else a change early in the request. `session`: only one Session's Calls are read; the
+ * query then takes (log, session id).
+ */
+export function cacheBreaksSql(session = false): string {
+  return `
+WITH ordered AS (
+  SELECT c.log, c.session_id, c.lane, c.idx, c.id AS call_id, c.ts, c.model, c.cache_read_tokens,
+    c.cache_write_tokens, c.input_tokens, c.cache_boundary_position, c.block_count,
+    lag(c.idx) OVER lane_w AS l_idx, lag(c.ts) OVER lane_w AS l_ts, lag(c.model) OVER lane_w AS l_model,
+    lag(c.cache_read_tokens) OVER lane_w AS l_cr, lag(c.cache_write_1h_tokens) OVER lane_w AS l_w1h,
+    lag(c.idx) OVER time_w AS t_idx, lag(c.ts) OVER time_w AS t_ts, lag(c.model) OVER time_w AS t_model,
+    lag(c.cache_read_tokens) OVER time_w AS t_cr, lag(c.cache_write_1h_tokens) OVER time_w AS t_w1h
+  FROM calls c WHERE c.usage_basis IS NOT NULL ${session ? "AND c.log = ? AND c.session_id = ?" : ""}
+  WINDOW lane_w AS (PARTITION BY c.log, c.session_id, c.lane ORDER BY c.idx),
+    time_w AS (PARTITION BY c.log, c.session_id ORDER BY c.idx)
+),
+paired AS (
+  SELECT *, coalesce(t_model <> model AND (l_idx IS NULL OR t_idx > l_idx), 0) AS switched FROM ordered
+),
+prev AS (
+  SELECT log, session_id, lane, idx, call_id, ts, model, cache_read_tokens, cache_write_tokens, input_tokens,
+    cache_boundary_position, block_count,
+    CASE WHEN switched THEN t_idx ELSE l_idx END AS prev_idx,
+    CASE WHEN switched THEN t_ts ELSE l_ts END AS prev_ts,
+    CASE WHEN switched THEN t_model ELSE l_model END AS prev_model,
+    CASE WHEN switched THEN t_cr ELSE l_cr END AS prev_cache_read_tokens,
+    CASE WHEN switched THEN t_w1h ELSE l_w1h END AS prev_w1h
+  FROM paired
+)
+SELECT x.log, x.session_id, x.lane, x.idx, x.call_id, x.ts, x.model, x.prev_idx, x.prev_ts, x.prev_model,
   CAST(round((julianday(x.ts) - julianday(x.prev_ts)) * 86400) AS INTEGER) AS gap_seconds,
   x.prev_cache_read_tokens, x.cache_read_tokens, x.prev_cache_read_tokens - x.cache_read_tokens AS drop_tokens,
   x.cache_write_tokens, x.input_tokens, x.cache_boundary_position AS break_position, x.block_count,
-  b.block_hash AS break_block_hash, k.kind AS break_kind, k.tool AS break_tool
-FROM (
-  SELECT c.log, c.session_id, c.lane, c.idx, c.id AS call_id, c.ts, c.model, c.cache_read_tokens,
-    c.cache_write_tokens, c.input_tokens, c.cache_boundary_position, c.block_count,
-    lag(c.idx) OVER w AS prev_idx, lag(c.ts) OVER w AS prev_ts, lag(c.cache_read_tokens) OVER w AS prev_cache_read_tokens
-  FROM calls c WHERE c.usage_basis IS NOT NULL
-  WINDOW w AS (PARTITION BY c.log, c.session_id, c.lane ORDER BY c.idx)
-) x
+  b.block_hash AS break_block_hash, k.kind AS break_kind, k.tool AS break_tool,
+  CASE
+    WHEN k.kind = 'summary' OR EXISTS (SELECT 1 FROM compactions m WHERE m.log = x.log AND m.session_id = x.session_id
+      AND m.ts > x.prev_ts AND m.ts <= x.ts) THEN 'compaction'
+    WHEN x.prev_model <> x.model THEN 'model-switch'
+    WHEN (julianday(x.ts) - julianday(x.prev_ts)) * 86400 > CASE WHEN x.prev_w1h > 0 THEN 3600 ELSE 300 END
+      THEN 'ttl'
+    ELSE 'prefix-change'
+  END AS reason
+FROM prev x
 LEFT JOIN call_blocks b ON b.log = x.log AND b.session_id = x.session_id AND b.lane = x.lane
   AND b.first_call <= x.idx AND coalesce(b.last_call, ${OPEN}) >= x.idx AND b.position = x.cache_boundary_position
 LEFT JOIN log_blocks k ON k.log = b.log AND k.hash = b.block_hash
 WHERE x.cache_read_tokens < x.prev_cache_read_tokens`;
+}
+
+const CACHE_BREAKS = `CREATE TEMP VIEW v_cache_breaks AS ${cacheBreaksSql()}`;
 
 /** The names of the views, as documented. */
 export const VIEWS = [
