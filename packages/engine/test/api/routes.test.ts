@@ -236,3 +236,32 @@ describe("activity, for the idle exit", () => {
     expect(await send("")).toMatch(/^HTTP\/1\.1 200 [\s\S]*"apiVersion":1/);
   });
 });
+
+describe("caching of Blocks and media", () => {
+  test("an ETag by content, a 304 when it matches, and never the same tag in demo mode", async () => {
+    const { port, query } = await basic();
+    const [image] = query.findSessions(ID(3));
+    if (image === undefined) throw new Error("no image session");
+    const hash = query
+      .contextAt(image, 1)
+      ?.blocks.find((b) => b.source.filePath?.endsWith("diagram.png") && b.kind === "tool-result")?.hash;
+    const media = query.getBlock(hash ?? "", image.log)?.media[0]?.hash;
+    const demo = await engine(["basic-tools", "image"], {}, { demo: { redactPaths: true } });
+    for (const path of [`/api/v1/blocks/${image.log}/${hash}`, `/api/v1/blocks/${image.log}/${hash}/media/${media}`]) {
+      const first = await get(port, path);
+      const tag = String(first.headers.etag);
+      expect([path, first.headers["cache-control"], tag]).toEqual([
+        path,
+        "no-cache",
+        expect.stringMatching(/^"[\w.-]+"$/),
+      ]);
+      const again = await get(port, path, { "if-none-match": tag });
+      expect([path, again.status, again.body]).toEqual([path, 304, ""]);
+      expect((await get(port, path, { "if-none-match": '"other"' })).status).toBe(200);
+      const shown = await get(demo.port, path);
+      expect(shown.status).toBe(200);
+      expect(shown.headers.etag).not.toBe(tag);
+      expect((await get(demo.port, path, { "if-none-match": tag })).status).toBe(200);
+    }
+  });
+});

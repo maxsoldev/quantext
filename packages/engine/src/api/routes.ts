@@ -9,7 +9,10 @@ import type { Params } from "./params.ts";
 import { badRequest, checkText, integer, notFound, queryParams } from "./params.ts";
 import type { Offload } from "./server.ts";
 
-export type Reply = { kind: "json"; body: unknown } | { kind: "media"; mediaType: string; bytes: Uint8Array };
+/** `tag`: what names the content for good (a Block's log and hash); the server makes it an ETag. */
+export type Reply =
+  | { kind: "json"; body: unknown; tag?: string }
+  | { kind: "media"; mediaType: string; bytes: Uint8Array; tag: string };
 
 /** Images a browser shows inline; anything else (an SVG, a PDF) is sent as a download, never rendered here. */
 const INLINE_MEDIA = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
@@ -137,19 +140,23 @@ const ROUTES: Route[] = [
   {
     path: ["blocks", ":log", ":hash"],
     params: [],
-    run: (query, p) => found(query.getBlock(hash(p.hash ?? "", "hash"), integer(p.log ?? "", "log", 0, MAX_LOG))),
+    run(query, p) {
+      const [h, log] = [hash(p.hash ?? "", "hash"), integer(p.log ?? "", "log", 0, MAX_LOG)];
+      return { ...found(query.getBlock(h, log)), tag: `${log}-${h}` };
+    },
   },
   {
     path: ["blocks", ":log", ":hash", "media", ":media"],
     params: [],
     run(query, p) {
-      const media = query.getMedia(
+      const [h, log, m] = [
         hash(p.hash ?? "", "hash"),
         integer(p.log ?? "", "log", 0, MAX_LOG),
         hash(p.media ?? "", "media"),
-      );
+      ];
+      const media = query.getMedia(h, log, m);
       if (media === undefined) throw notFound();
-      return { kind: "media", mediaType: media.mediaType, bytes: media.bytes };
+      return { kind: "media", mediaType: media.mediaType, bytes: media.bytes, tag: `${log}-${h}-${m}` };
     },
   },
   {

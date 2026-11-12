@@ -20,7 +20,7 @@ import type {
 import type { Query } from "../query/index.ts";
 import type { EventStream } from "./events.ts";
 import { createEventStream } from "./events.ts";
-import { refusal, sendBytes, sendError, sendJson } from "./http.ts";
+import { refusal, securityHeaders, sendBytes, sendError, sendJson } from "./http.ts";
 import { badRequest, HttpError } from "./params.ts";
 import { isInlineMedia, route } from "./routes.ts";
 import { staticFiles } from "./static.ts";
@@ -110,6 +110,11 @@ export function createApi(options: ApiOptions): Api {
     ingest: shown(ingestStatus()),
     streams: events.clients(),
   });
+  /**
+   * A Block's content never changes under its hash; demo mode's redaction can, when the store's projects do. So
+   * a demo tag also holds the change cursor, and a demo tag never equals a plain one: no cache entry is shared.
+   */
+  const etagOf = (tag: string) => (info.demo ? `"${tag}.demo.${query.changeCursor()}"` : `"${tag}"`);
   let port = 0;
   let lastActive = now();
   const sockets = new Set<Socket>();
@@ -153,7 +158,14 @@ export function createApi(options: ApiOptions): Api {
     if (api) {
       if (!url.pathname.startsWith(API_PREFIX)) throw new HttpError(404, "not-found", "no such route");
       const reply = await route(query, segments.slice(2), url.searchParams, offload);
-      if (reply.kind === "json") return sendJson(req, res, 200, reply.body);
+      const etag = reply.tag === undefined ? undefined : etagOf(reply.tag);
+      const cache: Record<string, string> = etag === undefined ? {} : { "Cache-Control": "no-cache", ETag: etag };
+      if (etag !== undefined && matches(req.headers["if-none-match"], etag)) {
+        res.writeHead(304, { ...securityHeaders(false), ...cache });
+        res.end();
+        return;
+      }
+      if (reply.kind === "json") return sendJson(req, res, 200, reply.body, cache);
       const inline = isInlineMedia(reply.mediaType);
       return sendBytes(
         req,
@@ -161,7 +173,7 @@ export function createApi(options: ApiOptions): Api {
         reply.bytes,
         {
           "Content-Type": inline ? reply.mediaType : "application/octet-stream",
-          "Cache-Control": "private, max-age=3600",
+          ...cache,
           ...(inline ? {} : { "Content-Disposition": "attachment" }),
         },
         false,
@@ -226,6 +238,15 @@ export function createApi(options: ApiOptions): Api {
       });
     },
   };
+}
+
+/** Whether an If-None-Match header names this ETag (`*`, or a list of tags, weak or not). */
+function matches(header: string | string[] | undefined, etag: string): boolean {
+  if (typeof header !== "string") return false;
+  return header
+    .split(",")
+    .map((t) => t.trim().replace(/^W\//, ""))
+    .some((t) => t === etag || t === "*");
 }
 
 /** The path's segments, each percent-decoded once; a bad encoding is a 400. */

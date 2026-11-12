@@ -27,7 +27,9 @@ reconnects after sleep or a network change and must not miss a Call.
   same-origin` (another page cannot even embed an image), `Cross-Origin-Opener-Policy: same-origin`, and no
   `Access-Control-*`. Pages get `default-src 'self'` with no inline script and `frame-ancestors 'none'`; every
   other response `default-src 'none'; sandbox`. API: `no-store`. Files under `assets/`: immutable; others
-  `no-cache`. Media: PNG, JPEG, GIF and WebP inline, anything else as an `attachment` download.
+  `no-cache`. A Block and its media: `no-cache` with an ETag of its log and hash
+  (304 when it matches); in demo mode the tag also holds `demo` and the change cursor, so demo and normal answers
+  never share a cache entry. Media: PNG, JPEG, GIF and WebP inline, anything else as an `attachment` download.
 - **Slow routes off the event loop.** `blocks` and `tool-outputs` price every Block over every Call of a Session
   (about 0.8 s at 2,000 Calls); they run in a worker thread with its own read-only connection and the same query
   options, so `/health` and the stream keep answering (guarded: p95 under 200 ms, also during a catch-up, whose
