@@ -16,7 +16,10 @@ agents through SQL and a CLI. Nothing leaves the machine.
   call re-wrote it; the context passed 200k.
 - **`/clear-tools [outputs] [keep N]`:** compacts by replacing old tool calls (their inputs) and old tool outputs
   with short stubs instead of a summary, in one pass, so the prompt cache is written once. `outputs` clears only
-  the outputs; `keep N` leaves the last N whole. Also as `/compact tools [outputs] [keep N]`.
+  the outputs; `keep N` leaves the last N whole. Also as `/compact tools [outputs] [keep N]`. The next call
+  writes the whole new context to the cache again; the toast gives that cost and after how many calls the
+  smaller context pays it back, so a clear pays most right after the cache expired. A run with nothing to clear
+  changes nothing. Small inputs (300 chars or less) and ToolSearch results stay whole.
 - **`/quantext view`:** opens a live viewer on `http://127.0.0.1:4747` with every session on the machine:
   - the context of each call, exactly as the model received it (system prompt, tool schemas, messages), with the
     tokens and cost of each block, and what was read from the cache or written to it;
