@@ -79,6 +79,71 @@ export interface Call {
   /** Absent when the log holds no response for the request; then the Call has no exact total. */
   usage?: Usage;
   cost?: Cost;
+  /** What is wrong with this Call's data. Empty when its request is complete and its numbers reconcile. */
+  issues: CallIssue[];
+}
+
+/**
+ * A flag on a Call. `unresolved-request`: part of the request is not in the log, so the rebuilt input is
+ * incomplete.
+ */
+export interface CallIssue {
+  kind: "unresolved-request";
+  detail: string;
+}
+
+/** A JSON value, as content is sent to the model provider. */
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
+/** What a Block is, by its role in the request. */
+export type BlockKind =
+  | "tool-schema"
+  | "system"
+  | "user"
+  | "reminder"
+  | "assistant"
+  | "reasoning"
+  | "tool-call"
+  | "tool-result"
+  | "image"
+  | "document"
+  | "summary";
+
+/** Where a Block's content came from, as far as the log tells. */
+export interface BlockSource {
+  /** The tool that the Block defines, calls, or holds the result of. */
+  tool?: string;
+  /** The file the tool read or wrote. */
+  filePath?: string;
+  /** The MCP server of the tool. */
+  mcpServer?: string;
+  /** The skill whose text or call this is. */
+  skill?: string;
+}
+
+/** One unique piece of content sent to the model, identified by the hash of its content. */
+export interface Block {
+  hash: string;
+  kind: BlockKind;
+  source: BlockSource;
+  /** The content as sent to the model provider (one content block, tool schema or system block). */
+  content: JsonValue;
+}
+
+/** The part of a request a CallBlock is in. The provider reads the request in this order. */
+export type RequestSection = "tools" | "system" | "messages";
+
+/** One appearance of a Block in a Call's input. */
+export interface CallBlock {
+  callId: string;
+  blockHash: string;
+  /** 0-based position in the Call's input: tool schemas, then system blocks, then messages. */
+  position: number;
+  section: RequestSection;
+  /** The index of the message that holds the Block, for the messages section. */
+  message?: number;
+  /** The Block carries a cache breakpoint. */
+  cacheBreakpoint: boolean;
 }
 
 /** Input that the adapter could not map, counted so that nothing is dropped in silence. */
@@ -93,5 +158,7 @@ export interface IngestReport {
 export interface SessionGraph {
   sessions: Session[];
   calls: Call[];
+  blocks: Block[];
+  callBlocks: CallBlock[];
   report: IngestReport;
 }
