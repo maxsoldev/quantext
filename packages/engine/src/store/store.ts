@@ -23,6 +23,8 @@ export interface OpenStoreOptions {
 export interface StoreReport {
   /** Unknown record kinds with their counts, summed over logs, most frequent first. */
   unknownRecords: { kind: string; count: number }[];
+  /** Known record kinds that hold nothing for the domain, with their counts, most frequent first. */
+  ignoredRecords: { kind: string; count: number }[];
   /** Records that could not be read, by log (the main transcript's path) and place. */
   unreadable: { log: string; at: string; reason: string }[];
   /** Files that could not be read, or whose log failed to ingest, and why. */
@@ -58,16 +60,22 @@ export async function openStore(options: OpenStoreOptions): Promise<Store> {
     const schemaVersion = migrate(db);
     const opened = db;
     const sql = new Statements(opened);
+    const kinds = (status: string) =>
+      sql
+        .get(
+          `SELECT kind, sum(count) AS count FROM report_kinds WHERE status = ?
+           GROUP BY kind ORDER BY count DESC, kind`,
+        )
+        .all(status)
+        .map((r) => ({ kind: String(r.kind), count: Number(r.count) }));
     return {
       path,
       schemaVersion,
       db: opened,
       log: (logPath, harness, codec) => openLog(opened, sql, logPath, harness, codec),
       report: () => ({
-        unknownRecords: sql
-          .get("SELECT kind, sum(count) AS count FROM report_unknown GROUP BY kind ORDER BY count DESC, kind")
-          .all()
-          .map((r) => ({ kind: String(r.kind), count: Number(r.count) })),
+        unknownRecords: kinds("unknown"),
+        ignoredRecords: kinds("ignored"),
         unreadable: sql
           .get(
             `SELECT l.path, r.at, r.reason FROM report_unreadable r JOIN logs l ON l.id = r.log

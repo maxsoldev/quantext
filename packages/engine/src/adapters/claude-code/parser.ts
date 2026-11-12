@@ -10,23 +10,25 @@ import type {
   IngestReport,
   Session,
   SessionDelta,
+  SessionEvent,
   ToolCall,
   Usage,
 } from "@quantext/shared";
 import type { Estimator } from "../../core/estimate.ts";
+import { addCounts } from "../../core/graph.ts";
 import { estimateBlock } from "../../providers/anthropic/estimate.ts";
 import { canonicalModel } from "../../providers/anthropic/pricing.ts";
 import { Changes } from "./changes.ts";
 import type { Classifier } from "./classify.ts";
 import { createClassifier, textHash, toolSource } from "./classify.ts";
-import type { JsonObject } from "./json.ts";
+import type { Json, JsonObject } from "./json.ts";
 import { arr, num, obj, str } from "./json.ts";
 import { laneOf, splitCall } from "./lane.ts";
 import { Content, NO_LOOKUP } from "./lookup.ts";
 import { hasInput, mergeUsage, paramsOf, sameInput, setUsage, usageChange, usageOf } from "./mapping.ts";
 import { get, put } from "./records.ts";
 import type { Row } from "./rows.ts";
-import { countUnknown, readLine } from "./rows.ts";
+import { countIgnored, countUnknown, readLine } from "./rows.ts";
 import type { CallSpec, Lane, ParserState, TranscriptState, UsageSum } from "./state.ts";
 import { emptyState } from "./state.ts";
 import { addAssistantRow, addBlob, addUserRow, blocksOf, resolve } from "./wire.ts";
@@ -114,11 +116,8 @@ function transcriptOf(state: ParserState, name: string): TranscriptState {
 
 function mergeReport(total: IngestReport, delta: IngestReport): void {
   total.unreadable.push(...delta.unreadable);
-  for (const { kind, count } of delta.unknownRecords) {
-    const entry = total.unknownRecords.find((e) => e.kind === kind);
-    if (entry === undefined) total.unknownRecords.push({ kind, count });
-    else entry.count += count;
-  }
+  total.unknownRecords = addCounts(total.unknownRecords, delta.unknownRecords);
+  total.ignoredRecords = addCounts(total.ignoredRecords, delta.ignoredRecords);
 }
 
 /** The handlers of the rows of one transcript. */
@@ -262,9 +261,89 @@ class Rows {
       case "cost-state":
         this.costState(data);
         break;
+      case "ai-title":
+      case "custom-title":
+      case "agent-name":
+        if (session !== undefined) this.naming(row, session);
+        break;
+      case "system/turn_duration":
+        this.turnDuration(data);
+        break;
+      case "pr-link":
+      case "continued-in":
+      case "fork-context-ref":
+      case "relocated":
+      case "permission-mode":
+      case "system/away_summary":
+        this.event(row, session);
+        break;
       default:
-        break; // known rows that hold nothing for the domain (UI and process state)
+        countIgnored(this.changes().report, row.type); // known rows that hold nothing for the domain
+        break;
     }
+  }
+
+  /** A title (the user's own wins over the harness's) or an agent name for the Session. */
+  private naming(row: Row, session: Session): void {
+    const before = JSON.stringify(session);
+    const ai = str(row.data.aiTitle);
+    const custom = str(row.data.customTitle);
+    const agent = str(row.data.agentName);
+    if (custom !== undefined) Object.assign(session, { title: custom, titleSource: "user" });
+    else if (ai !== undefined && session.titleSource !== "user")
+      Object.assign(session, { title: ai, titleSource: "harness" });
+    if (agent !== undefined) session.agentName = agent;
+    if (JSON.stringify(session) !== before) this.changes().sessions.add(session.id);
+  }
+
+  /** The duration of a turn, on its last Call: the latest Call of the transcript. */
+  private turnDuration(data: JsonObject): void {
+    const ms = num(data.durationMs);
+    const call = this.t.lastCallId === undefined ? undefined : this.store.call(this.t.lastCallId);
+    if (ms === undefined || call === undefined) return;
+    call.turnDurationMs = ms;
+    this.changes().calls.add(call.id);
+  }
+
+  /** An event on the Session's timeline. A row with no Session of its own belongs to its transcript's Session. */
+  private event(row: Row, session: Session | undefined): void {
+    const data = row.data;
+    const parent = str(data.parentSessionId);
+    const agent = str(data.agentId);
+    const sessionId =
+      session?.id ??
+      this.t.sessionId ??
+      (parent !== undefined && agent !== undefined ? `${parent}:agent-${agent}` : undefined);
+    if (sessionId === undefined) return;
+    const ts = str(data.timestamp) ?? get(this.state.sessions, sessionId)?.ended;
+    const base = { id: row.at, sessionId, ...(ts === undefined ? {} : { ts }) };
+    const event = ((): SessionEvent | undefined => {
+      switch (row.type) {
+        case "pr-link": {
+          const detail: { [key: string]: Json } = {};
+          if (data.prNumber !== undefined) detail.number = data.prNumber;
+          if (data.prRepository !== undefined) detail.repository = data.prRepository;
+          return { ...base, kind: "pr", value: str(data.prUrl) ?? "", detail };
+        }
+        case "continued-in":
+          return { ...base, kind: "continued-in", value: str(data.continuedInSessionId) ?? "" };
+        case "fork-context-ref": {
+          const detail: { [key: string]: Json } = {};
+          if (data.contextLength !== undefined) detail.contextLength = data.contextLength;
+          if (data.parentLastUuid !== undefined) detail.parentLastUuid = data.parentLastUuid;
+          return { ...base, kind: "forked-from", value: parent ?? "", detail };
+        }
+        case "relocated":
+          return { ...base, kind: "cwd", value: str(data.relocatedCwd) ?? "" };
+        case "permission-mode":
+          return { ...base, kind: "mode", value: str(data.permissionMode) ?? "" };
+        case "system/away_summary":
+          return { ...base, kind: "note", value: str(data.content) ?? "" };
+        default:
+          return undefined;
+      }
+    })();
+    if (event !== undefined) this.changes().events.push(event);
   }
 
   /** The Session of the row's transcript, created or updated with what the row tells. */
@@ -278,6 +357,7 @@ class Rows {
       this.linkChildren();
     }
     const id = isAgent ? `${parent}:agent-${agent}` : parent;
+    this.t.sessionId = id;
     const existing = get(this.state.sessions, id);
     const session = existing ?? put(this.state.sessions, id, { id, harness: HARNESS, requestLog: "present" });
     const before = JSON.stringify(session);
@@ -711,7 +791,7 @@ function frontier(state: ParserState): ParserState {
     groupSizes: {},
     toolSources: {},
     compactions: {},
-    report: { unknownRecords: [], unreadable: [] },
+    report: { unknownRecords: [], ignoredRecords: [], unreadable: [] },
     gapped: pick(state.gapped, new Set(Object.keys(state.waiting))),
     specs: pick(state.specs, calls),
     calls: pick(state.calls, calls),

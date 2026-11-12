@@ -61,8 +61,16 @@ describe("parseClaudeCodeSession on basic-tools", () => {
     expect(cost?.totalUsd).toBeCloseTo(0.084513 * 1.1, 12);
   });
 
-  test("reports no unknown records for a known transcript", () => {
-    expect(graph.report).toEqual({ unknownRecords: [], unreadable: [] });
+  test("reports no unknown records for a known transcript, and counts the rows it ignores", () => {
+    expect(graph.report.unknownRecords).toEqual([]);
+    expect(graph.report.unreadable).toEqual([]);
+    expect(graph.report.ignoredRecords).toEqual([
+      { kind: "queue-operation", count: 2 },
+      { kind: "attachment", count: 11 },
+      { kind: "atis-latch", count: 4 },
+      { kind: "last-prompt", count: 4 },
+      { kind: "tools-used", count: 3 },
+    ]);
   });
 });
 

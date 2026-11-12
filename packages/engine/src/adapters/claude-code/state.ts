@@ -72,8 +72,9 @@ export interface TranscriptState {
   userRun: Json[][];
   /** The message ids of the latest assistant rows, newest last: their later rows add to them (bounded). */
   openAssistantIds: string[];
-  /** The last Call logged in the transcript. */
+  /** The last Call logged in the transcript, and the Session of its latest row. */
   lastCallId?: string;
+  sessionId?: string;
   /** The running totals of the last `cost-state` row, and the Usage of the Calls logged since, per model. */
   costTotals?: JsonObject;
   usageSinceCost: Record<string, UsageSum>;
@@ -172,6 +173,6 @@ export function emptyState(): ParserState {
     metaToolUse: {},
     responses: {},
     requestLogs: {},
-    report: { unknownRecords: [], unreadable: [] },
+    report: { unknownRecords: [], ignoredRecords: [], unreadable: [] },
   };
 }

@@ -40,6 +40,7 @@ function normal(graph: SessionGraph): SessionGraph {
     callBlocks: [...graph.callBlocks].sort(by((r) => r.id)),
     toolCalls: [...graph.toolCalls].sort(by((t) => t.id)),
     compactions: [...graph.compactions].sort(by((c) => c.id)),
+    events: [...graph.events].sort(by((e) => e.id)),
     report: graph.report,
   };
 }

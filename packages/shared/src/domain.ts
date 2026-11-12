@@ -29,6 +29,29 @@ export interface Session {
    * is logged. `absent`: the harness version logs only usage (usage-only Calls, no Blocks). `partial`: both.
    */
   requestLog: RequestLog;
+  /** The Session's title: the user's own (`user`) wins over one the harness made (`harness`). */
+  title?: string;
+  titleSource?: "user" | "harness";
+  /** The name of the agent the Session ran as, when the harness names it. */
+  agentName?: string;
+}
+
+/**
+ * Something that happened in a Session besides its Calls, for its timeline. `mode`: the permission mode changed
+ * (value: the mode). `cwd`: the Session moved to another folder. `note`: a summary the harness wrote (for
+ * example while the user was away). `pr`: a pull request was linked (value: its URL). `continued-in`: the
+ * Session went on in another Session (value: its id). `forked-from`: the Session started from another one's
+ * context (value: its id).
+ */
+export interface SessionEvent {
+  id: string;
+  sessionId: string;
+  /** ISO 8601; a row without a time gets the time of the latest row before it. */
+  ts?: string;
+  kind: "mode" | "cwd" | "note" | "pr" | "continued-in" | "forked-from";
+  value: string;
+  /** More of what the harness logged, for example a pull request's number and repository. */
+  detail?: { [key: string]: JsonValue };
 }
 
 export type RequestLog = "present" | "partial" | "absent";
@@ -115,6 +138,8 @@ export interface Call {
   framingTokens: number;
   /** What is wrong with this Call's data. Empty when its request is complete and its numbers reconcile. */
   issues: CallIssue[];
+  /** On the last Call of a turn (a user prompt and the Calls that answer it): how long the turn took. */
+  turnDurationMs?: number;
 }
 
 /**
@@ -249,6 +274,8 @@ export interface Compaction {
 export interface IngestReport {
   /** Unknown record kinds, by the harness's own name, with their counts, in the order first seen. */
   unknownRecords: { kind: string; count: number }[];
+  /** Known record kinds that hold nothing for the domain (UI and process state), with their counts. */
+  ignoredRecords: { kind: string; count: number }[];
   /** Records that could not be read (bad JSON, missing fields): where (transcript and line) and why. */
   unreadable: { at: string; reason: string }[];
 }
@@ -310,5 +337,6 @@ export interface SessionGraph {
   callBlocks: CallBlock[];
   toolCalls: ToolCall[];
   compactions: Compaction[];
+  events: SessionEvent[];
   report: IngestReport;
 }

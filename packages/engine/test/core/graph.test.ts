@@ -48,6 +48,7 @@ describe("mergeDelta", () => {
         { kind: "k", count: 3 },
         { kind: "j", count: 1 },
       ],
+      ignoredRecords: [],
       unreadable: [{ at: "main:2", reason: "r" }],
     });
   });
