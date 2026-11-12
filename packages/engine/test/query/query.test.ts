@@ -2,6 +2,8 @@
  * The query layer on the recorded fixtures. Expected values come from the fixtures themselves: the manifests, and
  * the harness's own `cost-state` totals in the transcripts, never from the store's rows.
  */
+
+import type { CallContext } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
 import { claudeCodeCodec } from "../../src/adapters/claude-code/index.ts";
 import type { Query } from "../../src/query/index.ts";
@@ -226,6 +228,70 @@ describe("contextAt", () => {
     const q = await query(["image"]);
     expect(q.contextAt(key(q, 3), 99)).toBeUndefined();
     expect(q.contextAt({ log: 99, id: ID(3) }, 0)).toBeUndefined();
+  });
+});
+
+describe("turns", () => {
+  /** The context of a scenario's main Session at its last Call. */
+  async function lastContext(name: string) {
+    const q = await query([name]);
+    const [s] = q.listSessions().items;
+    if (s === undefined) throw new Error(`no session in ${name}`);
+    const last = q.listCalls(s).items.at(-1);
+    const ctx = last && q.contextAt(s, last.index);
+    if (ctx === undefined) throw new Error(`no context in ${name}`);
+    return ctx;
+  }
+  const prompts = (ctx: CallContext) => ctx.turns.map((t) => t.prompt?.preview.slice(0, 20));
+
+  test("cover the messages in order: each message Block is in one turn, and the turns add up", async () => {
+    const q = await query();
+    for (const s of q.listSessions().items.flatMap((m) => [m, ...(m.subagents ?? [])])) {
+      for (const call of q.listCalls(s).items) {
+        const ctx = q.contextAt(s, call.index);
+        if (ctx === undefined || !ctx.rebuilt) continue;
+        const messages = ctx.blocks.filter((b) => b.section === "messages");
+        expect(ctx.turns.map((t) => t.turn)).toEqual(ctx.turns.map((_, i) => i + 1));
+        expect(ctx.turns[0]?.start).toBe(messages[0]?.position);
+        expect(ctx.turns.reduce((n, t) => n + t.blocks, 0)).toBe(messages.length);
+        expect(ctx.turns.reduce((n, t) => n + t.tokens, 0)).toBe(ctx.sections.messages);
+        for (const t of ctx.turns) {
+          const own = messages.filter((b) => b.turn === t.turn);
+          expect(own.map((b) => b.position)).toEqual(own.map((_, i) => t.start + i));
+          expect(t.cachedTokens).toBe(own.reduce((n, b) => n + (b.inCachedPrefix ? (b.tokens ?? 0) : 0), 0));
+        }
+        expect(ctx.blocks.filter((b) => b.section !== "messages" && b.turn !== undefined)).toEqual([]);
+      }
+    }
+  });
+
+  test("a turn starts at each prompt; what the harness sends before the first prompt joins the first turn", async () => {
+    const ctx = await lastContext("resume");
+    expect(prompts(ctx)).toEqual(["Summarise @notes.txt", "How many list items ", "Use the Skill tool t"]);
+    const first = ctx.blocks.find((b) => b.section === "messages");
+    expect(first?.kind).toBe("reminder");
+    expect(first?.turn).toBe(1);
+    const second = ctx.turns[1];
+    expect(ctx.blocks[second?.start ?? -1]?.preview).toMatch(/^How many list items/);
+  });
+
+  test("a compaction summary is not a prompt: with the answer kept after it, it is a turn with no prompt", async () => {
+    const ctx = await lastContext("compaction");
+    expect(prompts(ctx)).toEqual([undefined, "Which two files did "]);
+    expect(ctx.blocks.find((b) => b.kind === "summary")?.turn).toBe(1);
+  });
+
+  test("a note the harness adds after a tool result does not start a turn", async () => {
+    const ctx = await lastContext("mcp-deferred");
+    expect(prompts(ctx)).toEqual(["Use the lookup_word "]);
+  });
+
+  test("a Session resumed on another model keeps its earlier prompts as turns", async () => {
+    const q = await query();
+    const s = key(q, 7);
+    const last = q.listCalls(s).items.at(-1);
+    const ctx = last && q.contextAt(s, last.index);
+    expect(ctx && prompts(ctx)).toEqual(["Without tools: a tra", "And if the trip took", "And if it left 10 mi"]);
   });
 });
 

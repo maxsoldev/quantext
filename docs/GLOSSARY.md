@@ -90,6 +90,13 @@ texts (a skill listing, the deferred tools, the environment) into one Block. The
 end to end; their tokens are estimates that add up to the Block's.
 _Avoid_: segment, sub-block, piece
 
+**Turn**:
+A prompt (a text the user typed, not a tool result, a reminder or a summary) and all the messages after it, up to
+the next prompt's lead-in: the Blocks the harness sends with that prompt after the model's last answer. What comes
+before the first prompt joins the first turn, unless the model answered there already (after a Compaction): that
+is a turn with no prompt. Turns are counted in one Call's context, from 1.
+_Avoid_: round, exchange, step
+
 **CallBlock**:
 A run of one Block at one position in the Calls of one lane, while its place and tokens stay the same: from a first
 Call to a last Call (or on to the lane's latest Call). The input of Call N is every CallBlock that covers N.

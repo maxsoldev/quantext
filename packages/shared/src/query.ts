@@ -194,6 +194,27 @@ export interface ContextBlock {
   parts?: ContextPart[];
   /** The Call (by index) whose Response this Block is: its answer, sent back as input from the next Call on. */
   fromResponseOf?: number;
+  /** The turn (`ContextTurn.turn`) that holds this Block; messages only. */
+  turn?: number;
+}
+
+/**
+ * One turn of the messages: a prompt (a text the user typed) and all that follows it, up to the lead-in of the next
+ * prompt (the Blocks the harness sends with that prompt, after the last answer). What comes before the first
+ * prompt joins the first turn, unless the model answered there already (after a Compaction): then it is a turn
+ * with no prompt.
+ */
+export interface ContextTurn {
+  /** 1 for the first turn of this context. */
+  turn: number;
+  /** The position of its first Block; its Blocks follow one another. */
+  start: number;
+  blocks: number;
+  tokens: number;
+  /** Its tokens in the Cached prefix. */
+  cachedTokens: number;
+  /** The user text the model answers: the last one before the answer. Absent for a turn with no prompt. */
+  prompt?: { position: number; preview: string };
 }
 
 /**
@@ -233,6 +254,8 @@ export interface CallContext extends Meta {
   categories: Record<ContextCategory, number>;
   /** Tokens by part label within each category, most first (estimates, except a Block's only part). */
   partTotals: PartTotal[];
+  /** The turns of the messages, in order; empty when the context is not rebuilt. */
+  turns: ContextTurn[];
   /** The input total of the Call: the blocks and framing add up to it. */
   totalTokens: number;
 }

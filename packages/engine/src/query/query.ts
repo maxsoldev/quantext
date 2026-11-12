@@ -64,6 +64,7 @@ import { markResponses, splitOutput } from "./output.ts";
 import { contextParts, partTotals } from "./parts.ts";
 import { previewOf } from "./preview.ts";
 import { API_VERSION } from "./sql.ts";
+import { markTurns } from "./turns.ts";
 import { cacheBreaksSql, installViews, toolOutputsSql } from "./views.ts";
 
 const LIFETIME_SORTS: Record<NonNullable<LifetimeOptions["sort"]>, string> = {
@@ -443,6 +444,7 @@ export function createQuery(options: QueryOptions): Query {
       sections,
       categories,
       partTotals: partTotals(blocks),
+      turns: rebuilt ? markTurns(blocks) : [],
       totalTokens:
         u === undefined
           ? blocks.reduce((n, b) => n + (b.tokens ?? 0), 0)
