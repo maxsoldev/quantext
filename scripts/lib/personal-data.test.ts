@@ -48,6 +48,12 @@ describe("scanText", () => {
     ]);
   });
 
+  test("finds Bedrock API keys (bearer tokens), not short ABSK words", () => {
+    const bedrock = j("AB", "SK", "QmVkcm9ja0FQSUtleS1leGFtcGxl", "+/=");
+    const text = [`AWS_BEARER_TOKEN_BEDROCK=${bedrock}`, "ABSKshort"].join("\n");
+    expect(scanText(text)).toEqual([{ line: 1, kind: "Bedrock API key", match: bedrock }]);
+  });
+
   test("finds home paths in escaped and encoded forms", () => {
     const text = [
       j('{"cwd":"C:', "\\\\Users\\\\erin\\\\code"),
