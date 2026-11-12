@@ -14,7 +14,10 @@ API and the viewer. It makes no network calls. In the repo: `pnpm qx <command>` 
 | `qx blocks <session> [--sort cost\|tokens\|calls] [--limit <n>]` | The Session's Blocks by lifetime cost (`blockLifetimes`) |
 | `qx sql "<select>" [--limit <n>] [--timeout <s>]` | One read-only statement over the tables and views (`docs/schema.md`, "Views"), in its own process, killed after `--timeout` seconds (default 30); at most 1000 rows by default |
 | `qx report` | What ingest could not read or map, the Calls' issues by kind, bytes waiting for a newline |
+| `qx serve [--root <dir>] [--port <n>] [--live while-viewer\|always] [--idle-minutes <n>] [--open]` | The engine: the HTTP API (`docs/api.md`) and the viewer on `127.0.0.1` (port 4747, else a free one; `--port`: that one or fail), live ingest. Takes the writer lock. When an engine of the same version already runs for this data folder, prints its URL and exits 0 (`--open`: opens it); another version: exit 1. Stops after `--idle-minutes` (default 10) with no viewer and no request, unless `--live always`, and on SIGINT or SIGTERM (ADR 25) |
 | `qx --version`, `qx --help` | |
+
+`qx serve` writes `engine.json` (port, pid, version, URL, start time) to the data folder while it runs.
 
 Every reading command opens the store read-only (no writer lock), so it also works while an engine writes.
 
@@ -28,7 +31,7 @@ Every reading command opens the store read-only (no writer lock), so it also wor
 | Code | Meaning |
 |---|---|
 | 0 | Done (`ingest`: also when some files could not be read; they are listed on stderr and in `qx report`) |
-| 1 | Failed: no store, a store of another schema version, the writer lock is held, a SQL error, a query over its time limit |
+| 1 | Failed: no store, a store of another schema version, the writer lock is held, a SQL error, a query over its time limit; `serve`: an engine of another version runs, or `--port` is taken |
 | 2 | Wrong use: unknown command or option, a bad number, an ambiguous session, a statement that is not a single read (by the text check or SQLite's authorizer), `sql` in demo mode |
 | 3 | Not found: no such session or call |
 
