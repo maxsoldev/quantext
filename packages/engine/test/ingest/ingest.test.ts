@@ -199,6 +199,75 @@ describe("an ingest that stops inside a file", () => {
   });
 });
 
+/** The store, counting the lookups that a parser restored from its snapshot makes (its lanes' open runs). */
+function countingStore(store: Store): { store: Store; restores: () => number } {
+  let openRuns = 0;
+  return {
+    restores: () => openRuns,
+    store: {
+      ...store,
+      log(path, harness, codec): LogStore {
+        const log = store.log(path, harness, codec);
+        return {
+          ...log,
+          lookup: {
+            ...log.lookup,
+            openRuns(sessionId, lane) {
+              openRuns++;
+              return log.lookup.openRuns(sessionId, lane);
+            },
+          },
+        };
+      },
+    },
+  };
+}
+
+describe("live ingest", () => {
+  test("keeps the parser of a log warm between passes instead of restoring it each time", async () => {
+    const root = tempDir("qx-root-");
+    const files = layout(root, "basic-tools");
+    const text = readFileSync(files.source);
+    const half = text.indexOf("\n", text.length / 2) + 1;
+    writeText(files.main, text.subarray(0, half));
+    const real = await openStore({ dataDir: tempDir("qx-data-") });
+    onCleanup(() => real.close());
+    const counting = countingStore(real);
+    const ingest = createIngest({ store: counting.store, root });
+    await ingest.ingestAll();
+    const before = counting.restores();
+    writeText(files.main, text);
+    await ingest.ingestAll();
+    expect(counting.restores()).toBe(before);
+    expect(graphOf(real, files.main)).toEqual(expectedGraph(text));
+  });
+
+  test("drops a warm parser whose write failed, so the next pass reads that batch again", async () => {
+    const root = tempDir("qx-root-");
+    const files = copyScenario(root, "compaction");
+    const real = await openStore({ dataDir: tempDir("qx-data-") });
+    onCleanup(() => real.close());
+    let writes = 0;
+    const flaky: Store = {
+      ...real,
+      log(path, harness, codec) {
+        const log = real.log(path, harness, codec);
+        return {
+          ...log,
+          write(batch) {
+            if (++writes === 4) throw new Error("disk busy");
+            return log.write(batch);
+          },
+        };
+      },
+    };
+    const ingest = createIngest({ store: flaky, root, batchBytes: 4096 });
+    expect((await ingest.ingestAll()).errors).toEqual([{ path: files.main, error: "ingest failed: disk busy" }]);
+    await ingest.ingestAll();
+    expect(graphOf(real, files.main)).toEqual(expectedScenario(files));
+  });
+});
+
 describe("a file that changes under the reader", () => {
   test("truncated below the read position is read again from the start", async () => {
     const s = await setup();

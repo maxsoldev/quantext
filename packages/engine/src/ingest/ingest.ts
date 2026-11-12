@@ -18,6 +18,15 @@ const HARNESS = "claude-code";
 export const DEFAULT_BATCH_BYTES = 4 * 1024 * 1024;
 export const DEFAULT_RESTORE_BYTES = 64 * 1024 * 1024;
 
+/** Logs whose parser stays in memory between passes (live sessions); others are restored from their snapshot. */
+const MAX_WARM_LOGS = 8;
+
+/** A log's parser kept between passes, and the bytes it has read since it was restored. */
+interface Warm {
+  parser?: ClaudeCodeParser;
+  sinceRestore: number;
+}
+
 interface Limits {
   batchBytes: number;
   restoreBytes: number;
@@ -80,6 +89,8 @@ export function createIngest(options: IngestOptions): Ingest {
     restoreBytes: options.restoreBytes ?? DEFAULT_RESTORE_BYTES,
   };
   const listeners = new Set<(event: CallsEvent) => void>();
+  /** The parsers of the logs read last, oldest first: a live log is read on without a restore. */
+  const warmParsers = new Map<string, Warm>();
   let queue: Promise<unknown> = Promise.resolve();
   /** One pass at a time: two passes over one log would read its new bytes twice. */
   const serial = <T>(work: () => Promise<T>): Promise<T> => {
@@ -120,7 +131,14 @@ export function createIngest(options: IngestOptions): Ingest {
           summary.stopped = true;
           break;
         }
-        await ingestLog(log, files, limits, summary, (result) => emit(files.main, result, summary), signal);
+        const warm = warmParsers.get(files.main) ?? { sinceRestore: 0 };
+        warmParsers.delete(files.main); // a failed pass drops it: its parser may be ahead of the store
+        await ingestLog(log, files, limits, summary, (result) => emit(files.main, result, summary), signal, warm);
+        if (warm.parser !== undefined) warmParsers.set(files.main, warm);
+        for (const old of warmParsers.keys()) {
+          if (warmParsers.size <= MAX_WARM_LOGS) break;
+          warmParsers.delete(old);
+        }
       } catch (error) {
         summary.errors.push({ path: files.main, error: `ingest failed: ${describe(error)}` });
         markFailed(log, files.main, describe(error));
@@ -168,6 +186,7 @@ async function ingestLog(
   summary: IngestSummary,
   emit: (result: WriteResult) => void,
   signal: AbortSignal | undefined,
+  warm: Warm,
 ): Promise<void> {
   const entries: Entry[] = [{ path: files.main, transcript: "main", kind: "transcript" }];
   for (const agent of files.subagents) {
@@ -180,26 +199,26 @@ async function ingestLog(
     if (await anyReplaced(entries, marks)) {
       log.reset();
       marks = new Map();
+      delete warm.parser;
+      warm.sinceRestore = 0;
     }
     let snapshot = log.snapshot() as ParserState | undefined;
-    let parser: ClaudeCodeParser | undefined;
-    const parserNow = () => (parser ??= createClaudeCodeParser(snapshot, { lookup: log.lookup }));
-    let sinceRestore = 0;
+    const parserNow = () => (warm.parser ??= createClaudeCodeParser(snapshot, { lookup: log.lookup }));
     /**
      * Write one delta with its mark and snapshot. After `restoreBytes` of input, drop the parser: the next one is
      * restored from the snapshot and the store, so the memory of a long file stays bounded.
      */
     const write = (delta: ReturnType<ClaudeCodeParser["push"]> | undefined, mark: FileMark, bytes = 0) => {
-      if (delta !== undefined && parser !== undefined) snapshot = parser.snapshot();
+      if (delta !== undefined && warm.parser !== undefined) snapshot = warm.parser.snapshot();
       const result = log.write({
         deltas: delta === undefined ? [] : [delta],
         files: [mark],
         ...(delta === undefined || snapshot === undefined ? {} : { snapshot: snapshot as unknown as JsonValue }),
       });
-      sinceRestore += bytes;
-      if (sinceRestore >= limits.restoreBytes) {
-        parser = undefined;
-        sinceRestore = 0;
+      warm.sinceRestore += bytes;
+      if (warm.sinceRestore >= limits.restoreBytes) {
+        delete warm.parser;
+        warm.sinceRestore = 0;
       }
       marks.set(mark.path, mark);
       summary.callsAdded += result.calls.reduce((n, c) => n + c.added.length, 0);
