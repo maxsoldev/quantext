@@ -14,7 +14,7 @@ reconnects after sleep or a network change and must not miss a Call.
   its limits (header size, header and request time, keep-alive) are set explicitly. Tests run on both.
 - **Routes** under `/api/v1/` map one to one to query methods (`docs/api.md`). Every parameter is named, typed
   and bounded; an unknown or repeated one is a 400. Errors are JSON (`ApiError`) and never repeat the input. A
-  Session hidden by demo mode is a 404, as is one that does not exist (`Query.hasSession`).
+  Session that does not exist is a 404 (`Query.hasSession`).
 - **Request checks**, in this order: the `Host` is `127.0.0.1:<port>` or `localhost:<port>` (403); GET or HEAD
   (405); an `Origin` must be this origin (403); a `Sec-Fetch-Site` other than `same-origin` or `none` is refused
   (403), except a top-level navigation to a viewer page (a link from slides may open the viewer, it cannot read
@@ -29,17 +29,17 @@ reconnects after sleep or a network change and must not miss a Call.
   injected styles), `img-src 'self' data: blob:` (images the viewer makes itself) and `frame-ancestors 'none'`; every
   other response `default-src 'none'; sandbox`. API: `no-store`. Files under `assets/`: immutable; others
   `no-cache`. A Block and its media: `no-cache` with an ETag of its log, hash and the engine version
-  (304 when it matches); in demo mode the tag also holds `demo` and the change cursor, so demo and normal answers
-  never share a cache entry. Media: PNG, JPEG, GIF and WebP inline, anything else as an `attachment` download.
+  (304 when it matches). Media: PNG, JPEG, GIF and WebP inline, anything else as an `attachment` download.
 - **Slow routes off the event loop.** `blocks` and `tool-outputs` price every Block over every Call of a Session
-  (about 0.8 s at 2,000 Calls); they run in a worker thread with its own read-only connection and the same query
-  options (now near-linear, ADR 26). One request runs at a time; identical ones share it; at most 5 wait or run
+  (about 0.8 s at 2,000 Calls); they run in a worker thread with its own read-only connection (now near-linear,
+  ADR 26). One request runs at a time; identical ones share it; at most 5 wait or run
   (else 503 `busy`); one over 30 s fails with 503 `timeout` and its computation is stopped; the socket's idle
   limit is off while a request waits, so `/health` and the stream keep answering (guarded: p95 under 200 ms, also during a catch-up, whose
   batches are sized to about 40 ms).
 - **Static files** come from one folder: only regular files whose real path (symbolic links resolved) is inside
   it, no dot files, no listing; a path with no extension that is no file is a viewer page (`index.html`).
-- **Event stream** (`GET /api/v1/events`, SSE). Each ingest event passes `Query.visibleEvent`, then goes into a
+- **Event stream** (`GET /api/v1/events`, SSE). Each ingest event passes `Query.publicEvent` (Session keys and projects, not
+  the harness's folders), then goes into a
   ring of the last 1024 events and to every stream. Event ids are `<cursor>.<n>` (the n-th event of one write);
   `ready` and `resync` have the id `<cursor>`, meaning all of it. A client resumes with `Last-Event-ID` or
   `?cursor=`: what the ring holds after it is replayed, then `ready`; when the ring no longer reaches back (or the

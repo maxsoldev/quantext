@@ -226,7 +226,7 @@ export function createEventStream(options: EventStreamOptions): EventStream {
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
       });
-      // A write may change the store without an event this stream shows (a hidden project, a scan).
+      // A write may change the store without an event this stream shows (memory of no known project, a scan).
       latest = Math.max(latest, query.changeCursor());
       clients.set(res, { live: false });
       const gone = () => clients.delete(res);

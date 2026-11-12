@@ -11,7 +11,7 @@ an engine nobody uses must not stay.
 ## Decision
 
 - **`qx serve`** is the engine: it opens the store (writer lock), opens a read-only connection for the query
-  layer (with demo mode when asked), listens, writes `engine.json`, catches up (`ingestAll`), then watches the
+  layer, listens, writes `engine.json`, catches up (`ingestAll`), then watches the
   transcripts. Ingest events go to the event stream (ADR 24). Listening comes before the catch-up, so that a
   first run over a large corpus answers `/health` at once and the viewer sees the Calls arrive.
 - **Port 4747** when it is free, else any free port. `--port` asks for one port and fails when it is taken. The

@@ -11,10 +11,10 @@ All are GET (or HEAD). `:log` and `:id` are a Session's key (`SessionKey`); `:n`
 
 | Route | Query method | Parameters |
 |---|---|---|
-| `/health` | | `Health`: `ok`, `version`, `apiVersion`, `pid`, `startedAt`, `demo`, `dataDir` (not in demo mode) |
-| `/api/v1/status` | | `EngineStatus`: `engine` (`version`, `pid`, `startedAt`, `demo`), `ingest` (`phase`: `catching-up`, `live`, `stopping`; `logsDone`, `logsTotal`, `bytesDone`, `bytesTotal` of the pass in progress or the last one, its `startedAt`, `lastError`: in demo mode only that one failed), `streams` |
+| `/health` | | `Health`: `ok`, `version`, `apiVersion`, `pid`, `startedAt`, `dataDir` |
+| `/api/v1/status` | | `EngineStatus`: `engine` (`version`, `pid`, `startedAt`), `ingest` (`phase`: `catching-up`, `live`, `stopping`; `logsDone`, `logsTotal`, `bytesDone`, `bytesTotal` of the pass in progress or the last one, its `startedAt`, `lastError`), `streams` |
 | `/api/v1/sessions` | `listSessions` | `project`, `search` (≤ 200), `sort` (`ended` `started` `cost` `calls`), `order` (`asc` `desc`), `changedSince`, `limit` (1–500, default 50), `offset` |
-| `/api/v1/projects` | `listProjects` | `Items<ProjectSummary>`: `project` (as Sessions show it; its folder name in demo mode), `sessions`, `ended`, latest first |
+| `/api/v1/projects` | `listProjects` | `Items<ProjectSummary>`: `project` (as Sessions show it), `sessions`, `ended`, latest first |
 | `/api/v1/session-keys` | `findSessions` | `id` (an id or its prefix) |
 | `/api/v1/sessions/:log/:id` | `getSession` | |
 | `/api/v1/sessions/:log/:id/calls` | `listCalls` | `lane`, `afterIndex`, `limit` (1–5000) |
@@ -31,12 +31,11 @@ All are GET (or HEAD). `:log` and `:id` are a Session's key (`SessionKey`); `:n`
 | `/api/v1/blocks/:log/:hash/media/:media` | `getMedia` | the bytes; PNG, JPEG, GIF, WebP inline, others as a download |
 | `/api/v1/memory` | `projectMemory` | `project` (needed) |
 | `/api/v1/report` | `ingestReport` | |
-| `/api/v1/events` | `visibleEvent` | SSE, below; `cursor` |
+| `/api/v1/events` | `publicEvent` | SSE, below; `cursor` |
 | anything else | | the viewer's files; a path with no extension gets `index.html` |
 
 **Errors** are JSON (`ApiError`): `{ apiVersion, error: { status, code, message } }`. 400 `bad-request`: an
-unknown, repeated, mistyped or out-of-range parameter; 404 `not-found`: no such route, Session (also one hidden by
-demo mode), Call, Block or media; 403 `forbidden-host`, `forbidden-origin`, `forbidden-site`; 405
+unknown, repeated, mistyped or out-of-range parameter; 404 `not-found`: no such route, Session, Call, Block or media; 403 `forbidden-host`, `forbidden-origin`, `forbidden-site`; 405
 `method-not-allowed`; 413, 414, 431: a body, a long URL, large headers; 503 `too-many-streams`, `busy` (too many slow queries wait), `timeout` (a query over 30 s), `stopping`.
 
 ## The event stream
@@ -45,7 +44,7 @@ demo mode), Call, Block or media; 403 `forbidden-host`, `forbidden-origin`, `for
 
 | Event | id | data |
 |---|---|---|
-| `calls` | `<cursor>.<n>` | `VisibleEvent` of kind `calls`: `cursor`, `session`, `added` (`id`, `index`), `updated`. One per Session each write changed; both lists empty when only the Session changed (its end, title, events), so the stream's cursor keeps up with the store's |
+| `calls` | `<cursor>.<n>` | `PublicEvent` of kind `calls`: `cursor`, `session`, `added` (`id`, `index`), `updated`. One per Session each write changed; both lists empty when only the Session changed (its end, title, events), so the stream's cursor keeps up with the store's |
 | `memory` | `<cursor>.<n>` | `{ kind, cursor, projects }` |
 | `log-removed` | `<cursor>.<n>` | `{ kind, cursor, logId }` (its Sessions are read again from the start) |
 | `resync` | `<cursor>` | `SseResync`: `cursor`, `since`. Read `/api/v1/sessions?changedSince=<since>` again |
@@ -55,4 +54,4 @@ demo mode), Call, Block or media; 403 `forbidden-host`, `forbidden-origin`, `for
 `<cursor>` is the store's change cursor after the write, `<n>` the event's place among the events of that write.
 A client that comes back (the browser sends `Last-Event-ID`, or `?cursor=<id>`) gets every event after that id
 that the engine still holds, else `resync`. `: ping` comes every 15 s. A client that does not read is dropped;
-it reconnects and resumes. Demo mode applies: an event of a hidden project is not sent.
+it reconnects and resumes.
