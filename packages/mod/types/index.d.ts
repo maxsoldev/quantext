@@ -10,6 +10,8 @@ export type Live = {
   /** When the last main-loop call ended (ms since the epoch), and its input size; 0 before the first. */
   lastEndAt: number;
   lastCtx: number;
+  /** The model of the last main-loop call, to price a cache re-write; absent before the first. */
+  model?: string;
   /** Whether the large-context nudge was shown since the last compaction or /clear. */
   bigCtxNudged: boolean;
 };

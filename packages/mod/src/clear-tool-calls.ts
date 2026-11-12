@@ -1,28 +1,25 @@
 /**
- * `/clear-tool-calls [keep N]`: replace the input of old tool calls with a short stub, so the model's own Write
- * contents, Bash heredocs and Agent briefs leave the context. Each call keeps its name and id, so it still pairs
- * with its result. Deterministic: no model call. It runs as `/compact tool-calls keep N`.
+ * The calls half of `/clear-tools`: replace the input of old tool calls with a short stub, so the model's own
+ * Write contents, Bash heredocs and Agent briefs leave the context. Each call keeps its name and id, so it still
+ * pairs with its result. Deterministic: no model call (`clear-tools.ts`).
  */
 import type { SessionMessage, ToolUseSummary } from "claude-code";
-import { tokens } from "./format.ts";
+import { approx } from "./format.ts";
 
 /** Starts every stub, so a second run sees which inputs are cleared already. */
 export const CLEARED_INPUT = "[Old tool input cleared";
 
-/** Inputs up to this size (~200 tokens) stay: a stub would save little. */
-const SMALL_INPUT_CHARS = 800;
+/** Inputs up to this size (~75 tokens) stay: a stub would save little. */
+const SMALL_INPUT_CHARS = 300;
 /** A field up to this size stays in the stub input (a path, a name, a short description). */
-const SMALL_FIELD_CHARS = 200;
+const SMALL_FIELD_CHARS = 80;
+/** A stub must save at least this many chars, or the input stays (one of many short fields grows). */
+const MIN_SAVED_CHARS = 100;
 const HEAD_CHARS = 60;
 
 const sizeOf = (v: unknown): number => JSON.stringify(v)?.length ?? 0;
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const lineCount = (s: string): number => (s === "" ? 0 : s.split("\n").length);
-/** Tokens at ~4 characters each: `850`, `4.2k`, `12k`. */
-const approx = (chars: number): string => {
-  const n = Math.round(chars / 4);
-  return n < 1000 ? `${n}` : n < 10_000 ? `${(n / 1000).toFixed(1)}k` : tokens(n);
-};
 const head = (s: string): string => {
   const first = s.split("\n")[0] ?? "";
   return first.slice(0, HEAD_CHARS);
@@ -72,7 +69,7 @@ const isStub = (u: ToolUseSummary): boolean =>
   Object.values(u.input).some((v) => typeof v === "string" && v.startsWith(CLEARED_INPUT));
 
 /**
- * Stubs the input of every tool call but the last `keep`; small inputs stay. A changed message loses its engine
+ * Stubs the input of every tool call but the last `keep`; small inputs, and those a stub would not shrink, stay. A changed message loses its engine
  * handle and is rebuilt from role, text and tool blocks. Calls stubbed already do not count toward `keep`.
  */
 export function clearToolCalls(messages: readonly SessionMessage[], keep = 0) {
@@ -95,6 +92,7 @@ export function clearToolCalls(messages: readonly SessionMessage[], keep = 0) {
           const size = sizeOf(u.input);
           if (size <= SMALL_INPUT_CHARS) return u;
           const input = stubInput(u.tool, u.input);
+          if (size - sizeOf(input) < MIN_SAVED_CHARS) return u;
           cleared++;
           chars += size - sizeOf(input);
           return { ...u, input };

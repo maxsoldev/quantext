@@ -1,7 +1,6 @@
 import type { SessionMessage } from "claude-code";
-import { expect, mock, test } from "claude-code/testing";
+import { expect, test } from "claude-code/testing";
 import { clearToolCalls } from "../src/clear-tool-calls.ts";
-import { command, toasts } from "./kit.ts";
 
 const call = (id: string, tool: string, input: Record<string, unknown>): SessionMessage => ({
   role: "assistant",
@@ -78,55 +77,23 @@ test("small inputs, the last N calls and earlier stubs stay as they are", () => 
   expect(again.messages[0]).toBe(once.messages[0]);
 });
 
-const chat: SessionMessage[] = [
-  { role: "user", text: "write it", toolUses: [], handle: "p" },
-  call("1", "Write", { file_path: "a.md", content: "a".repeat(8_000) }),
-  { ...result("1"), toolResults: [{ tool_use_id: "1", text: "o".repeat(4_000), isError: false }] },
-];
-
-test("/clear-tool-calls and /clear-tools queue their /compact once the command has returned", async ($, on) => {
-  const clock = mock.clock(on, { now: 1_000_000 });
-  const queued: string[] = [];
-  on("command.run", { command: "compact" }, (_$, e) => {
-    queued.push(e.args);
-    return { value: { text: "" } } as never;
+test("inputs over 300 chars get a stub; fields up to 80 chars stay in it", () => {
+  const short = call("1", "Bash", { command: `echo ${"s".repeat(240)}`, description: "short" });
+  const long = { command: `pnpm build ${"b".repeat(400)}`, description: "Build the plugin" };
+  const r = clearToolCalls([short, call("2", "Bash", long)]);
+  expect(r.messages[0]).toBe(short);
+  expect(inputOf(r.messages[1])).toEqual({
+    command: `[Old tool input cleared: Bash: pnpm build ${"b".repeat(49)} … (115 tokens)]`,
+    description: "Build the plugin",
   });
-  expect((await $.command.run(command("clear-tool-calls", "keep 2"))).text).toBe(
-    "Clearing tool calls, keeping the last 2…",
-  );
-  expect((await $.command.run(command("clear-tools", ""))).text).toBe("Clearing tool calls and outputs…");
-  expect((await $.command.run(command("clear-tool-calls", "all"))).text).toBe("Usage: /clear-tool-calls [keep N]");
-  await clock.advance(1);
-  expect(queued).toEqual(["tool-calls keep 2", "tools keep 0"]);
+  expect(r.cleared).toBe(1);
 });
 
-test("/compact tool-calls stubs old tool inputs in place of a summary; tools does inputs and outputs", async ($, on) => {
-  mock.clock(on, { now: 1_000_000 });
-  const seen = toasts(on);
-  let summarised = false;
-  on("session.compact", () => {
-    summarised = true;
-    return { messages: [] };
-  });
-  const calls = await $.session.compact({ trigger: "manual", instructions: "tool-calls", messages: chat } as never);
-  expect(summarised).toBe(false);
-  expect(calls.messages?.[1]?.toolUses[0]?.input.content).toBe("[Old tool input cleared: Write a.md (2.0k tokens)]");
-  expect(calls.messages?.[2]?.toolResults?.[0]?.text).toBe("o".repeat(4_000));
-  const both = await $.session.compact({ trigger: "manual", instructions: "tools", messages: chat } as never);
-  expect(both.messages?.[1]?.toolUses[0]?.input.content).toBe("[Old tool input cleared: Write a.md (2.0k tokens)]");
-  expect(both.messages?.[2]?.toolResults?.[0]?.text).toBe("[Old tool result content cleared]");
-  expect(seen).toEqual(["Cleared 1 tool calls (~2k tokens)", "Cleared 1 tool calls and 1 tool outputs (~3k tokens)"]);
-});
-
-test("a failed clear-tool-calls skips the compaction rather than pay for a summary", async ($, on) => {
-  mock.clock(on, { now: 1_000_000 });
-  let summarised = false;
-  on("session.compact", () => {
-    summarised = true;
-    return { messages: [] };
-  });
-  const broken = { role: "assistant", text: "", handle: "b" }; // no toolUses: it throws
-  const r = await $.session.compact({ trigger: "manual", instructions: "tool-calls", messages: [broken] } as never);
-  expect(summarised).toBe(false);
-  expect(r).toEqual({ skip: "quantext: clearing tool calls failed" });
+test("an input the stub would not make clearly smaller stays as it is", () => {
+  const fields = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`field${i}`, "f".repeat(40)]));
+  const m = call("1", "mcp__x__y", fields);
+  const r = clearToolCalls([m]);
+  expect(r.messages[0]).toBe(m);
+  expect(r.cleared).toBe(0);
+  expect(r.chars).toBe(0);
 });
