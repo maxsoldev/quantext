@@ -17,6 +17,7 @@ import { SplitBar } from "../ui/SplitBar.tsx";
 import { useLoad } from "../ui/useLoad.ts";
 import { useWindow } from "../ui/useWindow.ts";
 import { mergeSessions } from "./merge.ts";
+import { costSplit } from "./totals.ts";
 
 type ListRoute = Extract<Route, { page: "sessions" }>;
 
@@ -284,14 +285,20 @@ function Row({ s, index, sort, now }: { s: SessionSummary; index: number; sort: 
   const issues = Object.entries(s.issues).filter(([, n]) => (n ?? 0) > 0);
   const issueCount = issues.reduce((a, [, n]) => a + (n ?? 0), 0);
   const rl = REQUEST_LOG[s.requestLog];
+  const all = s.totals.all;
   const costParts = {
-    cacheRead: s.cost.cacheReadUsd,
-    cacheWrite: s.cost.cacheWriteUsd,
-    input: s.cost.inputUsd,
-    output: s.cost.outputUsd,
+    cacheRead: all.cost.cacheReadUsd,
+    cacheWrite: all.cost.cacheWriteUsd,
+    input: all.cost.inputUsd,
+    output: all.cost.outputUsd,
   };
+  const split = costSplit(s, s.subagents ?? [], 3);
   const unpriced =
-    s.unpricedCalls > 0 ? `\n${s.unpricedCalls} calls have no list price: their cost is not counted.` : "";
+    all.unpricedCalls > 0 ? `\n${all.unpricedCalls} calls have no list price: their cost is not counted.` : "";
+  const costTip =
+    split.lines.length > 0
+      ? `${usd(split.total)} with its subagents, at list prices.\n${split.lines.join("\n")}${unpriced}`
+      : `${usd(split.total)} at list prices: the session has no subagents.${unpriced}`;
   return (
     <tr className="tr" data-row={index} data-testid="session-row" aria-rowindex={index + 2}>
       <td className="cell-session">
@@ -334,9 +341,11 @@ function Row({ s, index, sort, now }: { s: SessionSummary; index: number; sort: 
         {s.calls.toLocaleString("en-US")}
       </td>
       <td className="right cell-cost">
-        <span className="num">{usd(s.cost.totalUsd)}</span>
+        <button type="button" className="tip-anchor num" data-testid="session-cost" data-tip={costTip}>
+          {usd(split.total)}
+        </button>
         <SplitBar
-          title={`Cost by part, at list prices.${unpriced}`}
+          title={`Cost by part${split.lines.length > 0 ? ", with the subagents" : ""}, at list prices.${unpriced}`}
           slices={CACHE_PARTS.map((p) => ({
             key: p.key,
             label: p.label,

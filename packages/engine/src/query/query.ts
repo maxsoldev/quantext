@@ -64,6 +64,7 @@ import { markResponses, splitOutput } from "./output.ts";
 import { contextParts, partTotals } from "./parts.ts";
 import { previewOf } from "./preview.ts";
 import { API_VERSION } from "./sql.ts";
+import { SUB_JOIN, subtreeSql, TOTAL_COST, totalsOf } from "./totals.ts";
 import { markTurns } from "./turns.ts";
 import { cacheBreaksSql, installViews, toolOutputsSql } from "./views.ts";
 
@@ -137,7 +138,7 @@ const BLOCK_OF_LOG = `SELECT b.*, k.content FROM log_blocks b JOIN blocks k ON k
 const SORTS: Record<NonNullable<SessionFilter["sort"]>, string> = {
   ended: "coalesce(ended, started)",
   started: "started",
-  cost: "cost_total_usd",
+  cost: TOTAL_COST,
   calls: "calls",
 };
 
@@ -196,7 +197,7 @@ export function createQuery(options: QueryOptions): Query {
     return out;
   };
   const summary = (r: SqlRow, issues: Map<string, SessionSummary["issues"]>): SessionSummary => {
-    const s: SessionSummary = {
+    const own: Omit<SessionSummary, "totals"> = {
       log: Number(r.log),
       id: String(r.id),
       harness: String(r.harness),
@@ -221,6 +222,7 @@ export function createQuery(options: QueryOptions): Query {
       issues: issues.get(`${r.log}\0${r.id}`) ?? {},
       live: r.ended !== null && now() - Date.parse(String(r.ended)) <= liveWindowMs,
     };
+    const s: SessionSummary = { ...own, totals: totalsOf(own, r) };
     const opt = (field: keyof SessionSummary, value: SqlValue | undefined) => {
       if (value !== null && value !== undefined) (s as unknown as Record<string, unknown>)[field] = String(value);
     };
@@ -249,10 +251,11 @@ export function createQuery(options: QueryOptions): Query {
     const logs = [...new Set(keys.map((k) => k.log))];
     const rows = db
       .prepare(
-        `SELECT * FROM v_sessions WHERE parent_id IS NOT NULL AND log IN (${logs.map(() => "?").join(",")})
+        `${subtreeSql(`v.parent_id IS NOT NULL AND v.log IN (${logs.map(() => "?").join(",")})`)}
+         SELECT * FROM v_sessions v ${SUB_JOIN} WHERE parent_id IS NOT NULL AND log IN (${logs.map(() => "?").join(",")})
          ORDER BY started, id`,
       )
-      .all(...logs);
+      .all(...logs, ...logs);
     const issues = issuesOf(logs);
     return rows.map((r) => summary(r, issues));
   };
@@ -651,10 +654,11 @@ export function createQuery(options: QueryOptions): Query {
       // One pass over the view: the total comes with the page (a page past the end needs a count of its own).
       const rows = db
         .prepare(
-          `SELECT *, count(*) OVER () AS total_rows FROM v_sessions v WHERE ${clause}
+          `${subtreeSql(clause)}
+           SELECT *, count(*) OVER () AS total_rows FROM v_sessions v ${SUB_JOIN} WHERE ${clause}
            ORDER BY ${sort} IS NULL, ${sort} ${order}, log, id LIMIT ? OFFSET ?`,
         )
-        .all(...params, limit, offset);
+        .all(...params, ...params, limit, offset);
       const total =
         rows[0] !== undefined
           ? Number(rows[0].total_rows)
@@ -673,7 +677,8 @@ export function createQuery(options: QueryOptions): Query {
         .map((r) => ({ log: Number(r.log), id: String(r.id) }));
     },
     getSession(key) {
-      const row = q("SELECT * FROM v_sessions WHERE log = ? AND id = ?").get(key.log, key.id);
+      const row = q(`${subtreeSql("v.log = ? AND v.id = ?")} SELECT * FROM v_sessions v ${SUB_JOIN}
+        WHERE log = ? AND id = ?`).get(key.log, key.id, key.log, key.id);
       if (row === undefined) return undefined;
       const issues = issuesOf([key.log]);
       const lanes: LaneSummary[] = q(
@@ -691,8 +696,9 @@ export function createQuery(options: QueryOptions): Query {
       const events = q("SELECT * FROM session_events WHERE log = ? AND session_id = ? ORDER BY ts, id")
         .all(key.log, key.id)
         .map(eventFromRow);
-      const subagents = q("SELECT * FROM v_sessions WHERE log = ? AND parent_id = ? ORDER BY started, id")
-        .all(key.log, key.id)
+      const subagents = q(`${subtreeSql("v.log = ? AND v.parent_id = ?")} SELECT * FROM v_sessions v ${SUB_JOIN}
+        WHERE log = ? AND parent_id = ? ORDER BY started, id`)
+        .all(key.log, key.id, key.log, key.id)
         .map((r) => summary(r, issues));
       return {
         ...meta,

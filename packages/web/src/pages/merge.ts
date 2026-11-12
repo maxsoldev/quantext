@@ -5,7 +5,7 @@ import type { SortKey } from "../route.ts";
 const KEY: Record<SortKey, (s: SessionSummary) => string | number | undefined> = {
   ended: (s) => s.ended ?? s.started,
   started: (s) => s.started,
-  cost: (s) => s.cost.totalUsd,
+  cost: (s) => s.totals.all.cost.totalUsd,
   calls: (s) => s.calls,
 };
 

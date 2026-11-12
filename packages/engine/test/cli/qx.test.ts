@@ -93,6 +93,7 @@ describe("qx", () => {
         "requestLog",
         "issues",
         "live",
+        "totals",
       ].sort(),
     );
   });
