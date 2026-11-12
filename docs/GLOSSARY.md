@@ -73,8 +73,9 @@ _Avoid_: cache hit, warm part
 ## Numbers
 
 **Token basis**:
-How a token number was found: `exact` (from Usage) or `estimate` (from a tokenizer, used only to split an exact
-total).
+How a token number was found: `exact` (from Usage), `derived` (computed from exact counters, such as the change of a
+running total, when a Call's own Usage is not logged) or `estimate` (from an estimator, used only to split an exact
+or derived total).
 _Avoid_: precision, confidence, source
 
 **Lifetime cost**:
