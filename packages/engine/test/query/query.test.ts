@@ -194,6 +194,47 @@ describe("contextAt", () => {
   });
 });
 
+describe("responseAt", () => {
+  test("gives the last call's answer: its text, why it stopped, its output tokens and their cost", async () => {
+    const q = await query(["basic-tools"]);
+    const s = key(q, 1);
+    const last = q.listCalls(s).items.at(-1);
+    const answer = mainRows("basic-tools")
+      .filter((r) => r.type === "assistant")
+      .at(-1) as { message: { content: { text: string }[]; stop_reason: string; usage: { output_tokens: number } } };
+    const r = q.responseAt(s, last?.index ?? -1);
+    expect(r).toMatchObject({
+      answered: true,
+      stopReason: answer.message.stop_reason,
+      outputTokens: answer.message.usage.output_tokens,
+      outputUsd: last?.cost?.outputUsd,
+    });
+    const text = r?.blocks.find((b) => b.kind === "assistant");
+    expect(text?.category).toBe("assistant");
+    expect(q.getBlock(text?.hash ?? "", s.log)?.text).toBe(answer.message.content[0]?.text);
+  });
+
+  test("names a tool call of the answer by its tool use id and tool, and marks omitted reasoning", async () => {
+    const q = await query(["basic-tools"]);
+    const s = key(q, 1);
+    const r = q
+      .listCalls(s)
+      .items.map((c) => q.responseAt(s, c.index))
+      .find((x) => x?.blocks[0]?.kind === "reasoning");
+    expect(r?.blocks.map((b) => [b.kind, b.reasoning ?? b.toolCall?.name ?? ""])).toEqual([
+      ["reasoning", "omitted"],
+      ["assistant", ""],
+      ["tool-call", "Read"],
+    ]);
+    expect(r?.blocks[2]?.toolCall?.id).toBe(r?.call.toolCalls[0]?.id);
+  });
+
+  test("is undefined for a Call or Session that does not exist", async () => {
+    const q = await query(["image"]);
+    expect(q.responseAt(key(q, 3), 99)).toBeUndefined();
+  });
+});
+
 describe("contextDiff", () => {
   test("the lane's first Call adds every Block; a later one adds the new turn and keeps the cached prefix", async () => {
     const q = await query(["basic-tools"]);

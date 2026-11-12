@@ -29,6 +29,7 @@ describe("the JSON routes", () => {
       ["/calls/3", query.getCall(key, 3)],
       ["/calls/3/context", query.contextAt(key, 3)],
       ["/calls/3/diff", query.contextDiff(key, 3)],
+      ["/calls/3/response", query.responseAt(key, 3)],
       ["/timeline", query.callTimeline(key)],
       ["/tool-calls", query.toolCalls(key)],
       ["/tool-outputs?sort=tokens&limit=2", query.toolOutputs(key, { sort: "tokens", limit: 2 })],
@@ -143,6 +144,7 @@ describe("bad requests", () => {
     }
     expect((await at("/calls/999")).status).toBe(404);
     expect((await at("/calls/999/context")).status).toBe(404);
+    expect((await at("/calls/999/response")).status).toBe(404);
   });
 });
 

@@ -243,6 +243,38 @@ export interface BlockDetail extends Meta {
   raw: { content: JsonValue };
 }
 
+/** One Block of a Call's Response, for display; `getBlock` gives all of its text. */
+export interface ResponseEntry {
+  hash: string;
+  kind: BlockKind;
+  category: ContextCategory;
+  source: BlockSource;
+  /** Reasoning: whether the log holds its text (`full`), only a signature (`omitted`), or an encrypted form. */
+  reasoning?: "full" | "omitted" | "redacted";
+  /** A tool call: its tool use id (a `ToolCallSummary.id`) and tool. */
+  toolCall?: { id: string; name: string };
+  /** The display text, cut to a preview. */
+  preview: string;
+  chars: number;
+  truncated: boolean;
+}
+
+/** What the model answered on Call N: the Blocks of its output in order, why it stopped, and what it cost. */
+export interface CallResponseDetail extends Meta {
+  session: SessionKey;
+  call: CallSummary;
+  /** False while the log holds no answer for the Call (it is still being written, or was never logged). */
+  answered: boolean;
+  blocks: ResponseEntry[];
+  /** In the provider's words: `end_turn`, `tool_use`, `max_tokens`, … */
+  stopReason?: string;
+  /** From the Call's Usage (absent without it); the reasoning part when the provider reports it. */
+  outputTokens?: number;
+  reasoningOutputTokens?: number;
+  /** The output part of the Call's cost. */
+  outputUsd?: number;
+}
+
 export interface CallDetail extends Meta {
   call: CallSummary;
   /** Not stable: the parameters as the provider names them (for Anthropic: `thinking`, `betas`). */

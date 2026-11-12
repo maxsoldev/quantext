@@ -13,6 +13,7 @@ import type {
   CallIssue,
   CallListOptions,
   CallParams,
+  CallResponseDetail,
   CallSummary,
   CompactionDetail,
   ContextBlock,
@@ -31,6 +32,7 @@ import type {
   QueryReport,
   RequestLog,
   RequestSection,
+  ResponseEntry,
   SessionDetail,
   SessionFilter,
   SessionKey,
@@ -102,6 +104,8 @@ export interface Query {
   contextAt(key: SessionKey, index: number): CallContext | undefined;
   /** What changed at Call `index` against the previous Call of its lane. */
   contextDiff(key: SessionKey, index: number): ContextDiff | undefined;
+  /** What the model answered on Call `index`: its Response Blocks in order, with output tokens and cost. */
+  responseAt(key: SessionKey, index: number): CallResponseDetail | undefined;
   getBlock(hash: string, log: number): BlockDetail | undefined;
   /** The bytes of an image or document that Block `block` of log `log` names (`BlockDetail.media`). */
   getMedia(block: string, log: number, hash: string): { mediaType: string; bytes: Uint8Array } | undefined;
@@ -120,6 +124,10 @@ export interface Query {
   /** A change event as the API sends it, without the harness's folders: null for memory of no known project. */
   publicEvent(event: IngestEvent): PublicEvent | null;
 }
+
+/** One Block of a log, with its kind, source and content. */
+const BLOCK_OF_LOG = `SELECT b.*, k.content FROM log_blocks b JOIN blocks k ON k.hash = b.hash
+  WHERE b.log = ? AND b.hash = ?`;
 
 const SORTS: Record<NonNullable<SessionFilter["sort"]>, string> = {
   ended: "coalesce(ended, started)",
@@ -300,6 +308,41 @@ export function createQuery(options: QueryOptions): Query {
     WHERE r.log = ? AND r.session_id = ? AND r.lane = ? AND r.first_call <= ?
       AND (r.last_call IS NULL OR r.last_call >= ?)
     ORDER BY r.position`;
+  const responseAt = (key: SessionKey, index: number): CallResponseDetail | undefined => {
+    const row = hasSession(key) ? callRow(key, index) : undefined;
+    if (row === undefined) return undefined;
+    const tools = toolUsesOf(key).get(String(row.id)) ?? [];
+    const call = callSummary(row, tools);
+    const response = callFromRow(row).response;
+    const blocks = (response?.blocks ?? []).flatMap((b): ResponseEntry[] => {
+      const r = q(BLOCK_OF_LOG).get(key.log, b.hash);
+      if (r === undefined) throw new Error(`the response of call ${index} names Block ${b.hash}, not in the store`);
+      const source = sourceOf(r);
+      const entry: ResponseEntry = {
+        hash: b.hash,
+        kind: b.kind,
+        category: categoryOf(b.kind, "messages", source),
+        source,
+        ...previewOf(textOf(r.content), previewChars),
+      };
+      if (b.reasoning !== undefined) entry.reasoning = b.reasoning;
+      const tool = b.toolUseId === undefined ? undefined : tools.find((t) => t.id === b.toolUseId);
+      if (tool !== undefined) entry.toolCall = tool;
+      return [entry];
+    });
+    const out: CallResponseDetail = {
+      ...meta,
+      session: { log: key.log, id: key.id },
+      call,
+      answered: blocks.length > 0,
+      blocks,
+    };
+    if (response?.stopReason !== undefined) out.stopReason = response.stopReason;
+    if (call.usage !== undefined) out.outputTokens = call.usage.outputTokens;
+    if (call.usage?.reasoningOutputTokens !== undefined) out.reasoningOutputTokens = call.usage.reasoningOutputTokens;
+    if (call.cost !== undefined) out.outputUsd = call.cost.outputUsd;
+    return out;
+  };
   const context = (key: SessionKey, index: number): CallContext | undefined => {
     const row = hasSession(key) ? callRow(key, index) : undefined;
     if (row === undefined) return undefined;
@@ -658,6 +701,7 @@ export function createQuery(options: QueryOptions): Query {
       return { ...meta, items: hasSession(key) ? timeline(key) : [] };
     },
     contextAt: context,
+    responseAt,
     contextDiff(key, index) {
       const now = context(key, index);
       if (now === undefined) return undefined;
@@ -696,9 +740,7 @@ export function createQuery(options: QueryOptions): Query {
       return diff;
     },
     getBlock(hash, log) {
-      const r = q(
-        `SELECT b.*, k.content FROM log_blocks b JOIN blocks k ON k.hash = b.hash WHERE b.log = ? AND b.hash = ?`,
-      ).get(log, hash);
+      const r = q(BLOCK_OF_LOG).get(log, hash);
       if (r === undefined) return undefined;
       const content = jsonColumn(r.content);
       const refs = [...String(r.content).matchAll(/"\$media":"([0-9a-f]+)"/g)].map((m) => m[1] ?? "");

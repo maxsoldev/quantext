@@ -21,6 +21,7 @@ All are GET (or HEAD). `:log` and `:id` are a Session's key (`SessionKey`); `:n`
 | `/api/v1/sessions/:log/:id/calls/:n` | `getCall` | |
 | `/api/v1/sessions/:log/:id/calls/:n/context` | `contextAt` | |
 | `/api/v1/sessions/:log/:id/calls/:n/diff` | `contextDiff` | |
+| `/api/v1/sessions/:log/:id/calls/:n/response` | `responseAt` | `CallResponseDetail`: what the model answered on Call `n`. `answered` (false while the log holds no answer), `blocks` in order (`hash`, `kind`, `category`, `source`, `reasoning`: `full` `omitted` `redacted`, `toolCall`: `id`, `name`; `preview`, `chars`, `truncated`; the full text from `/api/v1/blocks/:log/:hash`), `stopReason`, `outputTokens`, `reasoningOutputTokens`, `outputUsd`. A Response that grows is an `updated` Call in the `calls` event |
 | `/api/v1/sessions/:log/:id/timeline` | `callTimeline` | |
 | `/api/v1/sessions/:log/:id/tool-calls` | `toolCalls` | |
 | `/api/v1/sessions/:log/:id/tool-outputs` | `toolOutputs` | `sort` (`cost` `tokens` `calls`), `limit` |

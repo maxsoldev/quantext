@@ -122,6 +122,7 @@ const ROUTES: Route[] = [
   { path: CALL, params: [], run: (query, p) => found(query.getCall(...call(query, p))) },
   { path: [...CALL, "context"], params: [], run: (query, p) => found(query.contextAt(...call(query, p))) },
   { path: [...CALL, "diff"], params: [], run: (query, p) => found(query.contextDiff(...call(query, p))) },
+  { path: [...CALL, "response"], params: [], run: (query, p) => found(query.responseAt(...call(query, p))) },
   { path: [...SESSION, "timeline"], params: [], run: (query, p) => json(query.callTimeline(session(query, p))) },
   { path: [...SESSION, "tool-calls"], params: [], run: (query, p) => json(query.toolCalls(session(query, p))) },
   {
