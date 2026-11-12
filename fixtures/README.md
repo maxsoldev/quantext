@@ -123,3 +123,11 @@ Before anything is written to the repo, `record.ts`:
 - **Parameters vary per call.** Opus 5.5 sends adaptive thinking and `output_config.effort`; Sonnet 4.5 sends
   `thinking: { type: "enabled", budget_tokens }` and no effort.
 - `osVersion` and the platform in the environment reminder are kept as recorded (`darwin`).
+
+## Ground truth for estimates (not yet)
+
+Per-block token counts would need the free token-counting endpoint (Bedrock `CountTokens` or Anthropic
+`count_tokens`) run on single fixture blocks, with the same isolated auth as `record.ts`. With the Bedrock API key
+used for the 2.1.322 recording this is not possible: the key's IAM policy does not allow `bedrock:CountTokens`.
+Until a key with that permission (or an `ANTHROPIC_API_KEY`) is available, block splits stay estimates reconciled
+to exact totals, and the estimator error is measured only against exact per-call changes.
