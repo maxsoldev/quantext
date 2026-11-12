@@ -5,7 +5,8 @@
 import type { EgressPolicy } from "./egress.ts";
 
 /** The mod's start script (packages/mod/src/viewer.ts START_SCRIPT), repeated here so a change is reviewed twice. */
-const START_SCRIPT = 'umask 077; mkdir -p "$3" && nohup "$0" "$1" serve --live while-viewer >>"$2" 2>&1 </dev/null &';
+const START_SCRIPT =
+  'umask 077; mkdir -p "$3" && chmod 700 "$3" && cd "$3" && nohup "$0" "$1" serve --live while-viewer >>"$2" 2>&1 </dev/null &';
 
 export const POLICY: EgressPolicy = {
   documentationUrls: [
