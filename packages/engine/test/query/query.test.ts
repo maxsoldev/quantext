@@ -247,7 +247,8 @@ describe("a Session's detail", () => {
     expect(block?.text).toBe("[image 96x64]");
     expect(block?.media).toHaveLength(1);
     expect(block?.media[0]?.mediaType).toBe("image/png");
-    const bytes = q.getMedia(block?.media[0]?.hash ?? "")?.bytes;
+    const bytes = q.getMedia(block?.hash ?? "", s.log, block?.media[0]?.hash ?? "")?.bytes;
+    expect(q.getMedia("not-the-block", s.log, block?.media[0]?.hash ?? "")).toBeUndefined();
     expect([...(bytes ?? []).slice(1, 4)].map((b) => String.fromCharCode(b)).join("")).toBe("PNG");
     expect(q.getBlock(image?.hash ?? "", 99)).toBeUndefined();
   });

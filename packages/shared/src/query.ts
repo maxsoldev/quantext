@@ -17,6 +17,18 @@ import type {
   Usage,
 } from "./domain.ts";
 
+/** The version of these response types; it changes when a field is renamed or removed. */
+export type ApiVersion = 1;
+
+/** On every response object. */
+export interface Meta {
+  apiVersion: ApiVersion;
+  /** Demo mode: paths are hidden, and only the allowed projects are shown. */
+  redacted?: true;
+  /** Demo mode: show images blurred, they may show what the text hides. */
+  blurImages?: true;
+}
+
 /** A Session in the store: the same id can occur in two logs (a session that went on in another folder). */
 export interface SessionKey {
   log: number;
@@ -24,10 +36,11 @@ export interface SessionKey {
 }
 
 /**
- * Demo mode: only the allowed projects are visible (by path or by last folder name), and local paths are shown
+ * Demo mode: only the allowed projects are visible (by exact path), and local paths are shown
  * relative to the project, or under `~`. The home folder and the user name never appear.
  */
 export interface DemoOptions {
+  /** The allowed projects, by exact path. */
   projects?: string[];
   redactPaths: boolean;
 }
@@ -92,7 +105,7 @@ export interface SessionFilter {
   offset?: number;
 }
 
-export interface Page<T> {
+export interface Page<T> extends Meta {
   /** Items over all pages. */
   total: number;
   offset: number;
@@ -107,7 +120,7 @@ export interface LaneSummary {
   lastCall: number;
 }
 
-export interface SessionDetail {
+export interface SessionDetail extends Meta {
   session: SessionSummary;
   lanes: LaneSummary[];
   events: SessionEvent[];
@@ -174,7 +187,7 @@ export interface ContextBlock {
   run?: { firstCall: number; lastCall?: number };
 }
 
-export interface CallContext {
+export interface CallContext extends Meta {
   session: SessionKey;
   lane: string;
   call: CallSummary;
@@ -189,7 +202,7 @@ export interface CallContext {
 }
 
 /** What changed at Call N against the previous Call of its lane: Blocks by content and position. */
-export interface ContextDiff {
+export interface ContextDiff extends Meta {
   call: number;
   /** The previous Call of the lane; absent for the lane's first Call. */
   previous?: number;
@@ -203,7 +216,7 @@ export interface ContextDiff {
   cacheReadDrop: number;
 }
 
-export interface BlockDetail {
+export interface BlockDetail extends Meta {
   hash: string;
   log: number;
   kind: BlockKind;
@@ -258,7 +271,7 @@ export interface MemoryDocumentView {
 }
 
 /** What ingest could not map or read, and the Calls' issues, over the visible logs. */
-export interface QueryReport {
+export interface QueryReport extends Meta {
   unknownRecords: { kind: string; count: number }[];
   ignoredRecords: { kind: string; count: number }[];
   unreadable: { log: string; at: string; reason: string }[];
@@ -272,7 +285,7 @@ export interface QueryReport {
 }
 
 /** The result of a read-only SQL statement, at most `limit` rows. */
-export interface SqlResult {
+export interface SqlResult extends Meta {
   columns: string[];
   rows: { [column: string]: JsonValue }[];
   /** More rows were left out after the limit. */

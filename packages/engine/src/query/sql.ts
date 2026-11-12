@@ -3,10 +3,13 @@
  * text, a connection opened read-only, and `query_only`. There is no time limit: neither `node:sqlite` nor
  * `bun:sqlite` has an interrupt or a progress handler (docs/schema.md "Views").
  */
-import type { JsonValue, SqlResult } from "@quantext/shared";
+import type { ApiVersion, JsonValue, SqlResult } from "@quantext/shared";
 import type { SqlDriver, SqlValue } from "../store/index.ts";
 
 export const DEFAULT_SQL_LIMIT = 1000;
+
+/** The version of the response types in `@quantext/shared` that this engine gives. */
+export const API_VERSION = 1 satisfies ApiVersion;
 
 /** The statement is not a single read: nothing was run. */
 export class SqlRejectedError extends Error {
@@ -55,7 +58,7 @@ export function runSql(db: SqlDriver, sql: string, options: { limit?: number } =
     for (const [column, value] of Object.entries(row)) out[column] = shown(value);
     rows.push(out);
   }
-  return { columns: statement.columns(), rows, truncated };
+  return { apiVersion: API_VERSION, columns: statement.columns(), rows, truncated };
 }
 
 /** Throw unless `sql` is one statement that starts as a read and holds no word of a write. */

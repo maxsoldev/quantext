@@ -9,5 +9,8 @@
   },
   "dependencies": {
     "@quantext/shared": "workspace:*"
+  },
+  "bin": {
+    "qx": "./src/cli/qx.ts"
   }
 }

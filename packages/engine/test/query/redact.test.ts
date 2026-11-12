@@ -44,12 +44,55 @@ describe("demo mode: path redaction", () => {
   });
 });
 
+describe("demo mode: what the first redaction missed", () => {
+  const redact = createRedactor({ home: alice, user: "alice" });
+
+  test("decodes %2F and %5C in any case before it looks for paths", () => {
+    expect(redact(`open file:%2F${j("Us", "ers%2Falice")}%2fx and ${j("C:%5C", "Users%5ccarol")}%5Cy`)).toBe(
+      "open file:~/x and ~\\y",
+    );
+  });
+
+  test("hides a home folder whose name has spaces or letters beyond ASCII", () => {
+    expect(redact(`${j("/Us", "ers/Bob Smith")}/x`)).toBe("~/x");
+    expect(redact(`"${j("/ho", "me/zoë")}/notes"`)).toBe('"~/notes"');
+  });
+
+  test("hides the user name in any case, also after : and ~", () => {
+    expect(redact("git@github.com:alice/shop.git, ~alice/x, ALICE@host")).toBe(
+      "git@github.com:user/shop.git, ~user/x, user@host",
+    );
+  });
+
+  test("hides an encoded home folder with a drive, also with no user name known", () => {
+    const anon = createRedactor({});
+    expect(anon(`projects/${j("C--Us", "ers-carol")}-code-x/s.jsonl`)).toBe("projects/-~-code-x/s.jsonl");
+    expect(redact(`${j("-Us", "ers-alice")}-x`)).toBe("-~-x");
+  });
+
+  test("puts a placeholder for every hidden project, in every form it takes", () => {
+    const secret = `${alice}/code/secret-plans`;
+    const hiding = createRedactor({ home: alice, user: "alice", hidden: [secret] });
+    const text = [
+      `cd ${secret}/src`,
+      JSON.stringify({ cwd: secret }),
+      `projects/${secret.replace(/[^A-Za-z0-9]/g, "-")}/s.jsonl`,
+      encodeURIComponent(secret),
+      "the secret-plans repo",
+    ].join("\n");
+    const out = hiding(text, `${alice}/code/shop`);
+    expect(out).not.toMatch(/secret-plans|alice/i);
+    expect(out).toContain("<hidden project>/src");
+  });
+});
+
 describe("demo mode: project allowlist", () => {
-  test("allows a project by its path or by its last folder name, on any platform", () => {
+  test("allows a project by its exact path only, not every project with the same folder name", () => {
     expect(projectAllowed("/w/shop", ["/w/shop"])).toBe(true);
-    expect(projectAllowed("/w/shop", ["shop"])).toBe(true);
-    expect(projectAllowed("C:\\w\\shop", ["shop"])).toBe(true);
-    expect(projectAllowed("/w/shop", ["sho"])).toBe(false);
+    expect(projectAllowed("/w/shop/", ["/w/shop"])).toBe(true);
+    expect(projectAllowed("C:\\w\\shop", ["C:\\w\\shop"])).toBe(true);
+    expect(projectAllowed("/w/shop", ["shop"])).toBe(false);
+    expect(projectAllowed("/other/shop", ["/w/shop"])).toBe(false);
     expect(projectAllowed(undefined, ["shop"])).toBe(false);
     expect(projectAllowed("/w/anything", undefined)).toBe(true);
   });

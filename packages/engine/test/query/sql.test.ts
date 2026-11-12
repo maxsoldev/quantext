@@ -6,7 +6,12 @@ describe("read-only SQL for agents", () => {
   test("runs one SELECT and gives its columns and rows", async () => {
     const { db } = await ingested(["basic-tools"]);
     const result = runSql(db, "SELECT count(*) AS calls, min(idx) AS first FROM calls");
-    expect(result).toEqual({ columns: ["calls", "first"], rows: [{ calls: 8, first: 0 }], truncated: false });
+    expect(result).toEqual({
+      apiVersion: 1,
+      columns: ["calls", "first"],
+      rows: [{ calls: 8, first: 0 }],
+      truncated: false,
+    });
   });
 
   test("accepts WITH, VALUES, EXPLAIN and a trailing semicolon or comment", async () => {

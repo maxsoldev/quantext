@@ -1,7 +1,8 @@
 /**
- * Demo mode: hide local paths in what the query layer gives out. A path in the project is shown relative to it,
- * a path in a home folder (of anyone, on macOS, Linux or Windows, also JSON-escaped or encoded as a folder name)
- * under `~`. The user name is hidden where it stands next to a path or an address (`name@host`).
+ * Demo mode: hide local paths in what the query layer gives out. Percent-encoded text is decoded first. A path in
+ * the project is shown relative to it; every hidden project (by path, JSON-escaped, as the harness's encoded folder
+ * name, or by its folder name) becomes a placeholder; a home folder (of anyone, on macOS, Linux or Windows, also
+ * encoded) becomes `~`; the user name, in any case, is hidden next to a path, `:`, `~` or an address (`name@host`).
  */
 import type { JsonValue } from "@quantext/shared";
 
@@ -12,31 +13,57 @@ export interface Redactor {
   json<T extends JsonValue>(value: T, root?: string): T;
 }
 
-/** Not part of a path name: what may follow a folder's name when the path ends there. */
-const END = "(?![\\w.-])";
-const HOME_PATTERNS: readonly RegExp[] = [
-  /\b[A-Za-z]:(?:\\{1,2}|\/)Users(?:\\{1,2}|\/)[\w.-]+/g,
-  /\/Users\/(?!(?:Shared|Guest)\b)[\w.-]+/g,
-  /\/home\/[\w.-]+/g,
-  /\/root(?=\/|\\|$|[^\w.-])/g,
-];
-/** Claude Code names a project's folder after its path, with each `/` as `-`. */
-const ENCODED_HOME = /(?<![\w-])-(?:Users|home)-[^-/\\\s"']+/g;
+export interface RedactorOptions {
+  home?: string;
+  user?: string;
+  /** Projects that must not be seen: each path, wherever it shows, becomes HIDDEN_PROJECT. */
+  hidden?: readonly string[];
+  /** Hide paths (relative to the project, home folders as `~`); false: only the hidden projects. Default true. */
+  paths?: boolean;
+}
 
-export function createRedactor(env: { home?: string; user?: string } = {}): Redactor {
-  const home = env.home === undefined || env.home === "" ? undefined : env.home;
-  const user = env.user !== undefined && env.user.length >= 2 ? env.user : undefined;
+export const HIDDEN_PROJECT = "<hidden project>";
+
+/** A character of a folder name: anything but a separator, a quote, a line end or what no file name holds. */
+const NAME = "[^\\\\/\"'`\\n\\r\\t<>|*?:]+";
+/** Not part of a path name: what may follow a folder's name when the path ends there. */
+const END = "(?![\\p{L}\\p{N}_.-])";
+const HOME_PATTERNS: readonly RegExp[] = [
+  new RegExp(`\\b[A-Za-z]:(?:\\\\{1,2}|/)Users(?:\\\\{1,2}|/)${NAME}`, "gu"),
+  new RegExp(`/Users/(?!(?:Shared|Guest)(?:[\\\\/"']|$))${NAME}`, "gu"),
+  new RegExp(`/home/${NAME}`, "gu"),
+  /\/root(?=[\\/]|$|[^\w.-])/gu,
+];
+/** The harness names a project's folder after its path, each character that is not a letter or digit as `-`. */
+const ENCODED_HOME = /(?:\b[A-Za-z]--|(?<![\w-])-)(?:Users|home)-[^-/\\\s"']+/gu;
+
+export function createRedactor(options: RedactorOptions = {}): Redactor {
+  const home = options.home === undefined || options.home === "" ? undefined : trimSeparators(options.home);
+  const user = options.user !== undefined && options.user.length >= 2 ? options.user : undefined;
   const userPattern =
     user === undefined
       ? undefined
-      : new RegExp(`(?<=[@/\\\\-])${escapeRegExp(user)}(?![\\w])|(?<![\\w.-])${escapeRegExp(user)}(?=@)`, "g");
+      : new RegExp(
+          `(?<=[@/\\\\:~-])${escapeRegExp(user)}(?![\\p{L}\\p{N}_])|(?<![\\p{L}\\p{N}_.-])${escapeRegExp(user)}(?=@)`,
+          "giu",
+        );
+  const encodedUser =
+    user === undefined
+      ? undefined
+      : new RegExp(`(?:\\b[A-Za-z]--|(?<![\\w-])-)(?:Users|home)-${escapeRegExp(encode(user))}(?![A-Za-z0-9])`, "gu");
+  const hidden = [...(options.hidden ?? [])].map(trimSeparators).sort((a, b) => b.length - a.length);
+  const paths = options.paths ?? true;
   const redact = ((text: string, root?: string) => {
-    let out = text;
-    if (root !== undefined && root !== "") out = relative(out, root);
+    let out = decodePercent(text);
+    if (paths && root !== undefined && root !== "") out = relative(out, trimSeparators(root));
+    for (const project of hidden) out = hide(out, project);
+    if (!paths) return out;
     if (home !== undefined) {
-      for (const form of forms(home)) out = out.replace(new RegExp(`${escapeRegExp(form)}${END}`, "g"), "~");
+      for (const form of forms(home)) out = out.replace(new RegExp(`${escapeRegExp(form)}${END}`, "gu"), "~");
+      out = out.replace(new RegExp(`${escapeRegExp(encode(home))}(?![A-Za-z0-9])`, "g"), "-~");
     }
     for (const pattern of HOME_PATTERNS) out = out.replace(pattern, "~");
+    if (encodedUser !== undefined) out = out.replace(encodedUser, "-~");
     out = out.replace(ENCODED_HOME, "-~");
     if (userPattern !== undefined) out = out.replace(userPattern, "user");
     return out;
@@ -45,11 +72,17 @@ export function createRedactor(env: { home?: string; user?: string } = {}): Reda
   return redact;
 }
 
-/** Whether a project is visible: no allowlist, or the list names its path or its last folder name. */
+/** A path without the separators at its end, as the allowlist compares it. */
+export function trimSeparators(path: string): string {
+  return path.length > 1 ? path.replace(/[\\/]+$/, "") : path;
+}
+
+/** Whether a project is visible: no allowlist, or the list names its exact path. */
 export function projectAllowed(project: string | undefined, allowed: readonly string[] | undefined): boolean {
   if (allowed === undefined) return true;
   if (project === undefined) return false;
-  return allowed.some((name) => name === project || name === lastFolder(project));
+  const path = trimSeparators(project);
+  return allowed.some((name) => trimSeparators(name) === path);
 }
 
 /** The last folder name of a path, with `/` or `\` separators. */
@@ -63,16 +96,44 @@ function relative(text: string, root: string): string {
   let out = text;
   for (const form of forms(root)) {
     const sep = form.includes("\\\\") ? "\\\\\\\\" : form.includes("\\") ? "\\\\" : "/";
-    out = out.replace(new RegExp(`${escapeRegExp(form)}(?:${sep}|/)`, "g"), "");
-    out = out.replace(new RegExp(`${escapeRegExp(form)}${END}`, "g"), ".");
+    out = out.replace(new RegExp(`${escapeRegExp(form)}(?:${sep}|/)`, "gu"), "");
+    out = out.replace(new RegExp(`${escapeRegExp(form)}${END}`, "gu"), ".");
   }
   return out;
 }
 
-/** A path as it may appear in text: as is, and JSON-escaped when it has backslashes. */
+/** A hidden project's path in every form, its encoded folder name, and its folder name as a word, as a placeholder. */
+function hide(text: string, project: string): string {
+  let out = text;
+  for (const form of forms(project)) out = out.replaceAll(form, HIDDEN_PROJECT);
+  out = out.replaceAll(encode(project), HIDDEN_PROJECT);
+  const name = lastFolder(project);
+  if (name.length >= 4) {
+    out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}_.-])${escapeRegExp(name)}${END}`, "gu"), HIDDEN_PROJECT);
+  }
+  return out;
+}
+
+/** A path as it may appear in text: as is, JSON-escaped and with `/` when it has backslashes. */
 function forms(path: string): string[] {
-  const trimmed = path.replace(/[\\/]+$/, "");
-  return trimmed.includes("\\") ? [trimmed.replace(/\\/g, "\\\\"), trimmed] : [trimmed];
+  return path.includes("\\") ? [path.replace(/\\/g, "\\\\"), path, path.replace(/\\/g, "/")] : [path];
+}
+
+/** How the harness names a folder after a path. */
+function encode(path: string): string {
+  return path.replace(/[^A-Za-z0-9]/g, "-");
+}
+
+/** Percent-encoded runs decoded (`%2F` is `/`); a run that is not valid UTF-8 stays as it is. */
+function decodePercent(text: string): string {
+  if (!text.includes("%")) return text;
+  return text.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run.replace(/%2f/gi, "/").replace(/%5c/gi, "\\"); // not UTF-8: keep it, but decode the separators
+    }
+  });
 }
 
 function escapeRegExp(text: string): string {
