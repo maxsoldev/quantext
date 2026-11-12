@@ -9,6 +9,7 @@ import type {
   SessionKey,
   SessionSummary,
   TimelineCall,
+  UnloggedEstimate,
 } from "@quantext/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client.ts";
@@ -27,7 +28,7 @@ import { Term } from "../teach/Term.tsx";
 import { ToolCalls } from "../tools/ToolCalls.tsx";
 import { Tokens } from "../ui/Num.tsx";
 import { useLoad } from "../ui/useLoad.ts";
-import { costSplit, subagentName } from "./totals.ts";
+import { costSplit, subagentName, unloggedNote } from "./totals.ts";
 
 type SessionRoute = Extract<Route, { page: "session" }>;
 
@@ -91,6 +92,7 @@ export function SessionPage({ route }: { route: SessionRoute }) {
   if (!data.value) return <p className="muted">Reading the session…</p>;
   const { detail } = data.value;
   const s = detail.session;
+  const unlogged = unloggedNote(detail.unlogged);
   const span = s.started && s.ended ? Date.parse(s.ended) - Date.parse(s.started) : undefined;
   return (
     <article className="session-page" aria-labelledby="session-title">
@@ -121,13 +123,24 @@ export function SessionPage({ route }: { route: SessionRoute }) {
             <dd className="num">{s.calls.toLocaleString("en-US")}</dd>
           </div>
           <div>
-            <dt>Cost</dt>
+            <dt>
+              Cost
+              {unlogged && (
+                <span className="unlogged-note" data-testid="unlogged">
+                  <Term id="unlogged-calls">
+                    <button type="button" className="tip-anchor" data-tip={unlogged.tip}>
+                      {unlogged.label}
+                    </button>
+                  </Term>
+                </span>
+              )}
+            </dt>
             <dd>
               <button
                 type="button"
                 className="tip-anchor num"
                 data-testid="session-cost"
-                data-tip={costTip(s, detail.subagents)}
+                data-tip={costTip(s, detail.subagents, detail.unlogged)}
               >
                 {usd(s.totals.all.cost.totalUsd)}
               </button>
@@ -329,8 +342,9 @@ function pending<T>(): Promise<T> {
 }
 
 /** The head's cost tooltip: with the subagents' split, then by part, over all. */
-function costTip(s: SessionSummary, subagents: readonly SessionSummary[]): string {
+function costTip(s: SessionSummary, subagents: readonly SessionSummary[], unlogged: UnloggedEstimate): string {
   const split = costSplit(s, subagents, 5);
+  const note = unloggedNote(unlogged);
   const all = s.totals.all;
   return [
     split.lines.length > 0
@@ -340,6 +354,7 @@ function costTip(s: SessionSummary, subagents: readonly SessionSummary[]): strin
     "A compaction's summarising call counts too: its usage is derived from the harness's running totals (it is real spend).",
     ...CACHE_PARTS.map((p) => `${p.label}: ${usd(partCost(all.cost, p.key))}`),
     ...(all.unpricedCalls ? [`${all.unpricedCalls} calls have no price and are not counted.`] : []),
+    ...(note ? ["", note.tip] : []),
   ].join("\n");
 }
 

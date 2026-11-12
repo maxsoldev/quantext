@@ -283,6 +283,7 @@ progress::-moz-progress-bar {
   font-size: var(--t-small);
   line-height: 1.4;
   white-space: pre-line;
+  overflow-wrap: anywhere;
   pointer-events: none;
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.18);
 }

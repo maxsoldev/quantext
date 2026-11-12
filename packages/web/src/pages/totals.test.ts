@@ -1,6 +1,6 @@
 import type { SessionSummary, SessionTotal } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
-import { costSplit, subagentName } from "./totals.ts";
+import { costSplit, subagentName, unloggedNote } from "./totals.ts";
 
 const total = (usd: number, sessions = 1): SessionTotal => ({
   sessions,
@@ -49,5 +49,26 @@ describe("the cost split of a Session and its subagents", () => {
     expect(subagentName({ id: "x:agent-1", agentName: "Explore" } as SessionSummary)).toBe("Explore");
     expect(subagentName({ id: "x:agent-1", title: "Look" } as SessionSummary)).toBe("Look");
     expect(subagentName({ id: "x:agent-1" } as SessionSummary)).toBe("agent-1");
+  });
+});
+
+describe("unloggedNote", () => {
+  const u = { calls: 1292, cacheReadTokens: 2.7e8, costUsd: 63.24, unpricedCalls: 0, subagents: 35 };
+
+  test("is absent when no summary is estimated", () => {
+    expect(unloggedNote({ ...u, calls: 0, costUsd: 0, subagents: 0 })).toBeUndefined();
+  });
+
+  test("says up to, about, and that it is an estimate outside the total", () => {
+    const n = unloggedNote(u);
+    expect(n?.label).toBe("plus up to ~$63.24 unlogged");
+    expect(n?.tip).toContain("Plus up to ~$63.24 of unlogged progress summaries (~1,292 calls)");
+    expect(n?.tip).toContain("estimate");
+    expect(n?.tip).toContain("not in the exact cost");
+    expect(n?.tip).toContain("CLAUDE_CODE_DISABLE_AGENT_PROGRESS_SUMMARIES=1");
+  });
+
+  test("names the summaries it could not price", () => {
+    expect(unloggedNote({ ...u, unpricedCalls: 4 })?.tip).toContain("4 of them have no price");
   });
 });

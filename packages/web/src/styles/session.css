@@ -48,6 +48,12 @@
 .figures dd .num {
   font-variant-numeric: normal;
 }
+/* The estimate of the calls no transcript holds: beside the cost's label, quiet, never in the figure itself. */
+.figures dt .unlogged-note {
+  margin-left: var(--space-2);
+  font-weight: 400;
+  font-style: italic;
+}
 .figures dd.models-inline {
   font-size: var(--t-lead);
 }
