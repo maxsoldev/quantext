@@ -11,7 +11,7 @@
   "steps": [
     "claude -p --output-format json --permission-mode bypassPermissions --strict-mcp-config --session-id 00000000-0000-4000-8000-000000000002 \"Use the Agent tool with subagent_type Explore to find which file under src/ defines the function `add` and what it returns. Do not search yourself. Reply with the path and one line.\""
   ],
-  "costUsd": 0.0672,
+  "costUsd": 0.0946,
   "unresolvedTailHashes": 0,
   "transcripts": {
     "00000000-0000-4000-8000-000000000002.jsonl": {
@@ -31,7 +31,7 @@
         "user": 2
       }
     },
-    "00000000-0000-4000-8000-000000000002/subagents/agent-aa1df1da8383d7f51.jsonl": {
+    "00000000-0000-4000-8000-000000000002/subagents/agent-a326b693f67d5a3e8.jsonl": {
       "rows": 19,
       "llmCalls": 3,
       "rowTypes": {
@@ -43,5 +43,6 @@
         "user": 3
       }
     }
-  }
+  },
+  "compactions": {}
 }

@@ -2,36 +2,37 @@
   "scenario": "effort",
   "harness": "claude-code",
   "harnessVersion": "2.1.322",
-  "description": "Two turns with different effort levels and models, so the call parameters vary in one session.",
+  "description": "Three turns with different thinking parameters, so the call parameters vary in one session.",
   "exercises": [
-    "effort high",
-    "effort low",
-    "model change on resume",
-    "adaptive thinking"
+    "effort high (Opus)",
+    "effort low (Opus)",
+    "budget thinking on Sonnet (model change on resume)"
   ],
   "steps": [
     "claude --effort high -p --output-format json --permission-mode bypassPermissions --strict-mcp-config --session-id 00000000-0000-4000-8000-000000000007 \"Without tools: a train leaves at 09:47 and the trip takes 2 h 38 min. When does it arrive? Time only.\"",
-    "claude --effort low --model sonnet -p --output-format json --permission-mode bypassPermissions --strict-mcp-config --resume 00000000-0000-4000-8000-000000000007 \"And if the trip took 25 minutes longer? Time only.\""
+    "claude --effort low -p --output-format json --permission-mode bypassPermissions --strict-mcp-config --resume 00000000-0000-4000-8000-000000000007 \"And if the trip took 25 minutes longer? Time only.\"",
+    "claude --model sonnet -p --output-format json --permission-mode bypassPermissions --strict-mcp-config --resume 00000000-0000-4000-8000-000000000007 \"And if it left 10 minutes later than that? Time only.\""
   ],
-  "costUsd": 0.0841,
+  "costUsd": 0.1845,
   "unresolvedTailHashes": 0,
   "transcripts": {
     "00000000-0000-4000-8000-000000000007.jsonl": {
-      "rows": 41,
-      "llmCalls": 2,
+      "rows": 49,
+      "llmCalls": 3,
       "rowTypes": {
-        "api-request": 2,
+        "api-request": 3,
         "api-request-blob": 4,
         "api-request-shape": 2,
-        "assistant": 3,
+        "assistant": 4,
         "atis-latch": 4,
         "attachment": 13,
-        "cost-state": 2,
-        "last-prompt": 4,
-        "mode": 1,
-        "queue-operation": 4,
-        "user": 2
+        "cost-state": 3,
+        "last-prompt": 5,
+        "mode": 2,
+        "queue-operation": 6,
+        "user": 3
       }
     }
-  }
+  },
+  "compactions": {}
 }

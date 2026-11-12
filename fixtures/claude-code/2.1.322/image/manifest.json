@@ -10,7 +10,7 @@
   "steps": [
     "claude -p --output-format json --permission-mode bypassPermissions --strict-mcp-config --session-id 00000000-0000-4000-8000-000000000003 \"Read diagram.png with the Read tool and name its colours, left to right, in one line.\""
   ],
-  "costUsd": 0.0358,
+  "costUsd": 0.0357,
   "unresolvedTailHashes": 0,
   "transcripts": {
     "00000000-0000-4000-8000-000000000003.jsonl": {
@@ -30,5 +30,6 @@
         "user": 2
       }
     }
-  }
+  },
+  "compactions": {}
 }

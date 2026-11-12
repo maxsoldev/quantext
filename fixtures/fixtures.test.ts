@@ -3,7 +3,7 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import type { Manifest } from "./tools/manifest.ts";
-import { summariseTranscript } from "./tools/manifest.ts";
+import { compactionsOf, summariseTranscript } from "./tools/manifest.ts";
 import { sha256Sorted } from "./tools/normalise.ts";
 
 const HARNESS_DIR = join(dirname(fileURLToPath(import.meta.url)), "claude-code");
@@ -44,6 +44,15 @@ describe.each(scenarios)("fixture $version/$scenario", ({ version, scenario }) =
 
   test.each(transcripts)("%s parses as JSONL and matches the manifest counts", (file) => {
     expect(summariseTranscript(file, readFileSync(join(dir, file), "utf8"))).toEqual(manifest.transcripts[file]);
+  });
+
+  test("the manifest lists each compaction with the derived usage of its summarising call", () => {
+    const found = Object.fromEntries(
+      transcripts
+        .map((file) => [file, compactionsOf(readFileSync(join(dir, file), "utf8"))] as const)
+        .filter(([, list]) => list.length > 0),
+    );
+    expect(manifest.compactions).toEqual(found);
   });
 
   const rowsOf = (file: string) =>
@@ -90,15 +99,25 @@ describe.each(scenarios)("fixture $version/$scenario", ({ version, scenario }) =
 
 /**
  * The messages a tail hash may name, by Claude Code's rules (independent of the normaliser): an
- * `api-request-blob` row; a `user` row (role and content; a string prompt also as one text block); an assistant
- * message, which is every `assistant` row of one `message.id`, in order.
+ * `api-request-blob` row; a `user` row (role and content; a string prompt also as one text block); adjacent user
+ * rows joined into one message; an assistant message, which is every `assistant` row of one `message.id`, in order.
  */
 // biome-ignore lint/suspicious/noExplicitAny: transcript rows are untyped JSON in this test
 function wireIndex(rows: any[]): { messages: Set<string>; shapes: Set<string> } {
   const messages = new Set<string>();
   const shapes = new Set<string>();
   const assistant = new Map<string, unknown[]>();
+  let userRun: unknown[][] = [];
   for (const row of rows) {
+    if (row.type === "assistant") userRun = [];
+    if (row.type === "user" && row.message) {
+      const { content } = row.message;
+      userRun.push(typeof content === "string" ? [{ type: "text", text: content }] : content);
+      for (let start = 0; start < userRun.length - 1; start++) {
+        const joined = userRun.slice(start).flat();
+        messages.add(sha256Sorted({ role: "user", content: joined } as Parameters<typeof sha256Sorted>[0]));
+      }
+    }
     if (row.type === "api-request-blob") messages.add(row.hash);
     if (row.type === "api-request-shape") shapes.add(row.shapeHash);
     if (row.type === "user" && row.message) {

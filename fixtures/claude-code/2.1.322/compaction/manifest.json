@@ -13,7 +13,7 @@
     "claude -p --output-format json --permission-mode bypassPermissions --strict-mcp-config --resume 00000000-0000-4000-8000-000000000005 \"/compact\"",
     "claude -p --output-format json --permission-mode bypassPermissions --strict-mcp-config --resume 00000000-0000-4000-8000-000000000005 \"Which two files did you read earlier? Reply with the names only.\""
   ],
-  "costUsd": 0.2074,
+  "costUsd": 0.2081,
   "unresolvedTailHashes": 0,
   "transcripts": {
     "00000000-0000-4000-8000-000000000005.jsonl": {
@@ -35,5 +35,24 @@
         "user": 8
       }
     }
+  },
+  "compactions": {
+    "00000000-0000-4000-8000-000000000005.jsonl": [
+      {
+        "line": 39,
+        "trigger": "manual",
+        "preTokens": 16778,
+        "postTokens": 2865,
+        "basis": "derived",
+        "summaryUsage": {
+          "eu.anthropic.claude-opus-5-5": {
+            "inputTokens": 2051,
+            "outputTokens": 569,
+            "cacheReadInputTokens": 16510,
+            "cacheCreationInputTokens": 154
+          }
+        }
+      }
+    ]
   }
 }

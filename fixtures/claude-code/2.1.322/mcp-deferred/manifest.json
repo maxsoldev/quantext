@@ -9,7 +9,7 @@
     "MCP tool call"
   ],
   "steps": [
-    "claude --mcp-config /fixture/mcp/config.json -p --output-format json --permission-mode bypassPermissions --strict-mcp-config --session-id 00000000-0000-4000-8000-000000000006 \"Use the lookup_word tool of the dictionary MCP server to look up the word cobalt. Reply with its result only.\""
+    "claude --mcp-config /fixture-0000000000000000/mcp/config.json -p --output-format json --permission-mode bypassPermissions --strict-mcp-config --session-id 00000000-0000-4000-8000-000000000006 \"Use the lookup_word tool of the dictionary MCP server to look up the word cobalt. Reply with its result only.\""
   ],
   "costUsd": 0.0418,
   "unresolvedTailHashes": 0,
@@ -31,5 +31,6 @@
         "user": 3
       }
     }
-  }
+  },
+  "compactions": {}
 }
