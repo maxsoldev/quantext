@@ -16,7 +16,9 @@ makes **no outbound connections**.
 - **Network**: one HTTP server on `127.0.0.1`, for the viewer. The mod talks only to it.
 
 CI enforces this on the files we ship: a static no-egress guard reads the built plugin, and the engine's smoke
-test runs with a network tripwire. Details, and how to report a vulnerability: [SECURITY.md](SECURITY.md).
+test runs with a network tripwire. Dependencies are pinned and checked for vulnerabilities, licences and
+signatures, and none may run an install script. Details, and how to report a vulnerability:
+[SECURITY.md](SECURITY.md).
 
 ## Requirements and setup (contributors)
 

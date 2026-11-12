@@ -16,14 +16,15 @@
     "typecheck": "tsc -p tsconfig.json && pnpm -r typecheck",
     "test": "vitest run",
     "test:bun": "bun test ./fixtures ./packages/engine ./packages/shared ./packages/web ./scripts",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:mod && pnpm layers && pnpm scan && pnpm egress",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:mod && pnpm layers && pnpm scan && pnpm egress && pnpm supply-chain",
     "layers": "node scripts/check-layers.ts",
     "check:bun": "bun test ./fixtures ./packages/engine ./packages/shared ./packages/web ./scripts && bun scripts/check-layers.ts && bun scripts/scan-personal-data.ts && bun scripts/scan-personal-data.ts --history",
     "scan": "node scripts/scan-personal-data.ts && pnpm scan:history && sh scripts/gitleaks.sh",
     "scan:history": "node scripts/scan-personal-data.ts --history",
     "test:mod": "node scripts/test-mod.ts",
     "build:plugin": "node scripts/build-plugin.ts",
-    "egress": "node scripts/build-plugin.ts && node scripts/check-egress.ts"
+    "egress": "node scripts/build-plugin.ts && node scripts/check-egress.ts",
+    "supply-chain": "node scripts/check-supply-chain.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

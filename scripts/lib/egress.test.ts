@@ -6,6 +6,7 @@ import { findEgress } from "./egress.ts";
 const POLICY: EgressPolicy = {
   documentationUrls: [{ prefix: "https://docs.example.org/", reason: "shown to the user, never fetched" }],
   commands: [],
+  browserFiles: "engine/web/",
 };
 
 /** Each finding as "<file>:<line> <rule>", in order. */
@@ -43,7 +44,7 @@ describe("hard-coded URLs", () => {
       "engine/web/assets/a.css": "body{}\n@import url(//fonts.example.com/f.css);\n",
       "engine/package.json": '{ "homepage": "https://example.com" }\n',
     };
-    expect(check(files)).toEqual([
+    expect(check(files, { documentationUrls: POLICY.documentationUrls, commands: [] })).toEqual([
       "engine/package.json:1 url",
       "engine/web/assets/a.css:2 url",
       "engine/web/index.html:2 url",
@@ -272,5 +273,45 @@ describe("the mod's $ API", () => {
 
   test("$ in a bundle is a minified name, not the mod API", () => {
     expect(js("$.telemetry.log(x);\n")).toEqual([]);
+  });
+});
+
+describe("the viewer's files in the browser", () => {
+  const CSP =
+    'const HTML_CSP = ["default-src \'self\'", "img-src \'self\' data: blob:", "connect-src \'self\'"].join("; ");\n';
+  const viewer = (text: string, engine = CSP) =>
+    check({ "engine/engine.js": engine, "engine/web/assets/index.js": text });
+
+  test("a URL the guard cannot follow passes: the engine's CSP limits connect-src to 'self'", () => {
+    expect(viewer("function n(e) { fetch(e.href, t(e)); }\nconst C = x((e, t) => fetch(e, t));\n")).toEqual([]);
+  });
+
+  test("a URL that is known to be external is still a finding", () => {
+    expect(viewer('fetch("https://example.com/c");\nfetch(`https://${h}/c`);\n')).toEqual([
+      "engine/web/assets/index.js:1 url",
+      "engine/web/assets/index.js:1 fetch",
+      "engine/web/assets/index.js:2 fetch",
+    ]);
+  });
+
+  test("without that CSP, the viewer's files are a finding", () => {
+    expect(viewer("fetch(e);\n", "const x = 1;\n")).toEqual([
+      "engine/web/assets/index.js:1 csp",
+      "engine/web/assets/index.js:1 fetch",
+    ]);
+  });
+
+  test("a whole CSP in one string is read directive by directive", () => {
+    const one = "const c = \"default-src 'none'; frame-ancestors 'none'; sandbox\";\n";
+    expect(check({ "engine/engine.js": one })).toEqual([]);
+    expect(check({ "engine/engine.js": one.replace("sandbox", "connect-src https://x.example.com") })).toEqual([
+      "engine/engine.js:1 csp",
+      "engine/engine.js:1 url",
+    ]);
+  });
+
+  test("a CSP directive that allows another host or scheme is a finding", () => {
+    const loose = 'const c = ["default-src \'self\'", "connect-src \'self\' https:", "img-src *"];\n';
+    expect(check({ "engine/engine.js": loose })).toEqual(["engine/engine.js:1 csp", "engine/engine.js:1 csp"]);
   });
 });

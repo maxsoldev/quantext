@@ -18,7 +18,8 @@ agents (SQL, CLI, later MCP). Nothing leaves the machine.
    marked as estimates, and must add up to the exact total.
 6. **Fail loudly.** Unknown row types and numbers that do not reconcile are counted and shown, never dropped in
    silence.
-7. **Local and safe by default.** The server binds `127.0.0.1`, checks the `Host` header, and has no CORS.
+7. **Local and safe by default.** The server binds `127.0.0.1`, checks the `Host` header, and has no CORS. Nothing
+   connects out: no telemetry. A static guard on the built plugin and a runtime tripwire check it (ADR 28).
 8. **One product, one install; the engine runs only on request.** The user installs one plugin. The harness features
    work at once, in-process. The engine starts only when the user asks for it (`/quantext view`), and stops after an
    idle period.

@@ -15,7 +15,9 @@ export const POLICY: EgressPolicy = {
     },
     { prefix: "https://nodejs.org", reason: "install hint in a toast when no runtime is found" },
     { prefix: "https://bun.sh", reason: "install hint in a toast when no runtime is found" },
+    { prefix: "https://react.dev/errors/", reason: "React's minified error messages link to the docs (viewer)" },
   ],
+  browserFiles: "engine/web/",
   commands: [
     { argv: ["open", null], reason: "opens the viewer's URL in the browser on macOS" },
     { argv: ["xdg-open", null], reason: "opens the viewer's URL in the browser on Linux" },
