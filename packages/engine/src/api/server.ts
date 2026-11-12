@@ -25,8 +25,15 @@ export interface ApiOptions {
   /** The viewer's files. */
   staticDir: string;
   now?: () => number;
-  /** Open sockets at once; more are closed at once (default 64). */
+  /**
+   * Open sockets at once; more are closed at once (default 64). Bun's node:http shows a socket only once it sent
+   * a request, so there it counts those; Bun closes a silent socket by itself after about 10 s.
+   */
   maxConnections?: number;
+  /** A socket with no bytes for this long is closed; an open event stream is not (default 15 s). */
+  idleSocketMs?: number;
+  /** A request whose headers take longer is closed, however slowly they trickle in (default 10 s). */
+  headersTimeoutMs?: number;
   /** Event stream settings (heartbeat, replay, slow-client limit, clients). */
   events?: Omit<Parameters<typeof createEventStream>[0], "query">;
   /** Gets a request that failed inside the engine (a 500); the default writes it to stderr. */
@@ -78,6 +85,7 @@ export function createApi(options: ApiOptions): Api {
       for (const name of url.searchParams.keys()) {
         if (name !== "cursor") throw badRequest("the event stream takes only cursor");
       }
+      req.socket.setTimeout(0); // a stream is quiet between heartbeats; its writes bound it instead
       return events.connect(req, res, cursor);
     }
     if (api) {
@@ -105,7 +113,14 @@ export function createApi(options: ApiOptions): Api {
 
   const server: Server = createServer(
     // Header size, and time to send the headers and the request: a slow or huge request cannot hold a socket.
-    { maxHeaderSize: 16 * 1024, headersTimeout: 10_000, requestTimeout: 30_000, keepAliveTimeout: 5_000 },
+    {
+      maxHeaderSize: 16 * 1024,
+      headersTimeout: options.headersTimeoutMs ?? 10_000,
+      requestTimeout: 30_000,
+      keepAliveTimeout: 5_000,
+      // How often Node checks the two limits above: without it, a slowloris gets 30 s more.
+      connectionsCheckingInterval: 500,
+    },
     (req, res) => {
       const touch = () => {
         lastActive = now();
@@ -122,6 +137,8 @@ export function createApi(options: ApiOptions): Api {
       });
     },
   );
+  // A socket silent this long is destroyed (no "timeout" listener on the server): silent sockets cannot pile up.
+  server.timeout = options.idleSocketMs ?? 15_000;
   server.on("connection", (socket: Socket) => {
     if (sockets.size >= maxConnections) {
       socket.destroy();

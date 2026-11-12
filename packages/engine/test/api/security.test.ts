@@ -145,6 +145,47 @@ describe("methods and sizes", () => {
   });
 });
 
+describe("slow and silent sockets", () => {
+  /** How long until the server closes a socket that sends `first` and then trickles `more` (ms). */
+  const lifetime = (port: number, first: string, more = "") =>
+    new Promise<number>((resolve) => {
+      const started = Date.now();
+      const socket = connect({ host: "127.0.0.1", port }, () => first !== "" && socket.write(first));
+      const trickle = more === "" ? undefined : setInterval(() => socket.destroyed || socket.write(more), 100);
+      socket.on("error", () => socket.destroy());
+      socket.on("close", () => {
+        clearInterval(trickle);
+        resolve(Date.now() - started);
+      });
+      socket.resume();
+    });
+  // Node closes them at the limits set; Bun's own idle limit (about 10 s) closes them too.
+  const bound = process.versions.bun === undefined ? 3000 : 15_000;
+
+  test("closes a socket that never sends a request", { timeout: 20_000 }, async () => {
+    const { port } = await engine(["basic-tools"], { idleSocketMs: 300 });
+    expect(await lifetime(port, "")).toBeLessThan(bound);
+  });
+
+  test("closes a socket that sends its headers too slowly (slowloris)", { timeout: 20_000 }, async () => {
+    const { port } = await engine(["basic-tools"], { idleSocketMs: 300, headersTimeoutMs: 500 });
+    expect(await lifetime(port, "GET /health HTTP/1.1\r\n", "X-a: b\r\n")).toBeLessThan(bound);
+  });
+
+  test("keeps an event stream open past the idle limit", async () => {
+    const { port } = await engine(["basic-tools"], { idleSocketMs: 200, events: { heartbeatMs: 1000 } });
+    const socket = connect({ host: "127.0.0.1", port }, () =>
+      socket.write(`GET /api/v1/events HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n\r\n`),
+    );
+    let text = "";
+    socket.on("data", (d: Buffer) => (text += d.toString("utf8")));
+    await new Promise((r) => setTimeout(r, 1300));
+    expect(socket.destroyed).toBe(false);
+    expect(text).toContain(": ping");
+    socket.destroy();
+  });
+});
+
 describe("headers", () => {
   test("every response is nosniff, no-referrer, not framed, same-origin only", async () => {
     const { port } = await engine(["basic-tools"]);

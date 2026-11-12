@@ -19,7 +19,10 @@ reconnects after sleep or a network change and must not miss a Call.
   (405); an `Origin` must be this origin (403); a `Sec-Fetch-Site` other than `same-origin` or `none` is refused
   (403), except a top-level navigation to a viewer page (a link from slides may open the viewer, it cannot read
   it); no body (413, and the connection is closed); a URL of at most 4096 characters (414); headers of at most
-  16 KiB (431). At most 64 sockets; more are closed at once.
+  16 KiB (431). At most 64 sockets; more are closed at once. A socket silent for 15 s is closed, and headers must
+  arrive within 10 s however slowly they trickle (checked every 0.5 s); an open event stream is exempt. Bun's
+  `node:http` shows a socket only after its first request, so there the count covers those, and Bun itself closes
+  a silent or trickling socket after about 10 s (tested).
 - **Headers.** Every response: `nosniff`, `no-referrer`, `X-Frame-Options: DENY`, `Cross-Origin-Resource-Policy:
   same-origin` (another page cannot even embed an image), `Cross-Origin-Opener-Policy: same-origin`, and no
   `Access-Control-*`. Pages get `default-src 'self'` with no inline script and `frame-ancestors 'none'`; every
