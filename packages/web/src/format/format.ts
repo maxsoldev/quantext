@@ -14,10 +14,10 @@ function trim(x: number): string {
   return String(Number(x.toPrecision(3)));
 }
 
-/** US dollars: two significant digits below a dollar, cents up to $1,000, whole dollars above. */
+/** US dollars: two significant digits below 10 cents, cents up to $1,000, whole dollars above. */
 export function usd(x: number): string {
   if (x === 0) return "$0";
-  if (Math.abs(x) < 1) return `$${Number(x.toPrecision(2)).toString()}`;
+  if (Math.abs(x) < 0.1) return `$${Number(x.toPrecision(2)).toString()}`;
   if (Math.abs(x) < 1000) return `$${x.toFixed(2)}`;
   return `$${whole.format(x)}`;
 }
@@ -95,4 +95,15 @@ const dateTime = new Intl.DateTimeFormat("en-GB", {
 /** A short local date and time: "12 Nov, 09:41". */
 export function when(iso: string): string {
   return dateTime.format(new Date(iso));
+}
+
+/** A model id without its provider prefix and date: `claude-opus-5-5` → `opus-5-5`. */
+export function shortModel(model: string): string {
+  return model.replace(/^(anthropic\.|us\.anthropic\.|eu\.anthropic\.)?claude-/, "").replace(/-\d{8}(-v\d+:\d+)?$/, "");
+}
+
+/** The last folder of a project path, as people name it. */
+export function projectName(project: string): string {
+  const parts = project.split(/[\\/]/).filter((p) => p !== "");
+  return parts.at(-1) ?? project;
 }

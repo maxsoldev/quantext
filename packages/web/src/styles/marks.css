@@ -1,0 +1,57 @@
+/* Colour classes for marks: a category or a cache part fills an SVG shape or a box. Text never wears them. */
+.cat-tool-definitions {
+  fill: var(--cat-tool-definitions);
+  background: var(--cat-tool-definitions);
+}
+.cat-base-instructions {
+  fill: var(--cat-base-instructions);
+  background: var(--cat-base-instructions);
+}
+.cat-injected-context {
+  fill: var(--cat-injected-context);
+  background: var(--cat-injected-context);
+}
+.cat-user {
+  fill: var(--cat-user);
+  background: var(--cat-user);
+}
+.cat-assistant {
+  fill: var(--cat-assistant);
+  background: var(--cat-assistant);
+}
+.cat-reasoning {
+  fill: var(--cat-reasoning);
+  background: var(--cat-reasoning);
+}
+.cat-tool-calls {
+  fill: var(--cat-tool-calls);
+  background: var(--cat-tool-calls);
+}
+.cat-tool-outputs {
+  fill: var(--cat-tool-outputs);
+  background: var(--cat-tool-outputs);
+}
+.cat-compaction-summary {
+  fill: var(--cat-compaction-summary);
+  background: var(--cat-compaction-summary);
+}
+.cat-other {
+  fill: var(--cat-other);
+  background: var(--cat-other);
+}
+.cache-cacheRead {
+  fill: var(--cache-read);
+  background: var(--cache-read);
+}
+.cache-cacheWrite {
+  fill: var(--cache-write);
+  background: var(--cache-write);
+}
+.cache-input {
+  fill: var(--cache-uncached);
+  background: var(--cache-uncached);
+}
+.cache-output {
+  fill: var(--cache-output);
+  background: var(--cache-output);
+}

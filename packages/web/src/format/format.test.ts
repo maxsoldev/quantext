@@ -14,10 +14,11 @@ describe("numbers", () => {
   });
 
   test("dollars keep two significant digits below a dollar", () => {
-    expect([0, 0.000061, 0.0042, 0.107, 1.5, 12.345, 1234.5].map(usd)).toEqual([
+    expect([0, 0.000061, 0.0042, 0.1, 0.107, 1.5, 12.345, 1234.5].map(usd)).toEqual([
       "$0",
       "$0.000061",
       "$0.0042",
+      "$0.10",
       "$0.11",
       "$1.50",
       "$12.35",
@@ -52,5 +53,19 @@ describe("time", () => {
   });
   test("durations", () => {
     expect([800, 42_000, 61_000, 7_260_000].map(duration)).toEqual(["0.8 s", "42 s", "1 min 1 s", "2 h 1 min"]);
+  });
+});
+
+describe("names", () => {
+  test("models lose their provider prefix and date", async () => {
+    const { shortModel } = await import("./format.ts");
+    expect(shortModel("claude-opus-5-5")).toBe("opus-5-5");
+    expect(shortModel("eu.anthropic.claude-sonnet-4-5-20250929-v1:0")).toBe("sonnet-4-5");
+    expect(shortModel("gpt-5")).toBe("gpt-5");
+  });
+  test("a project is named by its last folder", async () => {
+    const { projectName } = await import("./format.ts");
+    expect(projectName("/fixture-0/repo")).toBe("repo");
+    expect(projectName("C:\\work\\app\\")).toBe("app");
   });
 });
