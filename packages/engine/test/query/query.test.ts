@@ -268,6 +268,62 @@ describe("responseAt", () => {
     const q = await query(["image"]);
     expect(q.responseAt(key(q, 3), 99)).toBeUndefined();
   });
+
+  test("splits the output tokens and their cost over the answer's Blocks", async () => {
+    const q = await query(["basic-tools"]);
+    const s = key(q, 1);
+    for (const c of q.listCalls(s).items) {
+      const r = q.responseAt(s, c.index);
+      if (!r?.answered || r.outputTokens === undefined || r.outputUsd === undefined) continue;
+      const blocks = r.blocks;
+      const sum = (f: (b: (typeof blocks)[number]) => number) => blocks.reduce((n, b) => n + f(b), 0);
+      expect(sum((b) => b.tokens ?? Number.NaN)).toBe(r.outputTokens);
+      expect(sum((b) => b.costUsd ?? Number.NaN)).toBeCloseTo(r.outputUsd, 9);
+      const basis = r.blocks.length === 1 ? r.call.usage?.basis : "estimate";
+      for (const b of r.blocks) expect(b.basis).toBe(basis);
+    }
+  });
+
+  test("gives omitted reasoning a share of the output, though the log holds no text of it", async () => {
+    const q = await query(["basic-tools"]);
+    const s = key(q, 1);
+    const r = q
+      .listCalls(s)
+      .items.map((c) => q.responseAt(s, c.index))
+      .find((x) => x?.blocks[0]?.reasoning === "omitted");
+    expect(r?.blocks[0]?.tokens).toBeGreaterThan(0);
+  });
+});
+
+describe("fromResponseOf", () => {
+  test("marks each Block of a context that an earlier Call answered with that Call", async () => {
+    const q = await query(["basic-tools"]);
+    const s = key(q, 1);
+    const calls = q.listCalls(s).items;
+    const lastIdx = calls.at(-1)?.index ?? -1;
+    const ctx = q.contextAt(s, lastIdx);
+    const answered = (ctx?.blocks ?? []).filter((b) => b.kind === "assistant" || b.kind === "tool-call");
+    expect(answered.length).toBeGreaterThan(1);
+    for (const b of answered) {
+      const from = b.fromResponseOf;
+      expect(from).toBeDefined();
+      expect(from).toBeLessThan(b.run?.firstCall ?? 0);
+      expect(q.responseAt(s, from ?? -1)?.blocks.map((x) => x.hash)).toContain(b.hash);
+    }
+    expect(ctx?.blocks.filter((b) => b.kind === "user" || b.kind === "tool-schema").some((b) => b.fromResponseOf)).toBe(
+      false,
+    );
+  });
+
+  test("the response of a Call is in the next Call of its lane, marked with it", async () => {
+    const q = await query(["basic-tools"]);
+    const s = key(q, 1);
+    const [first, second] = q.listCalls(s).items.filter((c) => c.lane === q.listCalls(s).items[0]?.lane);
+    const hashes = q.responseAt(s, first?.index ?? -1)?.blocks.map((b) => b.hash) ?? [];
+    const ctx = q.contextAt(s, second?.index ?? -1);
+    const marked = ctx?.blocks.filter((b) => b.fromResponseOf === first?.index).map((b) => b.hash);
+    expect(marked).toEqual(hashes);
+  });
 });
 
 describe("contextDiff", () => {

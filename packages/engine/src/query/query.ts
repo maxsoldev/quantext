@@ -14,6 +14,7 @@ import type {
   CallIssue,
   CallListOptions,
   CallParams,
+  CallResponse,
   CallResponseDetail,
   CallSummary,
   CompactionDetail,
@@ -59,6 +60,7 @@ import {
 import { categoryOf, emptyCategories, isDeferred } from "./categories.ts";
 import type { LifetimeRow } from "./lifetimes.ts";
 import { lifetimes, PRICED_CALLS, PRICED_RUNS, pricedCall, pricedRun } from "./lifetimes.ts";
+import { markResponses, splitOutput } from "./output.ts";
 import { contextParts, partTotals } from "./parts.ts";
 import { previewOf } from "./preview.ts";
 import { API_VERSION } from "./sql.ts";
@@ -343,6 +345,14 @@ export function createQuery(options: QueryOptions): Query {
     if (call.usage !== undefined) out.outputTokens = call.usage.outputTokens;
     if (call.usage?.reasoningOutputTokens !== undefined) out.reasoningOutputTokens = call.usage.reasoningOutputTokens;
     if (call.cost !== undefined) out.outputUsd = call.cost.outputUsd;
+    if (call.usage !== undefined) {
+      const output = { tokens: call.usage.outputTokens, basis: call.usage.basis };
+      splitOutput(blocks, {
+        ...output,
+        ...(out.reasoningOutputTokens === undefined ? {} : { reasoningTokens: out.reasoningOutputTokens }),
+        ...(out.outputUsd === undefined ? {} : { usd: out.outputUsd }),
+      });
+    }
     return out;
   };
   const context = (key: SessionKey, index: number): CallContext | undefined => {
@@ -382,6 +392,14 @@ export function createQuery(options: QueryOptions): Query {
       }
       return b;
     });
+    if (rebuilt) {
+      const answers = q(
+        "SELECT idx, response FROM calls WHERE log = ? AND session_id = ? AND idx < ? AND response IS NOT NULL",
+      )
+        .all(key.log, key.id, index)
+        .map((r) => ({ index: Number(r.idx), response: JSON.parse(String(r.response)) as CallResponse }));
+      markResponses(blocks, answers, index);
+    }
     if (rebuilt) {
       const framing: ContextBlock = {
         position: blocks.length,

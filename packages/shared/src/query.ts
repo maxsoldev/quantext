@@ -192,6 +192,8 @@ export interface ContextBlock {
   run?: { firstCall: number; lastCall?: number };
   /** The attached texts the Block holds (Block parts), in order, when it holds any. */
   parts?: ContextPart[];
+  /** The Call (by index) whose Response this Block is: its answer, sent back as input from the next Call on. */
+  fromResponseOf?: number;
 }
 
 /**
@@ -286,6 +288,13 @@ export interface ResponseEntry {
   preview: string;
   chars: number;
   truncated: boolean;
+  /**
+   * Its share of the Call's output tokens and output cost (absent without Usage): by characters, basis `estimate`;
+   * the reasoning part when the provider reports it; an only Block takes all, with the Call's basis.
+   */
+  tokens?: number;
+  basis?: TokenBasis;
+  costUsd?: number;
 }
 
 /** What the model answered on Call N: the Blocks of its output in order, why it stopped, and what it cost. */
