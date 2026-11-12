@@ -58,6 +58,20 @@ describe("the SQL driver", () => {
     expect(db.prepare("SELECT i FROM t").all()).toEqual([{ i: 1 }]);
   });
 
+  test("rethrows the original error when SQLite already ended the transaction (as after SQLITE_FULL)", async () => {
+    const db = await open();
+    db.exec("CREATE TABLE t (i INTEGER)");
+    expect(() =>
+      db.transaction(() => {
+        db.prepare("INSERT INTO t VALUES (1)").run();
+        db.exec("ROLLBACK"); // what SQLite does by itself on some errors
+        throw new Error("database or disk is full");
+      }),
+    ).toThrow("database or disk is full");
+    db.transaction(() => db.prepare("INSERT INTO t VALUES (2)").run());
+    expect(db.prepare("SELECT i FROM t").all()).toEqual([{ i: 2 }]);
+  });
+
   test("returns the value of the transaction's function", async () => {
     const db = await open();
     expect(db.transaction(() => 42)).toBe(42);

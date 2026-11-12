@@ -30,6 +30,8 @@ export interface RawDatabase {
   runtime: SqlDriver["runtime"];
   exec(sql: string): void;
   prepare(sql: string): SqlStatement;
+  /** Whether a transaction is open: SQLite ends one by itself on some errors (SQLITE_FULL, SQLITE_IOERR). */
+  inTransaction(): boolean;
   close(): void;
 }
 
@@ -62,7 +64,13 @@ function withTransactions(raw: RawDatabase): SqlDriver {
         raw.exec("COMMIT");
         return result;
       } catch (error) {
-        raw.exec("ROLLBACK");
+        if (raw.inTransaction()) {
+          try {
+            raw.exec("ROLLBACK");
+          } catch (rollback) {
+            throw new AggregateError([error, rollback], `rollback failed after: ${String(error)}`);
+          }
+        }
         throw error;
       } finally {
         open = false;
