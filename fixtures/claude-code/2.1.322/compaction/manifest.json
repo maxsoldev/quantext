@@ -1,0 +1,39 @@
+{
+  "scenario": "compaction",
+  "harness": "claude-code",
+  "harnessVersion": "2.1.322",
+  "description": "A turn with tool output, then `/compact` headless through resume, then a turn after the compaction.",
+  "exercises": [
+    "manual compaction (/compact)",
+    "compact summary",
+    "a call after compaction"
+  ],
+  "steps": [
+    "claude -p --output-format json --permission-mode bypassPermissions --strict-mcp-config --session-id 00000000-0000-4000-8000-000000000005 \"Read src/big.txt and notes.txt, then reply with the number of lines in each.\"",
+    "claude -p --output-format json --permission-mode bypassPermissions --strict-mcp-config --resume 00000000-0000-4000-8000-000000000005 \"/compact\"",
+    "claude -p --output-format json --permission-mode bypassPermissions --strict-mcp-config --resume 00000000-0000-4000-8000-000000000005 \"Which two files did you read earlier? Reply with the names only.\""
+  ],
+  "costUsd": 0.2074,
+  "unresolvedTailHashes": 0,
+  "transcripts": {
+    "00000000-0000-4000-8000-000000000005.jsonl": {
+      "rows": 72,
+      "llmCalls": 4,
+      "rowTypes": {
+        "api-request": 4,
+        "api-request-blob": 6,
+        "api-request-shape": 2,
+        "assistant": 5,
+        "atis-latch": 6,
+        "attachment": 20,
+        "cost-state": 3,
+        "last-prompt": 6,
+        "mode": 3,
+        "queue-operation": 6,
+        "system": 1,
+        "tools-used": 2,
+        "user": 8
+      }
+    }
+  }
+}
