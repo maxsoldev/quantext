@@ -22,6 +22,8 @@ import {
   printSql,
   printToolOutputs,
 } from "./print.ts";
+import type { ServeHooks } from "./serve.ts";
+import { DEFAULT_IDLE_MINUTES, DEFAULT_PORT, serve } from "./serve.ts";
 
 /** 0: done. 1: failed (no store, a store or SQL error). 2: wrong use (arguments, a rejected statement). 3: not found. */
 export const EXIT = { ok: 0, failed: 1, usage: 2, notFound: 3 } as const;
@@ -34,6 +36,8 @@ export interface CliIo {
   /** The user name and the machine's name, hidden in demo mode. */
   user?: string;
   host?: string;
+  /** `qx serve`: a stop signal, a clock, a browser opener and more, in place of the process's own (tests). */
+  serve?: Omit<ServeHooks, "out" | "err">;
 }
 
 export const USAGE = `qx: what the model received on every call, from the local session logs.
@@ -53,6 +57,11 @@ Usage:
                                                 One read-only statement over the tables and views, in its own
                                                 process, stopped after --timeout seconds (default 30)
   qx report                                     What ingest could not read or map, and the Calls' issues
+  qx serve [--root <dir>] [--port <n>] [--live while-viewer|always] [--idle-minutes <n>] [--open]
+                                                The engine: the viewer and the HTTP API on 127.0.0.1 (port
+                                                ${DEFAULT_PORT}, else a free one), live ingest; reuses a running
+                                                engine. Stops after --idle-minutes (default ${DEFAULT_IDLE_MINUTES}) with
+                                                no viewer, unless --live always
   qx --version | --help
 
 Options for every command:
@@ -80,6 +89,10 @@ const OPTIONS = {
   lane: { type: "string" },
   diff: { type: "boolean" },
   timeout: { type: "string" },
+  port: { type: "string" },
+  live: { type: "string" },
+  "idle-minutes": { type: "string" },
+  open: { type: "boolean" },
   version: { type: "boolean" },
   help: { type: "boolean", short: "h" },
 } as const;
@@ -114,6 +127,7 @@ export async function main(argv: readonly string[], given: CliIo): Promise<numbe
     const dataDir = values["data-dir"] ?? defaultDataDir(io.home);
     if (command === "ingest") return await ingest(values, args, dataDir, io);
     if (command === "sql") return await sql(values, args, dataDir, io);
+    if (command === "serve") return await serveCommand(values, args, dataDir, io);
     const run = COMMANDS[command];
     if (run === undefined) throw new UsageError(`unknown command: ${command}`);
     const db = await openReader(dataDir, { setup: installViews });
@@ -317,6 +331,35 @@ async function ingest(values: Values, args: string[], dataDir: string, io: CliIo
   } finally {
     store.close();
   }
+}
+
+async function serveCommand(values: Values, args: string[], dataDir: string, io: CliIo): Promise<number> {
+  arity(args, 0, "serve");
+  const live = values.live ?? "while-viewer";
+  if (live !== "while-viewer" && live !== "always") {
+    throw new UsageError(`--live must be while-viewer or always, not ${live}`);
+  }
+  const port = integer(values.port, "--port");
+  if (port !== undefined && port > 65_535) throw new UsageError("--port must be from 0 to 65535");
+  const idleMinutes = integer(values["idle-minutes"], "--idle-minutes") ?? DEFAULT_IDLE_MINUTES;
+  if (idleMinutes < 1) throw new UsageError("--idle-minutes must be at least 1");
+  const demo = demoOf(values).demo;
+  return serve(
+    {
+      dataDir,
+      root: values.root ?? claudeConfigDir(io.env, io.home),
+      version: packageJson.version,
+      ...(port === undefined ? {} : { port }),
+      ...(demo === undefined ? {} : { demo }),
+      live,
+      idleMinutes,
+      open: values.open === true,
+      home: io.home,
+      ...(io.user === undefined ? {} : { user: io.user }),
+      ...(io.host === undefined ? {} : { host: io.host }),
+    },
+    { out: io.stdout, err: io.stderr, ...io.serve },
+  );
 }
 
 /** A Session by its id, an id prefix, or `<log>:<id>` where the same id is in more than one log. */

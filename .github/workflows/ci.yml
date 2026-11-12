@@ -23,8 +23,10 @@ jobs:
         include:
           - runtime: Node 22
             check: check
+            smoke: node
           - runtime: Bun
             check: check:bun
+            smoke: bun
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,3 +49,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm ${{ matrix.check }}
+
+      # Bundle the engine and run dist/engine.js serve end to end on this job's runtime.
+      - run: pnpm smoke --runtime ${{ matrix.smoke }}

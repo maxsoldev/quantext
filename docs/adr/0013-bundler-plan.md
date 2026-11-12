@@ -1,6 +1,6 @@
 # 13. Rolldown to bundle the engine into dist/engine.js
 
-Status: accepted (to be configured in build step 7)
+Status: accepted (configured in build step 7, see the end)
 
 ## Context
 
@@ -20,3 +20,13 @@ contributor's machine).
 
 - One toolchain (Vite and Rolldown) for the viewer and the engine.
 - A later compiled binary per platform (`bun build --compile`) is a separate step and needs its own ADR.
+
+## Build step 7
+
+`pnpm build` (`scripts/build-engine.ts`) runs one Rolldown build per entry: `dist/engine.js` (`qx`, with
+`qx serve`), `dist/sql-child.js` and `dist/sql-watchdog.js`, plus the viewer's files in `dist/web/`. The only
+split points are the store's two drivers, so each entry has two small chunks (`<entry>-node-driver.js`,
+`<entry>-bun-driver.js`) that hold the one static import of `node:sqlite` or `bun:sqlite`: Bun resolves every
+`import()` in a file when it loads it, so `node:sqlite` must not be in a file Bun loads, and one file per entry
+is not possible. The build fails when an output imports anything but built-ins and its own chunks. `pnpm smoke`
+runs the bundle end to end on Node and Bun, in CI on each job's runtime.

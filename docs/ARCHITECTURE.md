@@ -37,7 +37,8 @@ agents (SQL, CLI, later MCP). Nothing leaves the machine.
 
 `/quantext view`:
 
-1. `$.http.fetch('http://127.0.0.1:<port>/health')`. If it answers, go to step 4.
+1. `$.http.fetch('http://127.0.0.1:<port>/health')`, with the port from `~/.quantext/engine.json` (4747 when free;
+   ADR 25). If it answers, go to step 4.
 2. Find a runtime: `node` ≥ 22.18, else `bun`, else show a clear message with install steps.
 3. Start it detached: `$.process.run(['sh', '-c', 'nohup <runtime> "<plugin root>/dist/engine.js" >>"<log>" 2>&1 </dev/null &'])`.
    Poll `/health`.
@@ -154,7 +155,7 @@ pnpm workspace, one repo:
 ```
 packages/
   shared/    domain and API types (no runtime code)
-  engine/    adapters/, providers/, core/, ingest/, store/, query/, api/, cli/  → bundled to one file, dist/engine.js
+  engine/    adapters/, providers/, core/, ingest/, store/, query/, api/, cli/  → bundled to dist/engine.js (ADR 13)
   web/       live context viewer (React + Vite), built into the engine's static files
   mod/       Claude Code plugin; imports only types from shared
 fixtures/    session logs recorded on a dummy repo, one folder per harness version and scenario

@@ -8,6 +8,8 @@
   },
   "scripts": {
     "qx": "node packages/engine/src/cli/qx.ts",
+    "build": "node scripts/build-engine.ts",
+    "smoke": "pnpm build && node scripts/smoke-engine.ts",
     "lint": "biome ci .",
     "format": "biome check --write .",
     "typecheck": "tsc -p tsconfig.json && pnpm -r typecheck",

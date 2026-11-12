@@ -107,10 +107,13 @@ export function createApi(options: ApiOptions): Api {
     // Header size, and time to send the headers and the request: a slow or huge request cannot hold a socket.
     { maxHeaderSize: 16 * 1024, headersTimeout: 10_000, requestTimeout: 30_000, keepAliveTimeout: 5_000 },
     (req, res) => {
-      lastActive = now();
-      res.on("close", () => {
+      const touch = () => {
         lastActive = now();
-      });
+      };
+      touch();
+      // Bun tells a closed event stream on the request only, Node on both.
+      req.on("close", touch);
+      res.on("close", touch);
       handle(req, res).catch((error: unknown) => {
         if (!(error instanceof HttpError)) onError(error);
         const failure = error instanceof HttpError ? error : new HttpError(500, "internal", "the engine failed");
