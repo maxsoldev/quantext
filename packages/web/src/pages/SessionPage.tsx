@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client.ts";
 import { laneView, mainLane } from "../chart/lane.ts";
 import { TimelineChart } from "../chart/TimelineChart.tsx";
+import { ContextAt } from "../context/ContextAt.tsx";
 import { CACHE_PARTS, CATEGORIES } from "../context/categories.ts";
 import { duration, percent, projectName, shortModel, usd, when } from "../format/format.ts";
 import { useLiveVersion } from "../live/hooks.ts";
@@ -161,6 +162,7 @@ export function SessionPage({ route }: { route: SessionRoute }) {
       ) : (
         <p className="muted">This session has no calls yet.</p>
       )}
+      {callIndex !== undefined && <ContextAt sessionKey={key} call={callIndex} version={version} />}
       {view && view.calls.length > 0 && <Scrubber place={place} last={last} index={callIndex ?? 0} onChange={select} />}
     </article>
   );

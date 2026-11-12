@@ -27,7 +27,7 @@ describe("numbers", () => {
   });
 
   test("shares below 10% keep one decimal so small parts do not read as 0%", () => {
-    expect([0, 0.004, 0.0754, 0.776, 1].map(percent)).toEqual(["0%", "0.4%", "7.5%", "78%", "100%"]);
+    expect([0, 0.00001, 0.004, 0.0754, 0.776, 1].map(percent)).toEqual(["0%", "<0.1%", "0.4%", "7.5%", "78%", "100%"]);
   });
 });
 

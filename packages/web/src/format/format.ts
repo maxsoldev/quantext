@@ -26,6 +26,7 @@ export function usd(x: number): string {
 export function percent(x: number): string {
   const p = 100 * x;
   if (p === 0) return "0%";
+  if (p < 0.1) return "<0.1%";
   return p < 10 ? `${p.toFixed(1)}%` : `${Math.round(p)}%`;
 }
 
