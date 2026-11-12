@@ -5,7 +5,7 @@
  */
 import type { EngineInterface } from "claude-code";
 import type { EngineAddress } from "./engine-file.ts";
-import { engineUrl, parseEngineFile, parseEngineVersion, parseHealth } from "./engine-file.ts";
+import { engineUrl, parseEngineFile, parseEngineVersion, parseHealth, printable } from "./engine-file.ts";
 import { INSTALL_HINT, MIN_BUN, MIN_NODE, meetsVersion } from "./runtime.ts";
 
 /** How long one `/health` may take: a local engine answers in milliseconds. */
@@ -21,6 +21,9 @@ export const START_POLL_MS = 250;
  */
 export const START_SCRIPT =
   'umask 077; mkdir -p "$3" && chmod 700 "$3" && cd "$3" && nohup "$0" "$1" serve --live while-viewer >>"$2" 2>&1 </dev/null &';
+
+/** How much of a failed start's stderr a toast shows. */
+const STDERR_SHOWN = 200;
 
 type Found = { kind: "same"; url: string } | { kind: "other"; version: string; pid: number } | { kind: "none" };
 
@@ -117,7 +120,8 @@ export async function openViewer($: EngineInterface): Promise<void> {
     const argv = ["sh", "-c", START_SCRIPT, runtime, `${engineDir}/engine.js`, log, dataDir];
     const started = await tryRun($, argv, engineDir);
     if (started?.exitCode !== 0) {
-      $.ui.toast(`quantext: the engine could not be started (${started?.stderr.trim() || "sh did not run"}).`);
+      const why = printable(started?.stderr.trim() ?? "").slice(0, STDERR_SHOWN) || "sh did not run";
+      $.ui.toast(`quantext: the engine could not be started (${why}).`);
       return;
     }
     found = await waitForEngine($, dataDir, version);

@@ -91,6 +91,16 @@ test("no command runs in the session's folder, so its bunfig.toml and .env reach
   expect(w.cwds).toEqual(Array(5).fill(`${w.root()}/engine`));
 });
 
+test("a failed start shows its stderr printable and cut short", async ($, on) => {
+  const w = world(on, { versions: { node: "v24.14.0" }, shFails: `\u001b[2Jno${"x".repeat(500)}` });
+  await $.command.run(command("quantext", "view"));
+  await w.settle();
+  const shown = w.toasts.at(-1) ?? "";
+  expect(shown).toContain("could not be started (?[2Jno");
+  expect(shown).not.toContain("\u001b");
+  expect(shown.length).toBeLessThan(300);
+});
+
 test("a node older than 22.18 is passed over for bun", async ($, on) => {
   const w = world(on, { versions: { node: "v22.17.1", bun: "1.3.3" }, afterStart: { [HEALTH]: health() } });
   await $.command.run(command("quantext", "view"));
