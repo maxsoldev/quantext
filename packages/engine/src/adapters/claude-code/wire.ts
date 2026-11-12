@@ -11,6 +11,11 @@ import type { Content } from "./lookup.ts";
 import { get, put } from "./records.ts";
 import type { TranscriptState, WireMessage } from "./state.ts";
 
+/** Assistant messages whose rows may still come, per transcript; older ones are closed. */
+const MAX_OPEN_ASSISTANT = 8;
+/** User rows the API may join into one message; a longer run keeps only its last rows. */
+const MAX_USER_RUN = 16;
+
 export function wireHash(role: string, content: Json): string {
   return sha256Sorted({ role, content });
 }
@@ -28,6 +33,7 @@ export function addUserRow(store: Content, transcript: TranscriptState, message:
   store.putMessage(wireHash(role, message.content ?? null), { role, content });
   if (typeof message.content === "string") store.putMessage(wireHash(role, content), { role, content });
   transcript.userRun.push(content);
+  if (transcript.userRun.length > MAX_USER_RUN) transcript.userRun.shift();
 }
 
 /** Add one row of an assistant message; returns the hash of the message so far. */
@@ -36,10 +42,11 @@ export function addAssistantRow(store: Content, transcript: TranscriptState, mes
   const id = str(message.id);
   if (id === undefined) return undefined;
   const content = [...(get(store.state.assistant, id) ?? []), ...(arr(message.content) ?? [])];
-  if (transcript.lastAssistantId !== undefined && transcript.lastAssistantId !== id) {
-    delete store.state.assistant[transcript.lastAssistantId]; // its rows are done: only its hash is needed now
+  transcript.openAssistantIds = [...transcript.openAssistantIds.filter((open) => open !== id), id];
+  while (transcript.openAssistantIds.length > MAX_OPEN_ASSISTANT) {
+    const done = transcript.openAssistantIds.shift() ?? "";
+    delete store.state.assistant[done]; // its rows are long done: only its hash is needed now
   }
-  transcript.lastAssistantId = id;
   put(store.state.assistant, id, content);
   const hash = wireHash("assistant", content);
   store.putMessage(hash, { role: "assistant", content });

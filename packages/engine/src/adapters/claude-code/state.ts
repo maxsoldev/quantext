@@ -66,8 +66,8 @@ export interface TranscriptState {
   lines: number;
   /** Adjacent user rows since the last assistant row; the API joins them into one message. */
   userRun: Json[][];
-  /** The message id of the last assistant row: its later rows add to it. */
-  lastAssistantId?: string;
+  /** The message ids of the latest assistant rows, newest last: their later rows add to them (bounded). */
+  openAssistantIds: string[];
   /** The last Call logged in the transcript. */
   lastCallId?: string;
   /** The running totals of the last `cost-state` row, and the Usage of the Calls logged since, per model. */
