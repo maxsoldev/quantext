@@ -9,3 +9,8 @@ Medium and low problems found in release 1, each with a proposed fix.
   list price, but those endpoints cost 10% more for Claude 4.5 models and later (the engine's pricing applies it).
   Fix: multiply by 1.1 when `$.session.model()` is a regional Bedrock id of such a model, or show the engine's cost
   once it runs.
+- **No install straight from GitHub yet.** The marketplace entry points at `./dist/plugin`, which is built, not
+  committed. Fix: a release job commits `dist/plugin` to a `plugin` branch and the entry's source names that ref
+  (ADR 27).
+- **CI does not run the mod's tests.** `pnpm test:mod` needs the `claude` CLI and skips loudly without it. Fix:
+  install a pinned Claude Code in CI and set `QUANTEXT_REQUIRE_CLAUDE=1`.

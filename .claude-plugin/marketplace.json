@@ -1,0 +1,11 @@
+{
+  "name": "quantext",
+  "owner": { "name": "maxsoldev" },
+  "plugins": [
+    {
+      "name": "quantext",
+      "source": "./dist/plugin",
+      "description": "Live context and cache costs in the status line, user-only nudges, and the Quantext live context viewer"
+    }
+  ]
+}
