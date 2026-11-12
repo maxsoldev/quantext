@@ -509,6 +509,24 @@ describe("a Session's detail", () => {
     expect(parallel).toHaveLength(1);
   });
 
+  test("prices each tool call's own Block as input to the Calls after it, next to its output", async () => {
+    const q = await query(["basic-tools"]);
+    const outputs = q.toolOutputs(key(q, 1), { limit: 100 }).items;
+    expect(outputs).toHaveLength(9);
+    for (const o of outputs) {
+      // The model wrote the call in Call n; Call n + 1 sends it back with the result, so both stay as long.
+      expect(o.toolCall?.calls).toBeGreaterThan(0);
+      expect(o.toolCall?.calls).toBe(o.calls);
+      expect(o.toolCall?.costUsd.total).toBeGreaterThan(0);
+      expect(["exact", "derived", "anchored", "estimate"]).toContain(o.toolCall?.basis);
+      const parts = o.toolCall?.costUsd;
+      expect((parts?.cacheRead ?? 0) + (parts?.cacheWrite ?? 0) + (parts?.input ?? 0)).toBeCloseTo(
+        parts?.total ?? 0,
+        12,
+      );
+    }
+  });
+
   test("has its compaction with the sizes the harness logged, and what was removed and kept", async () => {
     const q = await query(["compaction"]);
     const [c] = q.compactions(key(q, 5)).items;

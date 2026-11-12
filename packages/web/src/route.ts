@@ -8,7 +8,7 @@ export type SortKey = "ended" | "started" | "cost" | "calls";
 
 export type SessionView = "tools" | "compactions";
 /** Tool calls: by lifetime cost (default), result tokens, Calls kept, or in the order they ran. */
-export type ToolSort = "cost" | "tokens" | "calls" | "time";
+export type ToolSort = "total" | "cost" | "input-cost" | "input-tokens" | "tokens" | "calls" | "time";
 
 export type Route =
   | { page: "sessions"; project?: string; sort?: SortKey; search?: string }
@@ -27,7 +27,7 @@ export type Route =
   | { page: "not-found" };
 
 const SORTS: readonly string[] = ["ended", "started", "cost", "calls"];
-const TOOL_SORTS: readonly string[] = ["cost", "tokens", "calls", "time"];
+const TOOL_SORTS: readonly string[] = ["total", "cost", "input-cost", "input-tokens", "tokens", "calls", "time"];
 
 /**
  * A Call's number in the UI (headings, tooltips, the scrubber, `?call=` in URLs) is 1-based and counts every Call

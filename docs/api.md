@@ -24,7 +24,7 @@ All are GET (or HEAD). `:log` and `:id` are a Session's key (`SessionKey`); `:n`
 | `/api/v1/sessions/:log/:id/calls/:n/response` | `responseAt` | `CallResponseDetail`: what the model answered on Call `n`. `answered` (false while the log holds no answer), `blocks` in order (`hash`, `kind`, `category`, `source`, `reasoning`: `full` `omitted` `redacted`, `toolCall`: `id`, `name`; `preview`, `chars`, `truncated`; `tokens`, `basis`, `costUsd`: its share of the output tokens and output cost, by characters with basis `estimate`, the reported reasoning part to the reasoning Blocks, an only Block all with the Call's basis; the full text from `/api/v1/blocks/:log/:hash`), `stopReason`, `outputTokens`, `reasoningOutputTokens`, `outputUsd`. A Response that grows is an `updated` Call in the `calls` event |
 | `/api/v1/sessions/:log/:id/timeline` | `callTimeline` | |
 | `/api/v1/sessions/:log/:id/tool-calls` | `toolCalls` | |
-| `/api/v1/sessions/:log/:id/tool-outputs` | `toolOutputs` | `sort` (`cost` `tokens` `calls`), `limit` |
+| `/api/v1/sessions/:log/:id/tool-outputs` | `toolOutputs` | `sort` (`cost` `tokens` `calls`, of the result), `limit`. `toolCall`: the lifetime of the tool use's own Block (its input, as the model wrote it) over the Calls that sent it back, with its `blockHash` |
 | `/api/v1/sessions/:log/:id/blocks` | `blockLifetimes` | `sort`, `limit` |
 | `/api/v1/sessions/:log/:id/compactions` | `compactions` | |
 | `/api/v1/sessions/:log/:id/cache-breaks` | `cacheBreaks` | |

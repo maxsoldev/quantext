@@ -1,9 +1,10 @@
 /**
- * A Session's tool calls: tool, input, output tokens, the Calls its output stayed in, and its lifetime cost (its
- * tokens in each of those Calls, priced). By default the most expensive output comes first. A row opens a panel
+ * A Session's tool calls: tool, input, the tokens of the call itself (its input) and of its output, the Calls they
+ * stayed in, and their lifetime cost (their tokens in each of those Calls, priced). By default the most expensive
+ * tool call (input and output together) comes first. A row opens a panel
  * with the input, an Edit's change, and links to the call, the result block and a subagent's own Session.
  */
-import type { SessionSummary } from "@quantext/shared";
+import type { Lifetime, SessionSummary } from "@quantext/shared";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client.ts";
@@ -17,17 +18,24 @@ import { Tokens } from "../ui/Num.tsx";
 import { useLoad } from "../ui/useLoad.ts";
 import { useWindow } from "../ui/useWindow.ts";
 import type { ToolRow } from "./model.ts";
-import { editDiff, inputSummary, toolRows } from "./model.ts";
+import { costOf, editDiff, inputSummary, toolRows } from "./model.ts";
 
 type SessionRoute = Extract<Route, { page: "session" }>;
 const ROW = 56;
 
 const SORTS: { key: ToolSort; label: string; tip: string }[] = [
+  { key: "total", label: "Total cost", tip: "The lifetime cost of the tool call's input and of its output, added." },
+  {
+    key: "input-cost",
+    label: "Input cost",
+    tip: "What the tool call itself cost over the session: the input the model wrote (a command, a file to write, a brief), sent back in every later call.",
+  },
   {
     key: "cost",
-    label: "Lifetime cost",
+    label: "Output cost",
     tip: "What the output cost over the session: its tokens in every call it stayed in, at the price of each part.",
   },
+  { key: "input-tokens", label: "Input tokens", tip: "The tool call's own tokens: the tool and its input." },
   { key: "tokens", label: "Output tokens", tip: "The output's tokens in the first call that sent it." },
   { key: "calls", label: "Calls kept", tip: "How many calls the output was sent in." },
   { key: "time", label: "Order run", tip: "In the order the model called the tools." },
@@ -45,7 +53,7 @@ export function ToolCalls({
   version: number;
 }) {
   const key = route.key;
-  const sort = route.sort ?? "cost";
+  const sort = route.sort ?? "total";
   const data = useLoad(
     async (signal) => {
       const [calls, outputs] = await Promise.all([api.toolCalls(key, signal), api.toolOutputs(key, signal)]);
@@ -72,26 +80,31 @@ export function ToolCalls({
     );
   }
   if (!data.value) return <section className="card muted">Reading the tool calls…</section>;
-  const outputCost = rows.reduce((n, r) => n + (r.lifetime?.costUsd.total ?? 0), 0);
+  const outputCost = rows.reduce((n, r) => n + costOf(r).output, 0);
+  const callCost = rows.reduce((n, r) => n + costOf(r).input, 0);
   const inputCost = session.cost.totalUsd - session.cost.outputUsd;
-  const maxCost = Math.max(1e-12, ...rows.map((r) => r.lifetime?.costUsd.total ?? 0));
+  const maxCost = Math.max(1e-12, ...rows.map((r) => costOf(r).total));
   return (
     <section className="card tools-card" aria-labelledby="tools-title" data-testid="tool-calls">
       <div className="tools-head">
         <h2 id="tools-title">Tool calls</h2>
         {rows.length > 0 && (
           <p className="tools-lede">
-            {count(rows.length, "tool call")}. Their outputs cost{" "}
+            {count(rows.length, "tool call")}. Together they cost{" "}
             <button
               type="button"
               className="tip-anchor num"
-              data-tip={`${usd(outputCost)}: the lifetime cost of every tool output, of ${usd(inputCost)} input cost in the session.`}
+              data-testid="tools-total"
+              data-tip={`${usd(callCost + outputCost)}: the lifetime cost of every tool call's input and output, of ${usd(inputCost)} input cost in the session.`}
             >
-              {usd(outputCost)}
+              {usd(callCost + outputCost)}
             </button>
-            {inputCost > 0 && <>, {percent(outputCost / inputCost)} of the session's input cost</>}. A tool's output
-            stays in the context of every later call until a compaction removes it, so each call pays for it again,
-            mostly at the cache read price: its <Term id="lifetime-cost">lifetime cost</Term>.
+            {inputCost > 0 && <>, {percent((callCost + outputCost) / inputCost)} of the session's input cost</>}: the
+            calls themselves (their input) <span className="num">{usd(callCost)}</span>, their outputs{" "}
+            <span className="num">{usd(outputCost)}</span>
+            {outputCost > 0 && callCost > 0 && <> ({ratio(callCost / outputCost)} the outputs)</>}. Both stay in the
+            context of every later call until a compaction removes them, so each call pays for them again, mostly at the
+            cache read price: their <Term id="lifetime-cost">lifetime cost</Term>.
           </p>
         )}
       </div>
@@ -166,12 +179,23 @@ function ToolTable({
           </th>
           <th scope="col">Tool and input</th>
           <th scope="col" className="right">
-            Output
+            Input tokens
+          </th>
+          <th scope="col" className="right">
+            Output tokens
           </th>
           <th scope="col" className="right">
             Kept in
           </th>
-          <th scope="col">Lifetime cost</th>
+          <th scope="col" className="right">
+            <span className="swatch cat-tool-calls" aria-hidden="true" />
+            Input cost
+          </th>
+          <th scope="col" className="right">
+            <span className="swatch cat-tool-outputs" aria-hidden="true" />
+            Output cost
+          </th>
+          <th scope="col">Total</th>
         </tr>
       </thead>
       <tbody className="tbody" ref={scroller} onKeyDown={onKey} data-testid="tool-rows">
@@ -210,7 +234,9 @@ function ToolRowView({
 }) {
   const c = r.call;
   const l = r.lifetime;
-  const cost = l?.costUsd.total ?? 0;
+  const inp = r.input;
+  const cost = costOf(r);
+  const none = <span className="muted">none</span>;
   return (
     <tr className={selected ? "tr selected" : "tr"} data-row={index} data-testid="tool-row" aria-rowindex={index + 2}>
       <td className="right num muted">{c.callIndex ?? "none"}</td>
@@ -227,6 +253,17 @@ function ToolRowView({
           <span className="tool-input content">{inputSummary(c.name, c.input, cwd)}</span>
         </button>
       </td>
+      <td className="right" data-testid="input-tokens">
+        {inp?.tokens !== undefined ? (
+          <Tokens
+            n={inp.tokens}
+            basis={inp.basis ?? "exact"}
+            note="The tool call's own tokens (the tool and its input) in the calls that sent it."
+          />
+        ) : (
+          none
+        )}
+      </td>
       <td className="right">
         {c.resultTokens !== undefined ? (
           <Tokens
@@ -235,43 +272,86 @@ function ToolRowView({
             note="The output's tokens in the first call that sent it."
           />
         ) : (
-          <span className="muted">none</span>
+          none
         )}
       </td>
       <td className="right">
-        {l ? (
-          <button
-            type="button"
-            className="tip-anchor num"
-            data-tip={`Sent in ${count(l.calls, "call")}${l.firstCall !== undefined ? `, from call ${l.firstCall} to ${l.lastCall}` : ""}.`}
-          >
-            {count(l.calls, "call")}
+        {l || inp ? (
+          <button type="button" className="tip-anchor num" data-tip={keptTip(r)}>
+            {inp && l && inp.calls !== l.calls
+              ? `${inp.calls} / ${l.calls}`
+              : count(l?.calls ?? inp?.calls ?? 0, "call")}
           </button>
         ) : (
-          <span className="muted">none</span>
+          none
+        )}
+      </td>
+      <td className="right" data-testid="input-cost">
+        {inp ? (
+          <button type="button" className="tip-anchor num" data-tip={lifetimeTip(inp, "The tool call's input")}>
+            {usd(cost.input)}
+          </button>
+        ) : (
+          none
+        )}
+      </td>
+      <td className="right" data-testid="output-cost">
+        {l ? (
+          <button type="button" className="tip-anchor num" data-tip={lifetimeTip(l, "Its output")}>
+            {usd(cost.output)}
+          </button>
+        ) : (
+          none
         )}
       </td>
       <td>
-        {l ? (
+        {l || inp ? (
           <span className="share">
-            <button type="button" className="tip-anchor num" data-tip={lifetimeTip(l)}>
-              {usd(cost)}
+            <button
+              type="button"
+              className="tip-anchor num"
+              data-testid="total-cost"
+              data-tip={`${usd(cost.total)} over the session: input ${usd(cost.input)}, output ${usd(cost.output)}.`}
+            >
+              {usd(cost.total)}
             </button>
-            <span className="share-track">
-              <span className="share-fill cat-tool-outputs" style={{ width: `${(100 * cost) / maxCost}%` }} />
+            <span className="share-track stacked" aria-hidden="true">
+              {cost.input > 0 && (
+                <span className="share-fill cat-tool-calls" style={{ width: `${(100 * cost.input) / maxCost}%` }} />
+              )}
+              {cost.output > 0 && (
+                <span className="share-fill cat-tool-outputs" style={{ width: `${(100 * cost.output) / maxCost}%` }} />
+              )}
             </span>
           </span>
         ) : (
-          <span className="muted">none</span>
+          none
         )}
       </td>
     </tr>
   );
 }
 
-function lifetimeTip(l: NonNullable<ToolRow["lifetime"]>): string {
+/** The Calls the input and the output were sent in. */
+function keptTip(r: ToolRow): string {
+  const span = (l: NonNullable<ToolRow["lifetime"]>) =>
+    l.firstCall !== undefined ? `, from call ${l.firstCall} to ${l.lastCall}` : "";
   return [
-    `${usd(l.costUsd.total)} over ${count(l.calls, "call")}: ${tokens(l.lifetimeTokens)} tokens in all, its tokens in each call it was sent in.`,
+    r.input && `The tool call's input was sent in ${count(r.input.calls, "call")}.`,
+    r.lifetime && `Its output was sent in ${count(r.lifetime.calls, "call")}${span(r.lifetime)}.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** "4.7× the cost of", or "30% of the cost of" below 1×. */
+function ratio(x: number): string {
+  return x >= 1 ? `${x.toFixed(1)}× the cost of` : `${percent(x)} of the cost of`;
+}
+
+function lifetimeTip(l: Lifetime, what: string): string {
+  return [
+    `${what}: ${usd(l.costUsd.total)} over ${count(l.calls, "call")}, ${tokens(l.lifetimeTokens)} tokens in all, its tokens in each call it was sent in.`,
     `Cache read: ${tokens(l.tokensByPart.cacheRead)} tokens, ${usd(l.costUsd.cacheRead)}`,
     `Cache write: ${tokens(l.tokensByPart.cacheWrite)} tokens, ${usd(l.costUsd.cacheWrite)}`,
     `Uncached input: ${tokens(l.tokensByPart.input)} tokens, ${usd(l.costUsd.input)}`,

@@ -1,29 +1,47 @@
 /** A Session's tool calls joined with their outputs' lifetimes, in an order, and an Edit's change line by line. */
-import type { JsonValue, Lifetime, ToolCallSummary, ToolOutput } from "@quantext/shared";
+import type { JsonValue, Lifetime, TokenBasis, ToolCallSummary, ToolOutput } from "@quantext/shared";
 import type { ToolSort } from "../route.ts";
 
 export interface ToolRow {
   call: ToolCallSummary;
   /** Its result's lifetime: absent when no Call holds the result. */
   lifetime?: Lifetime & { firstCall?: number; lastCall?: number };
+  /** The lifetime of the tool call's own Block (its input, as the model wrote it): absent when no Call holds it. */
+  input?: Lifetime & { basis?: TokenBasis };
 }
+
+/** A row's lifetime cost: of its input, of its output, and both. */
+export function costOf(r: ToolRow): { input: number; output: number; total: number } {
+  const input = r.input?.costUsd.total ?? 0;
+  const output = r.lifetime?.costUsd.total ?? 0;
+  return { input, output, total: input + output };
+}
+
+/** Most first by the key, ties (and `time`) in the order the tools ran; a row without the number sorts last. */
+const KEYS: Record<ToolSort, (r: ToolRow) => number> = {
+  total: (r) => (r.lifetime || r.input ? costOf(r).total : -1),
+  cost: (r) => r.lifetime?.costUsd.total ?? -1,
+  "input-cost": (r) => r.input?.costUsd.total ?? -1,
+  "input-tokens": (r) => r.input?.tokens ?? -1,
+  tokens: (r) => r.call.resultTokens ?? -1,
+  calls: (r) => r.lifetime?.calls ?? -1,
+  time: () => 0,
+};
 
 export function toolRows(calls: readonly ToolCallSummary[], outputs: readonly ToolOutput[], sort: ToolSort): ToolRow[] {
   const byId = new Map(outputs.map((o) => [o.toolUseId, o]));
   const rows = calls.map((call): ToolRow => {
-    const lifetime = byId.get(call.id);
-    return lifetime ? { call, lifetime } : { call };
+    const o = byId.get(call.id);
+    const row: ToolRow = { call };
+    if (o === undefined) return row;
+    const { toolCall, ...lifetime } = o;
+    row.lifetime = lifetime;
+    if (toolCall !== undefined) row.input = toolCall;
+    return row;
   });
-  const key: (r: ToolRow) => number =
-    sort === "cost"
-      ? (r) => -(r.lifetime?.costUsd.total ?? -1)
-      : sort === "tokens"
-        ? (r) => -(r.call.resultTokens ?? -1)
-        : sort === "calls"
-          ? (r) => -(r.lifetime?.calls ?? -1)
-          : () => 0;
+  const key = KEYS[sort];
   const order = (r: ToolRow) => r.call.callIndex ?? Number.MAX_SAFE_INTEGER;
-  return rows.sort((a, b) => key(a) - key(b) || order(a) - order(b));
+  return rows.sort((a, b) => key(b) - key(a) || order(a) - order(b));
 }
 
 const obj = (v: JsonValue): Record<string, JsonValue> =>

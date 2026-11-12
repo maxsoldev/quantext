@@ -895,6 +895,14 @@ export function createQuery(options: QueryOptions): Query {
     toolOutputs(key, options = {}) {
       if (!hasSession(key)) return { ...meta, items: [] };
       const lives = sessionLifetimes(key);
+      // The basis of each tool use Block's tokens in the first Call that sent it (min() picks that row's basis).
+      const bases = new Map(
+        q(`SELECT r.block_hash, r.basis, min(r.first_call) FROM call_blocks r JOIN tool_calls t ON t.log = r.log
+           AND t.session_id = r.session_id AND t.block_hash = r.block_hash WHERE r.log = ? AND r.session_id = ?
+           GROUP BY r.block_hash`)
+          .all(key.log, key.id)
+          .map((r) => [String(r.block_hash), r.basis]),
+      );
       const sort = LIFETIME_SORTS[options.sort ?? "cost"] as keyof LifetimeRow;
       const rows = q(SESSION_TOOLS)
         .all(key.log, key.id)
@@ -922,6 +930,12 @@ export function createQuery(options: QueryOptions): Query {
         if (r.result_block_hash !== null) o.resultBlockHash = String(r.result_block_hash);
         if (r.first_call !== null) o.firstCall = Number(r.first_call);
         if (r.last_call !== null) o.lastCall = Number(r.last_call);
+        const own = r.call_block_hash === null ? undefined : lives.get(String(r.call_block_hash));
+        if (own !== undefined) {
+          o.toolCall = { blockHash: own.block_hash, ...lifetimeOf(own as unknown as SqlRow) };
+          const basis = bases.get(own.block_hash);
+          if (basis !== null && basis !== undefined) o.toolCall.basis = String(basis) as TokenBasis;
+        }
         return o;
       });
       return { ...meta, items };

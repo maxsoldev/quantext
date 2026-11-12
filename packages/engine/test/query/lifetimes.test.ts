@@ -83,6 +83,14 @@ function compare(db: SqlDriver, q: Query): number {
       ]);
       const want = Number(r.lifetime_cost_usd ?? 0);
       expect(Math.abs(o.costUsd.total - want)).toBeLessThanOrEqual(1e-9 * Math.max(1, Math.abs(want)));
+      // The ToolCall's own Block (what the model wrote), as input to the Calls after it.
+      const own = r.call_block_hash === null ? undefined : sql.get(String(r.call_block_hash));
+      expect([o.toolUseId, o.toolCall?.blockHash]).toEqual([o.toolUseId, own?.block_hash ?? undefined]);
+      if (own !== undefined && o.toolCall !== undefined) {
+        expect([o.toolCall.calls, o.toolCall.lifetimeTokens]).toEqual([Number(own.calls), Number(own.lifetime_tokens)]);
+        const cost = Number(own.lifetime_cost_usd ?? 0);
+        expect(Math.abs(o.toolCall.costUsd.total - cost)).toBeLessThanOrEqual(1e-9 * Math.max(1, Math.abs(cost)));
+      }
     }
   }
   return checked;
