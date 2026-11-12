@@ -1,38 +1,6 @@
-/** Pure helpers for the Response card: a reply's text as text and code segments, stop reasons in words. */
+/** Pure helpers for the Output section: stop reasons in words, a tool call's input in short. */
 import type { JsonValue } from "@quantext/shared";
 import { inputSummary } from "../tools/model.ts";
-
-export type Segment = { kind: "text"; text: string } | { kind: "code"; text: string; lang?: string };
-
-const FENCE = /^ {0,3}```\s*([\w+-]*)\s*$/;
-
-/**
- * A reply's text split at fenced code blocks (```), so code shows monospaced and the rest as plain text with its
- * line breaks. Nothing is parsed as HTML or Markdown beyond the fences. An unclosed fence runs to the end.
- */
-export function segments(text: string): Segment[] {
-  const out: Segment[] = [];
-  let lines: string[] = [];
-  let code: { lang: string } | undefined;
-  const flush = () => {
-    const body = lines.join("\n");
-    lines = [];
-    if (code !== undefined) {
-      out.push(code.lang ? { kind: "code", text: body, lang: code.lang } : { kind: "code", text: body });
-    } else if (body.trim() !== "") out.push({ kind: "text", text: body.replace(/^\n+|\n+$/g, "") });
-  };
-  for (const line of text.split("\n")) {
-    const fence = FENCE.exec(line);
-    if (fence === null) {
-      lines.push(line);
-      continue;
-    }
-    flush();
-    code = code === undefined ? { lang: fence[1] ?? "" } : undefined;
-  }
-  flush();
-  return out;
-}
 
 const STOP: Record<string, string> = {
   end_turn: "It ended its turn.",

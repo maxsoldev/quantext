@@ -146,6 +146,16 @@ export const TERMS: readonly Term[] = [
     where: { label: "The Tool calls tab", view: "tools" },
   },
   {
+    id: "output-tokens",
+    term: "Output and input tokens",
+    short: "An answer is paid once as output, then as input on every later call.",
+    body:
+      "What the model writes on a call (text, reasoning, tool calls) is billed once, at the output price, the " +
+      "highest per token. The next call sends that answer back as input, and so does every call after it, " +
+      "usually as a cache read, until a compaction replaces it. So a long answer costs a little on each later call too.",
+    where: { label: "The Output section of the block list", view: "context", selector: "[data-section=output]" },
+  },
+  {
     id: "token-basis",
     term: "Token basis marks",
     short: "How a token number was found: exact, ≈ anchored, ~ estimate, or Δ derived.",

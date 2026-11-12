@@ -3,58 +3,123 @@
  * by category, with the hidden part and the end of the cached prefix marked), the totals by category, and the
  * ordered block list by section. Opening a Block shows all of its content.
  */
-import type { CallContext, ContextBlock, ContextPart, SessionKey } from "@quantext/shared";
-import type { KeyboardEvent } from "react";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  CallContext,
+  CallResponseDetail,
+  ContextBlock,
+  ContextCategory,
+  ResponseEntry,
+  SessionKey,
+} from "@quantext/shared";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { percent, shortModel, tokens, usd, when } from "../format/format.ts";
 import { callNumber } from "../route.ts";
-import { partTeach } from "../teach/parts.ts";
 import { Term } from "../teach/Term.tsx";
 import { Tokens } from "../ui/Num.tsx";
 import type { Load } from "../ui/useLoad.ts";
-import { useWindow } from "../ui/useWindow.ts";
+import type { ListActions } from "./BlockList.tsx";
+import { BlockList } from "./BlockList.tsx";
 import { BlockPanel } from "./BlockPanel.tsx";
 import { CATEGORIES, CATEGORY_LABEL } from "./categories.ts";
-import { KIND_EXPLAIN, KIND_LABEL, SECTION } from "./kinds.ts";
-import type { Row } from "./model.ts";
-import { barSegments, blockSource, hiddenPart, listRows } from "./model.ts";
+import type { Collapse } from "./collapse.ts";
+import {
+  collapseAll,
+  expandAll,
+  readCollapse,
+  revealBlock,
+  toggleBlock,
+  toggleCategory,
+  toggleSection,
+} from "./collapse.ts";
+import { KIND_LABEL } from "./kinds.ts";
+import { barSegments, blockSource, hiddenPart } from "./model.ts";
 
-const ROW = 48;
 /** The label of text in a block that no attached text accounts for. */
 const OTHER_PART = "Other text";
+const STORE = "quantext.context.open";
+
+/** The open sections, kept in localStorage: the same on every call and after a reload. */
+function useCollapse(): [Collapse, (f: (s: Collapse) => Collapse) => void] {
+  const [state, setState] = useState(() => readCollapse(localStorage.getItem(STORE)));
+  useEffect(() => localStorage.setItem(STORE, JSON.stringify(state)), [state]);
+  return [state, setState];
+}
+
+/** An output block shown in the block panel. */
+function outputBlock(e: ResponseEntry, n: number): ContextBlock {
+  const b: ContextBlock = {
+    position: n,
+    section: "messages",
+    hash: e.hash,
+    kind: e.kind,
+    category: e.category,
+    source: e.source,
+    inCachedPrefix: false,
+    preview: e.preview,
+    chars: e.chars,
+    truncated: e.truncated,
+  };
+  if (e.tokens !== undefined) b.tokens = e.tokens;
+  if (e.basis !== undefined) b.basis = e.basis;
+  return b;
+}
 
 /** `ctx` is loaded by the page, which shares it with the diff card. */
 export function ContextAt({
   sessionKey,
   call,
   ctx,
+  resp,
+  next,
+  cwd,
   openHash,
   onOpened,
 }: {
   sessionKey: SessionKey;
   call: number;
   ctx: Load<CallContext>;
+  /** The Call's answer, shown as the Output section. */
+  resp: Load<CallResponseDetail>;
+  /** The next Call of the lane, which sends the answer back; absent for the lane's latest Call. */
+  next?: number | undefined;
+  /** The Session's folder: tool inputs are shown relative to it. */
+  cwd?: string | undefined;
   /** A Block to open once the context is loaded (a link from a tool call). */
   openHash?: string | undefined;
   onOpened?: () => void;
 }) {
-  const [open, setOpen] = useState<ContextBlock | null>(null);
-  const [openPart, setOpenPart] = useState<number | undefined>(undefined);
-  const openBlock = (b: ContextBlock, part?: number) => {
-    setOpen(b);
-    setOpenPart(part);
-  };
+  const [open, setOpen] = useState<{ block: ContextBlock; part?: number; output?: true } | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
+  const [jump, setJump] = useState<{ position: number; n: number } | undefined>(undefined);
+  const [fold, setFold] = useCollapse();
   const c = ctx.value;
   useEffect(() => {
     if (!openHash || !c || c.call.index !== call) return;
     const b = c.blocks.find((x) => x.hash === openHash);
     if (b) {
-      setOpen(b);
+      setFold((s) => revealBlock(s, b));
+      setOpen({ block: b });
       setSelected(b.position);
+      setJump((j) => ({ position: b.position, n: (j?.n ?? 0) + 1 }));
     }
     onOpened?.();
-  }, [openHash, c, call, onOpened]);
+  }, [openHash, c, call, onOpened, setFold]);
+  const act = useMemo<ListActions>(
+    () => ({
+      onSelect: setSelected,
+      onOpen: (block, part) => setOpen(part === undefined ? { block } : { block, part }),
+      onOpenOutput: (e, n) => setOpen({ block: outputBlock(e, n), output: true }),
+      onFold: (f) => setFold((s) => toggleSection(s, f)),
+      onParts: (b) => setFold((s) => toggleBlock(s, b)),
+      onAll: (all) => setFold((s) => (all && c ? expandAll(s, c) : collapseAll())),
+    }),
+    [c, setFold],
+  );
+  const onCategory = useCallback(
+    (cat: ContextCategory) => setFold((s) => (c ? toggleCategory(s, c, cat) : s)),
+    [c, setFold],
+  );
+  const r = resp.value?.call.index === call ? resp.value : undefined;
   if (ctx.state === "error" && !c) {
     return (
       <p className="error" role="alert">
@@ -73,27 +138,62 @@ export function ContextAt({
       <ContextHead ctx={c} />
       {c.rebuilt ? (
         <>
-          <ContextBar ctx={c} selected={selected} onPick={(b) => setSelected(b.position)} onOpen={openBlock} />
+          <ContextBar
+            ctx={c}
+            selected={selected}
+            onPick={(b) => setSelected(b.position)}
+            onOpen={(b) => {
+              setFold((f) => revealBlock(f, b));
+              setOpen({ block: b });
+              setJump((j) => ({ position: b.position, n: (j?.n ?? 0) + 1 }));
+            }}
+          />
           <div className="context-body">
-            <BlockList ctx={c} selected={selected} onSelect={setSelected} onOpen={openBlock} />
-            <CategoryTable ctx={c} />
+            <BlockList
+              sessionKey={sessionKey}
+              ctx={c}
+              resp={stale ? undefined : r}
+              next={next}
+              cwd={cwd}
+              fold={fold}
+              selected={selected}
+              jump={jump}
+              act={act}
+            />
+            <CategoryTable ctx={c} fold={fold} onCategory={onCategory} />
           </div>
         </>
       ) : (
-        <div className="empty">
-          <h3>This call's context cannot be shown</h3>
-          <p>
-            The log holds this call's usage but not its request, so the blocks it sent are unknown. Its token counts and
-            cost above are still exact.
-          </p>
-        </div>
+        <>
+          <div className="empty">
+            <h3>This call's context cannot be shown</h3>
+            <p>
+              The log holds this call's usage but not its request, so the blocks it sent are unknown. Its token counts
+              and cost above are still exact.
+            </p>
+          </div>
+          {r && (
+            <BlockList
+              sessionKey={sessionKey}
+              ctx={c}
+              resp={stale ? undefined : r}
+              next={next}
+              cwd={cwd}
+              fold={fold}
+              selected={selected}
+              jump={jump}
+              act={act}
+            />
+          )}
+        </>
       )}
       {open && (
         <BlockPanel
           log={sessionKey.log}
-          block={open}
+          block={open.block}
           call={c.call.index}
-          part={openPart}
+          part={open.part}
+          output={open.output}
           onClose={() => setOpen(null)}
         />
       )}
@@ -210,7 +310,15 @@ function ContextBar({
   );
 }
 
-function CategoryTable({ ctx }: { ctx: CallContext }) {
+function CategoryTable({
+  ctx,
+  fold,
+  onCategory,
+}: {
+  ctx: CallContext;
+  fold: Collapse;
+  onCategory: (cat: ContextCategory) => void;
+}) {
   const total = Math.max(1, ctx.totalTokens);
   const rows = CATEGORIES.map((c) => ({ ...c, tokens: ctx.categories[c.key] })).filter((r) => r.tokens > 0);
   const subRows = (key: string) =>
@@ -233,10 +341,25 @@ function CategoryTable({ ctx }: { ctx: CallContext }) {
           <Fragment key={r.key}>
             <tr>
               <th scope="row">
-                <button type="button" className="tip-anchor legend-item" data-tip={r.explain}>
-                  <span className={`swatch cat-${r.key}`} aria-hidden="true" />
-                  {r.label}
-                </button>
+                <span className="cat-head">
+                  {subRows(r.key).length > 0 && (
+                    <button
+                      type="button"
+                      className="part-toggle"
+                      aria-expanded={fold.cats.includes(r.key)}
+                      aria-controls={`cat-parts-${r.key}`}
+                      aria-label={`${fold.cats.includes(r.key) ? "Hide" : "Show"} the parts of ${r.label}`}
+                      onClick={() => onCategory(r.key)}
+                      data-testid="category-toggle"
+                    >
+                      <span className="chevron" aria-hidden="true" />
+                    </button>
+                  )}
+                  <button type="button" className="tip-anchor legend-item" data-tip={r.explain}>
+                    <span className={`swatch cat-${r.key}`} aria-hidden="true" />
+                    {r.label}
+                  </button>
+                </span>
               </th>
               <td className="right num">{tokens(r.tokens)}</td>
               <td className="right">
@@ -248,8 +371,13 @@ function CategoryTable({ ctx }: { ctx: CallContext }) {
                 </span>
               </td>
             </tr>
-            {subRows(r.key).map((p) => (
-              <tr key={p.label} className="cat-sub" data-testid="part-total">
+            {(fold.cats.includes(r.key) ? subRows(r.key) : []).map((p, k) => (
+              <tr
+                key={p.label}
+                className="cat-sub"
+                data-testid="part-total"
+                {...(k === 0 ? { id: `cat-parts-${r.key}` } : {})}
+              >
                 <th scope="row">{p.label}</th>
                 <td className="right">
                   <Tokens n={p.tokens} basis="estimate" note={`Estimated: part of ${r.label}.`} />
@@ -261,269 +389,5 @@ function CategoryTable({ ctx }: { ctx: CallContext }) {
         ))}
       </tbody>
     </table>
-  );
-}
-
-function BlockList({
-  ctx,
-  selected,
-  onSelect,
-  onOpen,
-}: {
-  ctx: CallContext;
-  selected: number | null;
-  onSelect: (position: number) => void;
-  onOpen: (b: ContextBlock, part?: number) => void;
-}) {
-  const [find, setFind] = useState("");
-  const rows = useMemo(() => listRows(ctx, find), [ctx, find]);
-  const scroller = useRef<HTMLDivElement>(null);
-  const w = useWindow(scroller, rows.length, ROW);
-  const totalCost = ctx.blocks.reduce((a, b) => a + (b.costUsd ?? 0), 0);
-  const total = Math.max(1, ctx.totalTokens);
-  const matched = rows.filter((r) => r.type === "block").length;
-  const move = (from: number, delta: number) => {
-    let i = from + delta;
-    while (i >= 0 && i < rows.length && rows[i]?.type === "section") i += delta;
-    const row = rows[i];
-    if (row === undefined || row.type === "section") return;
-    w.reveal(i);
-    onSelect(row.block.position);
-    requestAnimationFrame(() => scroller.current?.querySelector<HTMLElement>(`[data-i="${i}"]`)?.focus());
-  };
-  return (
-    <div className="block-list" data-testid="block-list">
-      <div className="block-find">
-        <input
-          type="search"
-          value={find}
-          onChange={(e) => setFind(e.target.value)}
-          onKeyDown={(e) => e.stopPropagation()}
-          placeholder="Find a block by kind, source or text"
-          aria-label="Find a block"
-          data-testid="block-find"
-        />
-        {find.trim() !== "" && (
-          <span className="muted" role="status">
-            {matched === 0
-              ? `No block matches “${find.trim()}”.`
-              : `${matched} of ${ctx.blocks.length} ${ctx.blocks.length === 1 ? "block" : "blocks"}`}
-          </span>
-        )}
-      </div>
-      <div className="block-list-head" aria-hidden="true">
-        <span>#</span>
-        <span>Block</span>
-        <span className="right">Tokens</span>
-        <span>Cache</span>
-        <span className="right">Cost</span>
-      </div>
-      <div className="block-scroll" ref={scroller}>
-        <div style={{ height: w.before }} />
-        {rows.slice(w.start, w.end).map((row, k) => {
-          const i = w.start + k;
-          if (row.type === "section") return <SectionRow key={`s-${row.section}`} row={row} total={total} />;
-          if (row.type === "part") {
-            return (
-              <PartRow
-                key={`${row.block.position}-${row.part.start}`}
-                b={row.block}
-                part={row.part}
-                i={i}
-                total={total}
-                onOpen={() => onOpen(row.block, row.part.start)}
-                onKey={(delta) => move(i, delta)}
-                onFocus={() => onSelect(row.block.position)}
-              />
-            );
-          }
-          return (
-            <BlockRow
-              key={row.block.position}
-              b={row.block}
-              i={i}
-              total={total}
-              totalCost={totalCost}
-              selected={selected === row.block.position}
-              onOpen={() => onOpen(row.block)}
-              onKey={(delta) => move(i, delta)}
-              onFocus={() => onSelect(row.block.position)}
-            />
-          );
-        })}
-        <div style={{ height: w.after }} />
-      </div>
-    </div>
-  );
-}
-
-/** Arrow keys step through the rows, as in the block rows. */
-function arrows(onKey: (delta: number) => void) {
-  return (e: KeyboardEvent<HTMLButtonElement>) => {
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      e.stopPropagation();
-      onKey(e.key === "ArrowDown" ? 1 : -1);
-    }
-  };
-}
-
-/** One attached text of a block, indented under it: its label, its estimated share and the block's cache state. */
-function PartRow({
-  b,
-  part,
-  i,
-  total,
-  onOpen,
-  onKey,
-  onFocus,
-}: {
-  b: ContextBlock;
-  part: ContextPart;
-  i: number;
-  total: number;
-  onOpen: () => void;
-  onKey: (delta: number) => void;
-  onFocus: () => void;
-}) {
-  const teach = partTeach(part.label, part.tokens);
-  return (
-    <div className="block-row part-row" data-testid="part-row" data-part={part.label}>
-      <span aria-hidden="true" />
-      <div className="part-cell">
-        <button
-          type="button"
-          className="block-main part-main"
-          data-i={i}
-          onClick={onOpen}
-          onFocus={onFocus}
-          onKeyDown={arrows(onKey)}
-          aria-label={`Open block ${b.position}, part ${part.label}`}
-          {...(teach ? { "data-tip": teach.tip } : {})}
-        >
-          <span className="part-branch" aria-hidden="true" />
-          <span className="part-label">{part.label}</span>
-          <span className="preview">{part.preview}</span>
-        </button>
-        {teach && <Term id={teach.term} />}
-      </div>
-      <span className="right">
-        {part.tokens !== undefined && part.basis ? (
-          <Tokens
-            n={part.tokens}
-            basis={part.basis}
-            note={`${percent(part.tokens / total)} of the input. Its share of block ${b.position}, by characters.`}
-          />
-        ) : (
-          <span className="muted">none</span>
-        )}
-      </span>
-      <span className={b.inCachedPrefix ? "cache-tag cached part-cache" : "cache-tag new part-cache"}>
-        {b.inCachedPrefix ? "Cached" : "New"}
-      </span>
-      <span aria-hidden="true" />
-    </div>
-  );
-}
-
-function SectionRow({ row, total }: { row: Extract<Row, { type: "section" }>; total: number }) {
-  const s = SECTION[row.section];
-  const hidden = row.section !== "messages";
-  return (
-    <div className={`section-row section-${row.section}`}>
-      <button type="button" className="tip-anchor section-title" data-tip={s.explain}>
-        {s.title}
-      </button>
-      {hidden && <span className="hidden-tag">Hidden from the chat</span>}
-      <span className="muted num">
-        {row.blocks} {row.blocks === 1 ? "block" : "blocks"}, {tokens(row.tokens)} tokens ({percent(row.tokens / total)}
-        )
-      </span>
-    </div>
-  );
-}
-
-function BlockRow({
-  b,
-  i,
-  total,
-  totalCost,
-  selected,
-  onOpen,
-  onKey,
-  onFocus,
-}: {
-  b: ContextBlock;
-  i: number;
-  total: number;
-  totalCost: number;
-  selected: boolean;
-  onOpen: () => void;
-  onKey: (delta: number) => void;
-  onFocus: () => void;
-}) {
-  const source = blockSource(b);
-  const kindTip = KIND_EXPLAIN[b.kind];
-  return (
-    <div className={selected ? "block-row selected" : "block-row"} data-testid="block-row">
-      <span className="block-pos num muted">{b.position}</span>
-      <button
-        type="button"
-        className="block-main"
-        data-i={i}
-        onClick={onOpen}
-        onFocus={onFocus}
-        onKeyDown={arrows(onKey)}
-        aria-label={`Open block ${b.position}: ${KIND_LABEL[b.kind]} ${source}`}
-      >
-        <span className={`kind-dot cat-${b.category}`} aria-hidden="true" />
-        <span className="kind" {...(kindTip ? { "data-tip": kindTip } : {})}>
-          {KIND_LABEL[b.kind]}
-        </span>
-        {b.deferred && (
-          <span
-            className="tag deferred"
-            data-tip="A deferred tool: its schema was not in the tool list. A tool search loaded it, so it is sent in the messages, from the call that loaded it on."
-          >
-            Deferred
-          </span>
-        )}
-        {source && <span className="source">{source}</span>}
-        <span className="preview">{b.preview}</span>
-      </button>
-      <span className="right">
-        {b.tokens !== undefined && b.basis ? (
-          <Tokens n={b.tokens} basis={b.basis} note={`${percent(b.tokens / total)} of the input.`} />
-        ) : (
-          <span className="muted">none</span>
-        )}
-      </span>
-      <span>
-        <button
-          type="button"
-          className={b.inCachedPrefix ? "tip-anchor cache-tag cached" : "tip-anchor cache-tag new"}
-          data-tip={
-            b.inCachedPrefix
-              ? "In the cached prefix: read from the provider's cache, at 0.05× to 0.1× of the input price (by model)."
-              : "After the cached prefix: written to the cache or sent uncached, at the full price or more."
-          }
-        >
-          {b.inCachedPrefix ? "Cached" : "New"}
-        </button>
-      </span>
-      <span className="right">
-        {b.costUsd !== undefined ? (
-          <button
-            type="button"
-            className="tip-anchor num"
-            data-tip={`${usd(b.costUsd)}: ${percent(totalCost ? b.costUsd / totalCost : 0)} of this call's input cost. Its tokens at the price of the part they fall in (cache read, cache write or input).`}
-          >
-            {usd(b.costUsd)}
-          </button>
-        ) : (
-          <span className="muted">none</span>
-        )}
-      </span>
-    </div>
   );
 }

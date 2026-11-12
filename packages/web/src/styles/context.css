@@ -235,18 +235,153 @@
   width: 6px;
   height: 6px;
 }
-.section-row {
-  height: 48px;
+/* A section header: it folds the section, and sums it in the list's columns. */
+.block-row.section-row {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--rule);
+}
+.section-toggle {
+  all: unset;
+  grid-column: 1 / 3;
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: 0 var(--space-3);
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--rule);
+  min-width: 0;
+  height: 100%;
+  cursor: pointer;
+  border-radius: 2px;
+}
+.section-toggle:focus-visible,
+.part-toggle:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: -2px;
 }
 .section-title {
   font-weight: 800;
   font-size: var(--t-lead);
+  white-space: nowrap;
+}
+.section-count {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--t-small);
+}
+/* A chevron: points right when closed, down when open. */
+.chevron {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  margin: 0 4px;
+  border-right: 2px solid var(--ink-2);
+  border-bottom: 2px solid var(--ink-2);
+  transform: rotate(-45deg);
+  transition: transform 120ms ease-out;
+}
+[aria-expanded="true"] > .chevron {
+  transform: rotate(45deg) translate(-2px, -2px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .chevron {
+    transition: none;
+  }
+}
+.part-toggle {
+  all: unset;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  border-radius: var(--radius-s);
+}
+.part-toggle:hover {
+  background: var(--sunken);
+}
+.block-pos {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+/* The cached share of a closed section: a short track, filled in the cache-read colour. */
+.cache-split {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-small);
+  font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.split-track {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--rule-strong);
+  overflow: hidden;
+  display: flex;
+  flex: none;
+  box-sizing: border-box;
+}
+.split-fill {
+  background: var(--cache-read);
+}
+.cache-tag.output::before {
+  background: var(--cache-output);
+  border-radius: 2px;
+}
+.tag.output-price {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+.preview.folded {
+  font-style: italic;
+}
+.row-link,
+.tag.answer-of {
+  flex: none;
+  white-space: nowrap;
+  font-size: var(--t-small);
+}
+.tag.answer-of {
+  color: var(--ink-2);
+  border-color: var(--rule-strong);
+  font-weight: 600;
+  text-decoration: none;
+}
+.tag.answer-of:hover {
+  color: var(--ink);
+  border-color: currentcolor;
+}
+.output-row {
+  background: var(--surface);
+}
+.block-row.note-row {
+  grid-template-columns: 48px minmax(0, 1fr);
+  color: var(--ink-2);
+  font-size: var(--t-small);
+}
+.note-row p {
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fold-all {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+  flex: none;
+}
+.fold-all button {
+  font-size: var(--t-small);
+  padding: 4px var(--space-2);
+}
+.cat-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
 }
 .hidden-tag {
   font-size: var(--t-small);
@@ -503,4 +638,37 @@ button.link:focus-visible {
   margin-top: 0;
   padding-top: 0;
   border-top: 0;
+}
+.cat-head .part-toggle {
+  width: 20px;
+  height: 20px;
+}
+.cat-head > .legend-item:first-child {
+  margin-left: 22px;
+}
+.part-cell > .block-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.section-toggle {
+  overflow: hidden;
+}
+.section-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.section-toggle > .tag,
+.section-toggle > .hidden-tag {
+  flex: none;
+}
+/* A narrow card: the section's count gives way to its title. */
+@container (max-width: 760px) {
+  .section-count,
+  .tag.output-price,
+  .section-toggle > .hidden-tag,
+  .block-list .wide-only {
+    display: none;
+  }
 }

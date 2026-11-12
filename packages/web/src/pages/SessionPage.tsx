@@ -21,7 +21,6 @@ import { DiffCard } from "../diff/DiffCard.tsx";
 import { count, duration, percent, projectName, shortModel, usd, when } from "../format/format.ts";
 import { useLiveVersion } from "../live/hooks.ts";
 import { Link, navigate } from "../nav.tsx";
-import { ResponseCard } from "../response/ResponseCard.tsx";
 import type { Route } from "../route.ts";
 import { callNumber } from "../route.ts";
 import { Term } from "../teach/Term.tsx";
@@ -224,12 +223,12 @@ export function SessionPage({ route }: { route: SessionRoute }) {
                 sessionKey={key}
                 call={callIndex}
                 ctx={call.ctx}
+                resp={call.resp}
+                cwd={s.cwd}
+                next={view?.calls[place + 1]?.index}
                 openHash={route.block}
                 onOpened={clearBlock}
               />
-            )}
-            {callIndex !== undefined && (
-              <ResponseCard sessionKey={key} call={callIndex} resp={call.resp} next={view?.calls[place + 1]?.index} />
             )}
           </div>
           {view && view.calls.length > 0 && (

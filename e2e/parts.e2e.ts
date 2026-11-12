@@ -1,13 +1,12 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./engine.ts";
 
-/** Open call 1 of basic-tools, with the block list scrolled to the merged block, so its windowed rows are drawn. */
+/** Open call 1 of basic-tools and show the parts of its merged block (folded by default). */
 async function openFirstCall(page: Page, url: string) {
   await page.goto(`${url}?call=1`);
   await expect(page.getByTestId("block-row").first()).toBeVisible();
-  await page.locator(".block-scroll").evaluate((el) => {
-    el.scrollTop = el.scrollHeight;
-  });
+  await expect(page.getByTestId("part-row")).toHaveCount(0);
+  await page.getByRole("button", { name: /Show the 7 parts of block/ }).click();
 }
 
 test("the merged injected block lists its attached texts as parts, with tokens and cache state", async ({

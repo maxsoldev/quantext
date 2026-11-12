@@ -21,6 +21,7 @@ export function BlockPanel({
   block,
   call,
   part,
+  output,
   onClose,
 }: {
   log: number;
@@ -28,6 +29,8 @@ export function BlockPanel({
   call: number;
   /** The start of a part to scroll to. */
   part?: number | undefined;
+  /** A block of the call's output (its answer), not of its input. */
+  output?: true | undefined;
   onClose: () => void;
 }) {
   const hash = block.hash;
@@ -66,7 +69,9 @@ export function BlockPanel({
             {KIND_LABEL[block.kind]} {source && <span className="source">{source}</span>}
           </h3>
           <p className="muted">
-            Position {block.position}, {block.section === "framing" ? "framing" : SECTION[block.section].title}
+            {output
+              ? `Output of call ${callNumber(call)}, block ${block.position}`
+              : `Position ${block.position}, ${block.section === "framing" ? "framing" : SECTION[block.section].title}`}
           </p>
         </div>
         <button type="button" ref={close} onClick={onClose} aria-label="Close the block">
@@ -85,8 +90,14 @@ export function BlockPanel({
           <dd>{CATEGORY_LABEL[block.category]}</dd>
         </div>
         <div>
-          <dt>Cache</dt>
-          <dd>{block.inCachedPrefix ? "Read from the cache" : "After the cached prefix"}</dd>
+          <dt>{output ? "Price" : "Cache"}</dt>
+          <dd>
+            {output
+              ? "Output price; sent again as input from the next call"
+              : block.inCachedPrefix
+                ? "Read from the cache"
+                : "After the cached prefix"}
+          </dd>
         </div>
         {block.run && (
           <div>

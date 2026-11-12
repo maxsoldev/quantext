@@ -17,6 +17,7 @@ test("the context at call N shows the hidden part, the bar and the blocks by sec
   const list = page.getByTestId("block-list");
   await expect(list).toContainText("Tool definitions");
   await expect(list).toContainText("Hidden from the chat");
+  await list.getByRole("button", { name: /Tool definitions/ }).click();
   await expect(page.getByTestId("block-row").first()).toContainText("Tool schema");
 });
 

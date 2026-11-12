@@ -65,13 +65,17 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // The last answer of the session: reasoning folded, the text with its line breaks.
-    name: "response",
+    // Call 7's answer as the Output section, at the end of the block list: three tool calls, priced as output.
+    name: "output",
     both: true,
     go: async (page, engine) => {
-      await page.goto(await engine.sessionUrl("basic-tools"));
-      await expect(page.getByTestId("response-text")).toBeVisible();
-      await page.evaluate(`document.getElementById("response-title")?.scrollIntoView({ block: "start" })`);
+      await page.goto(`${await engine.sessionUrl("basic-tools")}?call=7`);
+      await expect(page.getByTestId("block-row").first()).toBeVisible();
+      await page.locator(".block-scroll").evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+      await expect(page.getByTestId("output-note")).toBeVisible();
+      await page.evaluate(`document.querySelector(".block-list")?.scrollIntoView({ block: "end" })`);
     },
   },
   {

@@ -1,39 +1,130 @@
 /** Shaping a Call's context for the viewer: the rows of its block list, its hidden part, a Block's source in words. */
-import type { BlockSource, CallContext, ContextBlock, ContextPart, RequestSection } from "@quantext/shared";
+import type {
+  BlockSource,
+  CallContext,
+  CallResponseDetail,
+  ContextBlock,
+  ContextPart,
+  ResponseEntry,
+  TokenBasis,
+} from "@quantext/shared";
+import type { Collapse, Fold } from "./collapse.ts";
 import { KIND_LABEL } from "./kinds.ts";
 
-export type Row =
-  | { type: "section"; section: RequestSection; tokens: number; blocks: number }
-  | { type: "block"; block: ContextBlock }
-  | { type: "part"; block: ContextBlock; part: ContextPart };
+/** A section's header: what it holds, open or not. Output has no cache split. */
+export interface SectionHead {
+  type: "section";
+  section: Fold;
+  open: boolean;
+  blocks: number;
+  tokens: number;
+  basis: TokenBasis;
+  /** Tokens in the cached prefix, and after it. */
+  cached: number;
+  fresh: number;
+  costUsd?: number;
+}
 
-const ORDER: readonly RequestSection[] = ["tools", "system", "messages"];
+export type Row =
+  | SectionHead
+  | { type: "block"; block: ContextBlock; parts: number; open: boolean }
+  | { type: "part"; block: ContextBlock; part: ContextPart }
+  | { type: "output"; entry: ResponseEntry; n: number }
+  /** Under the output: still waiting, never logged, or which call sends it back. */
+  | { type: "note"; note: "waiting" | "none" | "answered"; next?: number; stopReason?: string };
+
+const ORDER = ["tools", "system", "messages"] as const;
+const WEAK: Record<TokenBasis, number> = { exact: 0, anchored: 1, derived: 2, estimate: 3 };
+
+/** The least exact basis of the blocks: the one that a sum of them has. */
+function weakest(blocks: readonly ContextBlock[]): TokenBasis {
+  let out: TokenBasis = "exact";
+  for (const b of blocks) if (b.basis && b.basis !== "framing" && WEAK[b.basis] > WEAK[out]) out = b.basis;
+  return out;
+}
 
 /**
- * The sections in request order, each with a header row, then its blocks, each followed by its parts when it has
- * more than one; the framing tokens go last, with the messages. `find` keeps the blocks whose kind, source,
- * preview or part matches (case does not count), with only the parts that match when any does.
+ * The sections in request order, each with a header row and, when open, its blocks, each followed by its parts
+ * when it has more than one and they are shown; the framing tokens go last, shown with the messages. `find` keeps the
+ * blocks whose kind, source, preview or part matches (case does not count), with only the parts that match when
+ * any does, and opens the sections and blocks it finds in. Without `fold`, all is open.
  */
-export function listRows(ctx: CallContext, find = ""): Row[] {
+export function listRows(ctx: CallContext, find = "", fold?: Collapse): Row[] {
   const needle = find.trim().toLowerCase();
   const has = (...texts: string[]) => texts.some((t) => t.toLowerCase().includes(needle));
   const blockRows = (block: ContextBlock): Row[] => {
     const parts = (block.parts?.length ?? 0) > 1 ? (block.parts ?? []) : [];
     const own = has(KIND_LABEL[block.kind], blockSource(block), block.preview);
-    const hits = needle === "" ? parts : parts.filter((p) => has(p.label, p.preview));
+    const hits = needle === "" ? [] : parts.filter((p) => has(p.label, p.preview));
     if (needle !== "" && !own && hits.length === 0) return [];
-    const shown = hits.length > 0 ? hits : parts;
-    return [{ type: "block", block }, ...shown.map((part): Row => ({ type: "part", block, part }))];
+    const open = fold === undefined || (block.hash !== undefined && fold.blocks.includes(block.hash));
+    const shown = hits.length > 0 ? hits : open ? parts : [];
+    const head: Row = { type: "block", block, parts: parts.length, open: shown.length > 0 };
+    return [head, ...shown.map((part): Row => ({ type: "part", block, part }))];
   };
   const rows: Row[] = [];
   for (const section of ORDER) {
     const blocks = ctx.blocks.filter((b) => b.section === section);
     const shown = blocks.flatMap(blockRows);
     if (shown.length === 0) continue;
-    rows.push({ type: "section", section, tokens: ctx.sections[section], blocks: blocks.length }, ...shown);
+    const open = needle !== "" || fold === undefined || fold.open[section];
+    const sum = (f: (b: ContextBlock) => number) => blocks.reduce((n, b) => n + f(b), 0);
+    const cached = sum((b) => (b.inCachedPrefix ? (b.tokens ?? 0) : 0));
+    const head: SectionHead = {
+      type: "section",
+      section,
+      open,
+      blocks: blocks.length,
+      tokens: ctx.sections[section],
+      basis: weakest(blocks),
+      cached,
+      fresh: ctx.sections[section] - cached,
+    };
+    if (blocks.some((b) => b.costUsd !== undefined)) head.costUsd = sum((b) => b.costUsd ?? 0);
+    rows.push(head, ...(open ? shown : []));
   }
-  for (const block of ctx.blocks.filter((b) => b.section === "framing")) rows.push(...blockRows(block));
+  const framing = needle !== "" || fold === undefined || fold.open.messages;
+  for (const block of ctx.blocks.filter((b) => b.section === "framing" && framing)) rows.push(...blockRows(block));
   return rows;
+}
+
+/**
+ * The Output section: what the model answered, a row per Block, then a note (waiting, none logged, or the stop
+ * reason and the call that sends it back). Not part of the input. `find` filters as in the input; `resp` absent
+ * while it loads gives no rows.
+ */
+export function outputRows(
+  resp: CallResponseDetail | undefined,
+  { find = "", open = true, next }: { find?: string; open?: boolean; next?: number | undefined } = {},
+): Row[] {
+  if (resp === undefined) return [];
+  const needle = find.trim().toLowerCase();
+  const has = (...texts: string[]) => texts.some((t) => t.toLowerCase().includes(needle));
+  const entries = resp.blocks.filter(
+    (e) => needle === "" || has(KIND_LABEL[e.kind], e.toolCall?.name ?? "", sourceLabel(e.source), e.preview),
+  );
+  if (needle !== "" && entries.length === 0) return [];
+  const head: SectionHead = {
+    type: "section",
+    section: "output",
+    open: open || needle !== "",
+    blocks: resp.blocks.length,
+    tokens: resp.outputTokens ?? 0,
+    basis: resp.call.usage?.basis ?? "exact",
+    cached: 0,
+    fresh: resp.outputTokens ?? 0,
+  };
+  if (resp.outputUsd !== undefined) head.costUsd = resp.outputUsd;
+  if (!head.open) return [head];
+  const note: Row = resp.answered
+    ? {
+        type: "note",
+        note: "answered",
+        ...(next === undefined ? {} : { next }),
+        ...(resp.stopReason === undefined ? {} : { stopReason: resp.stopReason }),
+      }
+    : { type: "note", note: next === undefined ? "waiting" : "none" };
+  return [head, ...entries.map((entry): Row => ({ type: "output", entry, n: resp.blocks.indexOf(entry) + 1 })), note];
 }
 
 /**

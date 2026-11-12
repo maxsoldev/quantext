@@ -1,28 +1,5 @@
-import { describe, expect, test } from "vitest";
-import { segments, stopWords, toolInput, toolWords } from "./model.ts";
-
-describe("segments", () => {
-  test("splits a reply at fenced code, keeping the text's line breaks and the code's language", () => {
-    const text = "Done.\n\nRun this:\n```sh\npnpm check\n```\nThen look.";
-    expect(segments(text)).toEqual([
-      { kind: "text", text: "Done.\n\nRun this:" },
-      { kind: "code", text: "pnpm check", lang: "sh" },
-      { kind: "text", text: "Then look." },
-    ]);
-  });
-
-  test("an open fence runs to the end, as a reply still being written does", () => {
-    expect(segments("a\n```\nb\nc")).toEqual([
-      { kind: "text", text: "a" },
-      { kind: "code", text: "b\nc" },
-    ]);
-  });
-
-  test("text with no fence is one segment; empty text is none", () => {
-    expect(segments("<b>not html</b>\nline 2")).toEqual([{ kind: "text", text: "<b>not html</b>\nline 2" }]);
-    expect(segments("")).toEqual([]);
-  });
-});
+import { expect, test } from "vitest";
+import { stopWords, toolInput, toolWords } from "./model.ts";
 
 test("says why the model stopped in words, and keeps an unknown reason as it is", () => {
   expect(stopWords("end_turn")).toBe("It ended its turn.");

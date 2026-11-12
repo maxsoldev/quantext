@@ -28,15 +28,11 @@ const ctx = (blocks: ContextBlock[]): CallContext =>
 describe("the rows of a Call's block list", () => {
   test("a header before each section that has blocks, in request order, then its blocks", () => {
     const c = ctx([block(0, "tools", 30), block(1, "system", 20), block(2, "messages", 45), block(3, "framing", 5)]);
-    expect(listRows(c).map((r) => (r.type === "section" ? `# ${r.section} ${r.tokens}` : r.block.position))).toEqual([
-      "# tools 30",
-      0,
-      "# system 20",
-      1,
-      "# messages 45",
-      2,
-      3,
-    ]);
+    expect(
+      listRows(c).map((r) =>
+        r.type === "section" ? `# ${r.section} ${r.tokens}` : r.type === "block" ? r.block.position : r.type,
+      ),
+    ).toEqual(["# tools 30", 0, "# system 20", 1, "# messages 45", 2, 3]);
   });
 });
 
@@ -59,7 +55,13 @@ describe("the parts of a block", () => {
   });
   const rowsOf = (c: CallContext, find?: string) =>
     listRows(c, find).map((r) =>
-      r.type === "section" ? `# ${r.section}` : r.type === "part" ? `  ${r.part.label}` : r.block.position,
+      r.type === "section"
+        ? `# ${r.section}`
+        : r.type === "part"
+          ? `  ${r.part.label}`
+          : r.type === "block"
+            ? r.block.position
+            : r.type,
     );
 
   test("follow their block as rows of their own, when it has more than one", () => {

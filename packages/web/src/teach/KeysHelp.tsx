@@ -8,6 +8,8 @@ const KEYS: [string[], string][] = [
   [["Home", "End"], "First or latest call of the lane"],
   [["↑", "↓"], "Move between rows of a list or table"],
   [["Enter"], "Open the row or block that has the focus"],
+  [["e"], "Expand all sections of the block list"],
+  [["c"], "Collapse all sections of the block list"],
   [["Esc"], "Close a panel"],
   [["g"], "Open the glossary"],
   [["?"], "Show these keys"],
