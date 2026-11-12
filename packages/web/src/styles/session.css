@@ -291,3 +291,12 @@
 .card {
   scroll-margin-top: 80px;
 }
+/* A Call with no usage in the log: a muted, hatched placeholder through both panels. */
+.no-usage {
+  fill: var(--sunken);
+  opacity: 0.8;
+}
+.no-usage-swatch {
+  background: var(--sunken);
+  outline: 1px solid var(--rule-strong);
+}

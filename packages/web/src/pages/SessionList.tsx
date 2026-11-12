@@ -16,6 +16,7 @@ import { Tokens } from "../ui/Num.tsx";
 import { SplitBar } from "../ui/SplitBar.tsx";
 import { useLoad } from "../ui/useLoad.ts";
 import { useWindow } from "../ui/useWindow.ts";
+import { mergeSessions } from "./merge.ts";
 
 type ListRoute = Extract<Route, { page: "sessions" }>;
 
@@ -45,18 +46,17 @@ const REQUEST_LOG: Record<SessionSummary["requestLog"], { word: string; explain:
 export function SessionList({ route }: { route: ListRoute }) {
   const [search, setSearch] = useState(route.search ?? "");
   const [limit, setLimit] = useState(PAGE);
-  const version = useLiveVersion(() => true);
+  // A removed log or a resync reads the list again; new and changed Sessions are merged in.
+  const full = useLiveVersion((e) => e.kind === "log-removed");
+  const changes = useLiveVersion((e) => e.kind === "calls");
   const filter = {
     ...(route.project ? { project: route.project } : {}),
     ...(route.search ? { search: route.search } : {}),
     sort: route.sort ?? "ended",
     order: "desc" as const,
   };
-  const page = useLoad(
-    (signal) => loadAll(filter, limit, signal),
-    [route.project, route.search, route.sort, limit, version],
-  );
-  const projects = useLoad((signal) => api.projects(signal), [version]);
+  const page = useSessionList(filter, limit, full, changes);
+  const projects = useLoad((signal) => api.projects(signal), [full, changes]);
 
   // Typing filters after a short pause, and keeps the URL in step (replace: no history entry per key).
   useEffect(() => {
@@ -165,12 +165,42 @@ function clean(route: Patch): ListRoute {
   return out;
 }
 
+type Filter = Parameters<typeof api.sessions>[0] & { sort: SortKey };
+
+/**
+ * The first `limit` Sessions, read in full when the filter, the limit or `full` changes, and kept up to date on
+ * `changes` by reading only the Sessions changed since the last cursor (pages of 500; more than that reads all).
+ */
+function useSessionList(filter: Filter, limit: number, full: number, changes: number) {
+  const fkey = JSON.stringify(filter);
+  const [list, setList] = useState<{ key: string; full: number; page: Page<SessionSummary> } | undefined>(undefined);
+  const page = useLoad(
+    async (signal) => {
+      const prev = list?.key === `${fkey}|${limit}` && list.full === full ? list.page : undefined;
+      if (prev?.cursor !== undefined) {
+        const [changed, head] = await Promise.all([
+          api.sessions({ ...filter, changedSince: prev.cursor, limit: PAGE }, signal),
+          api.sessions({ ...filter, limit: 1 }, signal),
+        ]);
+        if (changed.total <= changed.items.length) {
+          const items = mergeSessions(prev.items, changed.items, filter.sort);
+          const cursor = changed.cursor ?? prev.cursor;
+          return { ...prev, total: head.total, items, cursor };
+        }
+      }
+      return loadAll(filter, limit, signal);
+    },
+    // biome-ignore lint/correctness/useExhaustiveDependencies: `list` is the previous result, not an input.
+    [fkey, limit, full, changes],
+  );
+  useEffect(() => {
+    if (page.state === "ready") setList({ key: `${fkey}|${limit}`, full, page: page.value });
+  }, [page, fkey, limit, full]);
+  return page;
+}
+
 /** The first `limit` Sessions, in pages of at most 500 (the API's cap). */
-async function loadAll(
-  filter: Parameters<typeof api.sessions>[0],
-  limit: number,
-  signal: AbortSignal,
-): Promise<Page<SessionSummary>> {
+async function loadAll(filter: Filter, limit: number, signal: AbortSignal): Promise<Page<SessionSummary>> {
   let page = await api.sessions({ ...filter, limit: Math.min(limit, PAGE), offset: 0 }, signal);
   const items = [...page.items];
   while (items.length < Math.min(limit, page.total)) {

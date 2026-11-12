@@ -182,7 +182,7 @@ export function SessionPage({ route }: { route: SessionRoute }) {
                 </div>
                 <div className="legends">
                   <Legend />
-                  <BillingLegend />
+                  <BillingLegend noUsage={view.calls.some((c) => !c.usage)} />
                 </div>
               </div>
               <TimelineChart view={view} selected={place} onSelect={select} onBreak={showDiff} />
@@ -304,7 +304,7 @@ function Legend() {
   );
 }
 
-function BillingLegend() {
+function BillingLegend({ noUsage }: { noUsage: boolean }) {
   return (
     <ul className="legend billing-legend" aria-label="Billing parts">
       {CACHE_PARTS.filter((p) => p.key !== "output").map((p) => (
@@ -338,6 +338,18 @@ function BillingLegend() {
           Compaction
         </button>
       </li>
+      {noUsage && (
+        <li>
+          <button
+            type="button"
+            className="tip-anchor legend-item"
+            data-tip="A call whose log holds no usage: its tokens and cost are unknown, so it draws as a grey column."
+          >
+            <span className="swatch no-usage-swatch" aria-hidden="true" />
+            No usage
+          </button>
+        </li>
+      )}
     </ul>
   );
 }
