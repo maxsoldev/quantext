@@ -49,6 +49,7 @@ const PATTERNS: readonly Pattern[] = [
   },
   { kind: "AWS access key", regex: /\b(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}\b/g },
   { kind: "API key (sk-)", regex: /\bsk-[A-Za-z0-9_-]{20,}/g },
+  { kind: "Bedrock API key", regex: /\bABSK[A-Za-z0-9+/=]{20,}/g },
 ];
 
 /** Find personal data (home paths, emails, keys, local identity) in `text`; at most one finding per line and kind. */

@@ -15,7 +15,7 @@ secrets to a secret scanner, and they can contain API keys. Neither must reach t
 - `scripts/scan-personal-data.ts` scans every tracked and untracked, not ignored file, and each file path, for:
   home paths (`/Users/<name>`, `/home/<name>`, `/root`, `C:\Users\<name>` also JSON-escaped, Claude Code's
   dash-encoded project folders `-Users-<name>-…`, URL-encoded `%2FUsers%2F…`), emails outside reserved example
-  domains, AWS access keys and `sk-` API keys. It also looks for this checkout's git email and this machine's host name
+  domains, AWS access keys, `sk-` API keys and Bedrock API keys (`ABSK…`). It also looks for this checkout's git email and this machine's host name
   (not generic ones such as `localhost` or CI runner hosts); these terms are read at run time and never stored in
   the repo. The login name is not a term: CI names such as `runner` are ordinary words, and user names in paths are
   caught by the home-path rules. Its patterns live in `scripts/lib/personal-data.ts`
