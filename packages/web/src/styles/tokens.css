@@ -66,6 +66,11 @@
   --cache-write: #e8952a;
   --cache-uncached: #cf4f6b;
   --cache-output: #4b46a8;
+  /* An edit's removed and added lines: tints with a sign, never colour alone. */
+  --diff-del-bg: #fbe4e4;
+  --diff-del-ink: #8f1f1f;
+  --diff-add-bg: #dff3df;
+  --diff-add-ink: #0a5a0a;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -101,6 +106,10 @@
     --cache-write: #c97a12;
     --cache-uncached: #d9507a;
     --cache-output: #8b86e6;
+    --diff-del-bg: #4a1f24;
+    --diff-del-ink: #ffc9c9;
+    --diff-add-bg: #163a20;
+    --diff-add-ink: #bff0bf;
   }
 }
 
@@ -136,4 +145,8 @@
   --cache-write: #c97a12;
   --cache-uncached: #d9507a;
   --cache-output: #8b86e6;
+  --diff-del-bg: #4a1f24;
+  --diff-del-ink: #ffc9c9;
+  --diff-add-bg: #163a20;
+  --diff-add-ink: #bff0bf;
 }

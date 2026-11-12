@@ -1,14 +1,30 @@
-/** The viewer's pages as URLs: `/` (Sessions, filters in the query) and `/s/<log>/<id>?call=<n>`. */
+/**
+ * The viewer's pages as URLs: `/` (Sessions, filters in the query), `/s/<log>/<id>?call=<n>` (the context view),
+ * `/s/<log>/<id>/tools?sort=<key>` and `/s/<log>/<id>/compactions`.
+ */
 import type { SessionKey } from "@quantext/shared";
 
 export type SortKey = "ended" | "started" | "cost" | "calls";
 
+export type SessionView = "tools" | "compactions";
+/** Tool calls: by lifetime cost (default), result tokens, Calls kept, or in the order they ran. */
+export type ToolSort = "cost" | "tokens" | "calls" | "time";
+
 export type Route =
   | { page: "sessions"; project?: string; sort?: SortKey; search?: string }
-  | { page: "session"; key: SessionKey; call?: number }
+  | {
+      page: "session";
+      key: SessionKey;
+      call?: number;
+      /** The hash of a Block to open in the context at `call`. */
+      block?: string;
+      view?: SessionView;
+      sort?: ToolSort;
+    }
   | { page: "not-found" };
 
 const SORTS: readonly string[] = ["ended", "started", "cost", "calls"];
+const TOOL_SORTS: readonly string[] = ["cost", "tokens", "calls", "time"];
 
 export function parseRoute(pathname: string, search: string): Route {
   const q = new URLSearchParams(search);
@@ -22,11 +38,16 @@ export function parseRoute(pathname: string, search: string): Route {
     if (text) route.search = text;
     return route;
   }
-  const m = /^\/s\/(\d+)\/([^/]+)\/?$/.exec(pathname);
+  const m = /^\/s\/(\d+)\/([^/]+)(?:\/(tools|compactions))?\/?$/.exec(pathname);
   if (m?.[1] && m[2]) {
     const route: Route = { page: "session", key: { log: Number(m[1]), id: decodeURIComponent(m[2]) } };
+    if (m[3] === "tools" || m[3] === "compactions") route.view = m[3];
+    const sort = q.get("sort");
+    if (route.view === "tools" && sort && TOOL_SORTS.includes(sort)) route.sort = sort as ToolSort;
     const call = q.get("call");
     if (call !== null && /^\d+$/.test(call)) route.call = Number(call);
+    const block = q.get("block");
+    if (block && /^[0-9a-f]+$/.test(block) && !route.view) route.block = block;
     return route;
   }
   return { page: "not-found" };
@@ -34,8 +55,13 @@ export function parseRoute(pathname: string, search: string): Route {
 
 export function hrefOf(route: Route): string {
   if (route.page === "session") {
-    const path = `/s/${route.key.log}/${encodeURIComponent(route.key.id)}`;
-    return route.call === undefined ? path : `${path}?call=${route.call}`;
+    const path = `/s/${route.key.log}/${encodeURIComponent(route.key.id)}${route.view ? `/${route.view}` : ""}`;
+    const q = new URLSearchParams();
+    if (route.call !== undefined) q.set("call", String(route.call));
+    if (route.block && !route.view) q.set("block", route.block);
+    if (route.view === "tools" && route.sort) q.set("sort", route.sort);
+    const s = q.toString();
+    return s ? `${path}?${s}` : path;
   }
   if (route.page === "sessions") {
     const q = new URLSearchParams();

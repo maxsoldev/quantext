@@ -51,7 +51,7 @@ export const CACHE_PARTS: readonly Part<CachePart>[] = [
     key: "cacheRead",
     label: "Cache read",
     explain:
-      "Input read from the provider's cache: the prefix this request shares with the previous one. About 0.1× the input price.",
+      "Input read from the provider's cache: the prefix this request shares with the previous one. 0.05× to 0.1× of the input price, by model.",
   },
   {
     key: "cacheWrite",
