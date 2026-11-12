@@ -168,6 +168,8 @@ export interface ContextBlock {
   hash?: string;
   kind: BlockKind | "framing";
   category: ContextCategory;
+  /** A tool schema sent in the messages, not with the request's tools: a deferred tool that a tool search loaded. */
+  deferred?: true;
   source: BlockSource;
   message?: number;
   /** Absent for a Call with no Usage. */

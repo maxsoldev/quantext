@@ -43,7 +43,7 @@ import {
   runFromRow,
   toolCallFromRow,
 } from "../store/index.ts";
-import { categoryOf, emptyCategories } from "./categories.ts";
+import { categoryOf, emptyCategories, isDeferred } from "./categories.ts";
 import type { Redactor } from "./redact.ts";
 import { createRedactor, lastFolder, projectAllowed, trimSeparators } from "./redact.ts";
 import { API_VERSION } from "./sql.ts";
@@ -328,7 +328,7 @@ export function createQuery(options: QueryOptions): Query {
         section: run.section,
         hash: run.blockHash,
         kind: String(r.kind) as BlockKind,
-        category: categoryOf(String(r.kind) as BlockKind, source),
+        category: categoryOf(String(r.kind) as BlockKind, run.section, source),
         source,
         inCachedPrefix: run.position < boundary,
         preview: flat.length > previewChars ? `${flat.slice(0, previewChars - 1)}…` : flat,
@@ -339,6 +339,7 @@ export function createQuery(options: QueryOptions): Query {
             ? { firstCall: run.firstCall }
             : { firstCall: run.firstCall, lastCall: run.lastCall },
       };
+      if (isDeferred(b.kind, b.section)) b.deferred = true;
       if (run.message !== undefined) b.message = run.message;
       if (run.tokens !== undefined) b.tokens = run.tokens;
       if (run.basis !== undefined) b.basis = run.basis;

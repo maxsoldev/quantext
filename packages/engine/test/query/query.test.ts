@@ -152,6 +152,27 @@ describe("contextAt", () => {
     expect(image).toMatchObject({ kind: "tool-result", category: "tool-outputs", preview: "[image 96x64]" });
   });
 
+  test("counts a system text in the messages as injected context, not as the base instructions", async () => {
+    const q = await query(["compaction"]);
+    const ctx = q.contextAt(key(q, 5), 4);
+    const injected = ctx?.blocks.find((b) => b.position === 20);
+    expect(injected).toMatchObject({ kind: "system", section: "messages", category: "injected-context" });
+    expect(ctx?.blocks.filter((b) => b.category === "base-instructions").every((b) => b.section === "system")).toBe(
+      true,
+    );
+  });
+
+  test("marks a tool schema sent in the messages (loaded by a tool search) as deferred", async () => {
+    const q = await query(["mcp-deferred"]);
+    const s = key(q, 6);
+    const blocks = q.listCalls(s).flatMap((c) => q.contextAt(s, c.index)?.blocks ?? []);
+    const deferred = blocks.filter((b) => b.deferred === true);
+    expect(deferred.length).toBeGreaterThan(0);
+    expect(deferred.every((b) => b.kind === "tool-schema" && b.section === "messages")).toBe(true);
+    expect(deferred.every((b) => b.category === "tool-definitions")).toBe(true);
+    expect(blocks.filter((b) => b.section === "tools").every((b) => b.deferred === undefined)).toBe(true);
+  });
+
   test("is undefined for a Call or Session that does not exist", async () => {
     const q = await query(["image"]);
     expect(q.contextAt(key(q, 3), 99)).toBeUndefined();
