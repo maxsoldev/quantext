@@ -33,10 +33,10 @@ describe("the cost split of a Session and its subagents", () => {
       "Main conversation: $10.00",
       "5 subagents (all depths): $11.50",
       "Subagents, most expensive first:",
-      "  Plan: $8.00 (with its 1 subagent)",
-      "  c: $2.00",
-      "  Explore: $1.00",
-      "  and 1 more: $0.50",
+      "· Plan: $8.00 (with its 1 subagent)",
+      "· c: $2.00",
+      "· Explore: $1.00",
+      "· and 1 more: $0.50",
     ]);
   });
 

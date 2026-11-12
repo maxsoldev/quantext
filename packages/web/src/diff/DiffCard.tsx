@@ -283,14 +283,14 @@ function segmentTip(s: StripSegment): string {
   if (s.blocks.length === 1) {
     return `${name(s.block)}\n${CATEGORY_LABEL[s.category]}, ${tokens(s.tokens)} tokens\n${state}, position ${s.block.position}`;
   }
-  const shown = s.blocks.slice(0, 6).map((b) => `  ${name(b)}: ${tokens(b.tokens ?? 0)}`);
+  const shown = s.blocks.slice(0, 6).map((b) => `· ${name(b)}: ${tokens(b.tokens ?? 0)}`);
   const more = s.blocks.length - shown.length;
   return [
     `${s.blocks.length} small blocks, ${tokens(s.tokens)} tokens`,
     `${CATEGORY_LABEL[s.category]}`,
     `${state}, positions ${s.block.position} to ${s.blocks.at(-1)?.position}`,
     ...shown,
-    ...(more > 0 ? [`  and ${more} more`] : []),
+    ...(more > 0 ? [`· and ${more} more`] : []),
   ].join("\n");
 }
 

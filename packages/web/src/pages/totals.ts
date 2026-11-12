@@ -28,11 +28,11 @@ export function costSplit(
   for (const a of ranked.slice(0, top)) {
     const own = a.totals.subagents.sessions;
     const nested = own > 0 ? ` (with its ${count(own, "subagent")})` : "";
-    lines.push(`  ${subagentName(a)}: ${usd(a.totals.all.cost.totalUsd)}${nested}`);
+    lines.push(`· ${subagentName(a)}: ${usd(a.totals.all.cost.totalUsd)}${nested}`);
   }
   const rest = ranked.slice(top);
   if (rest.length > 0) {
-    lines.push(`  and ${rest.length} more: ${usd(rest.reduce((n, a) => n + a.totals.all.cost.totalUsd, 0))}`);
+    lines.push(`· and ${rest.length} more: ${usd(rest.reduce((n, a) => n + a.totals.all.cost.totalUsd, 0))}`);
   }
   return { total, lines };
 }
