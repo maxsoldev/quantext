@@ -84,6 +84,23 @@ describe("normaliseSession", () => {
     expect(result.unresolvedTailHashes).toBe(0);
   });
 
+  test("remaps the tail hash of one API message made of adjacent user rows (tool result, then skill text)", () => {
+    const input = jsonl(
+      {
+        type: "user",
+        message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: `ok ${ROOT}` }] },
+      },
+      { type: "user", isMeta: true, message: { role: "user", content: [{ type: "text", text: "skill" }] } },
+      { type: "attachment" },
+      { type: "api-request", keep: 0, tail: ["e8ad691996a4e82e381f0e9a856adda9b7591542508996a8c8045584b73f0fad"] },
+    );
+    const result = normaliseSession({ "s.jsonl": input }, REPLACE);
+    expect(rowsOf(result.files["s.jsonl"])[3].tail).toEqual([
+      "2bb892d4040733fdbbcc0c5974508aba93d6deec699624463fe3147bb2c9c35a",
+    ]);
+    expect(result.unresolvedTailHashes).toBe(0);
+  });
+
   test("remaps the tail hash of an assistant message that is split over rows with one message id", () => {
     const part = (text: string) => ({ role: "assistant", id: "msg_1", content: [{ type: "text", text }] });
     const input = jsonl(

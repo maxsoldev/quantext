@@ -36,8 +36,10 @@ export function normaliseSession(input: Record<string, string>, replacements: re
   };
   for (const { rows } of parsed) {
     const split = new Map<string, { before: Json[]; after: Json[] }>(); // assistant message id -> content parts
+    let userRun: { before: Json[]; after: Json[] }[] = []; // adjacent user rows, only other row types between
     for (const row of rows ?? []) {
       if (row === undefined) continue;
+      if (row.type === "assistant") userRun = [];
       const next = mapStrings(row, replace) as Row;
       const isChanged = JSON.stringify(next) !== JSON.stringify(row);
       if (isChanged) changed.set(row, next);
@@ -48,6 +50,23 @@ export function normaliseSession(input: Record<string, string>, replacements: re
         parts.before.push(...asArray(row.message.content));
         parts.after.push(...asArray(next.message.content));
         split.set(id, parts);
+      }
+      if (row.type === "user" && isObject(row.message) && isObject(next.message)) {
+        userRun.push({ before: asBlocks(row.message.content), after: asBlocks(next.message.content) });
+        // The API joins adjacent user rows into one message (a tool result and the skill text after it).
+        for (let start = 0; start < userRun.length - 1; start++) {
+          const part = userRun.slice(start);
+          remember([
+            wireHash(
+              "user",
+              part.flatMap((r) => r.before),
+            ),
+            wireHash(
+              "user",
+              part.flatMap((r) => r.after),
+            ),
+          ]);
+        }
       }
     }
     // Claude Code writes one assistant row per content block; the API message is all rows of one id, in order.
@@ -140,6 +159,11 @@ function contentHashes(row: Row, next: Row, isChanged: boolean): [string, string
 /** The hash of a message as the API received it: role and content only. */
 function wireHash(role: Json, content: Json): string {
   return sha256Sorted({ role, content });
+}
+
+/** Message content as blocks: a string is one text block. */
+function asBlocks(content: Json | undefined): Json[] {
+  return typeof content === "string" ? [{ type: "text", text: content }] : asArray(content);
 }
 
 function asArray(value: Json | undefined): Json[] {
