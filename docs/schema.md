@@ -14,6 +14,9 @@ are in ADR 19 and ADR 20; the domain terms are in `GLOSSARY.md`. This file is th
   open run).
 - **JSON columns are text.** Read them with `json_each` and `->>`.
 - **Positions and indexes are 0-based.** `calls.idx` is the Call's position in its Session.
+- **Integers are exact up to 2^53.** The engine reads INTEGER columns as JavaScript numbers, which lose precision
+  beyond 2^53: no column of the store comes near (token counts, Call indexes, byte offsets, the change cursor, log
+  ids). Costs are REAL.
 - **Hashes are hex text**, so that they can be read and pasted (binary hashes: see "Later").
 - **Tables with a natural key have no rowid** (`WITHOUT ROWID`); only `blocks` and `media` keep one.
 
@@ -223,14 +226,15 @@ with no price adds tokens and no cost.
 
 **Speed** (real corpus, 26,900 Calls, 6.5 million Block-Call pairs, Apple silicon): `v_block_lifetime_cost` and
 `v_tool_outputs` about 1.7 s over the whole corpus (they price every Block in every Call), the other views under
-0.15 s. A filter on a view is applied after the whole view is computed: for one Session, use the query layer's
-`blockLifetimes(session)` and `toolOutputs(session)` (the viewer and the API do), which read only that Session's
-runs (under 10 ms for most Sessions, about 130 ms for the largest).
+0.2 s. A filter on these two views is applied after the whole view is computed: for one Session, use
+`qx outputs <session>` and `qx blocks <session>` (the query layer's `toolOutputs` and `blockLifetimes`, which the
+viewer and the API use), which read only that Session's runs (under 10 ms for most Sessions, about 130 ms for
+the largest).
 
 **Examples.**
 
 ```sql
--- Top tool outputs by lifetime cost
+-- Top tool outputs by lifetime cost, over every Session (for one Session: qx outputs <session>)
 SELECT tool, file_path, input_summary, tokens, calls, lifetime_tokens, round(lifetime_cost_usd, 4) AS usd
 FROM v_tool_outputs ORDER BY lifetime_cost_usd DESC LIMIT 10;
 
@@ -247,10 +251,20 @@ WHERE log = :log AND session_id = :session
 
 **`qx sql` rules.** One statement that starts with `SELECT`, `WITH`, `VALUES` or `EXPLAIN`, and holds no word of a
 write, a schema or connection change (`INSERT`, `UPDATE`, `DELETE`, `CREATE`, `DROP`, `ALTER`, `ATTACH`, `DETACH`,
-`PRAGMA`, `VACUUM`, transactions, …). Comments and quoted text do not count. The connection is also opened
-read-only, with `query_only` set. At most 1000 rows (`--limit`); a BLOB shows as its size. There is no time
-limit: neither `node:sqlite` nor `bun:sqlite` has an interrupt or a progress handler; stop a long query with
-Ctrl-C. `qx sql` does not run in demo mode: it reads the tables as they are.
+`PRAGMA`, `VACUUM`, transactions, …). Comments and quoted text do not count. What protects the store:
+
+- **Every runtime:** this check of the text; the file opened read-only (SQLITE_OPEN_READONLY), so no write reaches
+  it; `query_only`, so not even the temporary schema changes. Pragma functions (`pragma_table_info('calls')`,
+  `pragma_table_list`, `pragma_index_list('calls')`) are reads that SQLite allows only for pragmas without side
+  effects: use them to discover the schema.
+- **Node 24 and later** (`node:sqlite` has an authorizer; `bun:sqlite` has none): SQLite itself also denies every
+  action but reading, selecting, functions, recursive queries and the schema pragmas above (so, for example,
+  `pragma_database_list`, which names files, is denied).
+
+The statement runs in a child process. The parent kills it after `--timeout` seconds (default 30), and passes on
+Ctrl-C; a watchdog thread in the child kills it a second later, or as soon as the parent is gone, so a killed `qx`
+leaves nothing running. Neither SQLite module can interrupt a statement. At most 1000 rows (`--limit`); a BLOB
+shows as its size. `qx sql` does not run in demo mode: it reads the tables as they are.
 
 ## Later
 

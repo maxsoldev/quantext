@@ -1,5 +1,6 @@
 /** Demo mode in the query layer: every method shows only the allowed projects, and no local path. */
 import { join } from "node:path";
+import type { IngestEvent } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
 import { claudeCodeCodec } from "../../src/adapters/claude-code/index.ts";
 import type { Query } from "../../src/query/index.ts";
@@ -84,6 +85,11 @@ function imageMedia(q: Query, key: { log: number; id: string }) {
   return block?.hash === undefined || hash === undefined ? undefined : { block: block.hash, log: key.log, hash };
 }
 
+/** The project folder that holds the shop project's memory, as the store names it. */
+function memoryDirOf(db: SqlDriver): string {
+  return String(db.prepare("SELECT DISTINCT project_dir FROM project_memory").get()?.project_dir);
+}
+
 describe("demo mode", () => {
   test("shows only the allowed projects, by their folder name", async () => {
     const q = await demo([PROJECTS["basic-tools"], PROJECTS.image]);
@@ -135,6 +141,58 @@ describe("demo mode", () => {
     const text = everything(q);
     expect(text).not.toContain("carol");
     expect(text).not.toMatch(/\bsecret\b/);
+  });
+
+  test("cuts previews and tool input summaries after it redacts them, at any length", async () => {
+    const { db } = await homes();
+    for (const previewChars of [10, 23, 37, 61, 120]) {
+      const q = createQuery({
+        db,
+        codec: claudeCodeCodec,
+        demo: { redactPaths: true },
+        home: ALICE,
+        user: "alice",
+        previewChars,
+      });
+      const text = everything(q);
+      for (const part of ["alice", "/Users/", "carol", "/home/", "Users\\\\"]) expect(text).not.toContain(part);
+    }
+  });
+
+  test("passes a change event on only for a visible project, with no local path", async () => {
+    const { db } = await homes();
+    const demoOptions = { projects: [PROJECTS["basic-tools"]], redactPaths: true };
+    const q = createQuery({ db, codec: claudeCodeCodec, demo: demoOptions, home: ALICE, user: "alice" });
+    const shop = q.listSessions().items[0];
+    if (shop === undefined) throw new Error("no session");
+    const all = createQuery({ db, codec: claudeCodeCodec });
+    const hidden = all.findSessions("00000000-0000-4000-8000-000000000004")[0];
+    const calls = (log: number, sessionId: string): IngestEvent => ({
+      kind: "calls",
+      logId: log,
+      cursor: 9,
+      sessionId,
+      added: ["c"],
+      addedIndexes: [3],
+      updated: [],
+    });
+    expect(q.visibleEvent(calls(shop.log, shop.id))).toEqual({
+      kind: "calls",
+      cursor: 9,
+      session: { log: shop.log, id: shop.id },
+      added: [{ id: "c", index: 3 }],
+      updated: [],
+    });
+    expect(q.visibleEvent(calls(hidden?.log ?? 0, hidden?.id ?? ""))).toBeNull();
+    const removed = (projects: string[]): IngestEvent => ({ kind: "log-removed", logId: 1, cursor: 9, projects });
+    expect(q.visibleEvent(removed([PROJECTS.resume]))).toBeNull();
+    expect(q.visibleEvent(removed([PROJECTS["basic-tools"]]))).toEqual({ kind: "log-removed", cursor: 9, logId: 1 });
+    expect(q.visibleEvent({ kind: "memory", cursor: 9, projectDirs: [memoryDirOf(db)] })).toEqual({
+      kind: "memory",
+      cursor: 9,
+      projects: ["shop"],
+    });
+    expect(q.visibleEvent({ kind: "memory", cursor: 9, projectDirs: ["/elsewhere"] })).toBeNull();
   });
 
   test("marks its responses as redacted, with images to blur", async () => {

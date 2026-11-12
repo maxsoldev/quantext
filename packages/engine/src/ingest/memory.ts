@@ -10,8 +10,15 @@ import type { Store } from "../store/index.ts";
 import type { PathError } from "./discover.ts";
 import { describe } from "./discover.ts";
 
-/** Bring the store's memory documents up to date with the files; returns what could not be read. */
-export async function ingestMemory(root: string, store: Store): Promise<PathError[]> {
+export interface MemoryPass {
+  /** What could not be read. */
+  errors: PathError[];
+  /** Set when documents were stored or removed: the change cursor after, and the projects whose memory changed. */
+  changed?: { cursor: number; projectDirs: string[] };
+}
+
+/** Bring the store's memory documents up to date with the files. */
+export async function ingestMemory(root: string, store: Store): Promise<MemoryPass> {
   const errors: PathError[] = [];
   const projects = await entries(join(root, "projects"), errors);
   const stored = new Map(store.memory.marks().map((m) => [`${m.projectDir}\0${m.path}`, m]));
@@ -39,8 +46,10 @@ export async function ingestMemory(root: string, store: Store): Promise<PathErro
   // Only documents of this root's project folders: another root's are not this scan's to remove.
   const mine = (m: { projectDir: string }) => dirname(m.projectDir) === join(root, "projects");
   const remove = [...stored.entries()].filter(([key, m]) => mine(m) && !seen.has(key)).map(([, m]) => m);
-  if (put.length > 0 || remove.length > 0) store.memory.write({ put, remove });
-  return errors;
+  if (put.length === 0 && remove.length === 0) return { errors };
+  const cursor = store.memory.write({ put, remove });
+  const projectDirs = [...new Set([...put, ...remove].map((d) => d.projectDir))].sort();
+  return { errors, changed: { cursor, projectDirs } };
 }
 
 /** The entries of a folder; a missing one is empty (no projects yet, no memory folder). */

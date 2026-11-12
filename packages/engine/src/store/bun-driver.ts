@@ -1,8 +1,11 @@
 /** The `bun:sqlite` adapter of the SQL driver. */
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import type { RawDatabase, RawOptions, SqlRow, SqlValue } from "./driver.ts";
 
-export function openBun(path: string, options: RawOptions = {}): RawDatabase {
+/** The module is passed in, not imported, so that a bundle loads `bun:sqlite` only on Bun (`driver.ts`). */
+export type BunSqlite = { Database: typeof Database };
+
+export function openBun({ Database }: BunSqlite, path: string, options: RawOptions = {}): RawDatabase {
   const db = new Database(path, options.readOnly === true ? { readonly: true } : { create: true });
   return {
     runtime: "bun",
@@ -18,6 +21,7 @@ export function openBun(path: string, options: RawOptions = {}): RawDatabase {
       };
     },
     inTransaction: () => db.inTransaction,
+    denyAllButReads: () => false, // bun:sqlite has no authorizer
     close: () => db.close(),
   };
 }

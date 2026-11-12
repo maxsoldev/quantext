@@ -221,6 +221,8 @@ export interface ContextDiff extends Meta {
   previous?: number;
   added: ContextBlock[];
   removed: ContextBlock[];
+  /** Content in both Calls at another position: `from` is its position in the previous Call. */
+  moved: (ContextBlock & { from: number })[];
   /** Entries kept from the previous Call that are not in this Call's Cached prefix: written to the cache again. */
   uncached: ContextBlock[];
   /** The previous Call ran on another model (in another lane): nothing of its cache could be read. */

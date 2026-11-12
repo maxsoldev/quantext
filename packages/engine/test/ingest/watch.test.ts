@@ -54,6 +54,7 @@ function recordingIngest() {
       return [];
     },
     onCalls: () => () => undefined,
+    onEvent: () => () => undefined,
   };
   return {
     ingest,
@@ -261,6 +262,6 @@ describe("the file system change source", () => {
     const files = layout(root, "basic-tools");
     writeText(files.main, readFileSync(files.source));
     await until(() => events.length > 0);
-    expect(events[0]?.log).toBe(join(root, "projects", "-fixture-basic-tools", files.main.split("/").pop() ?? ""));
+    expect(events[0]).toMatchObject({ kind: "calls", logId: 1 });
   });
 });

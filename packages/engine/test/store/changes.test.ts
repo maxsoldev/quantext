@@ -62,3 +62,21 @@ describe("the cache boundary offset of a Call", () => {
     },
   );
 });
+
+describe("changes that are not Calls", () => {
+  test("a memory write and a log emptied move the change cursor too", async () => {
+    const store = await open();
+    const memory = store.memory.write({
+      put: [{ projectDir: "/p", path: "a.md", content: "a", mtimeMs: 1, size: 1 }],
+      remove: [],
+    });
+    expect(memory).toBe(1);
+    const log = store.log("/logs/a.jsonl", "claude-code", claudeCodeCodec);
+    for (const delta of deltasOf(transcriptsOf("image"))) log.write({ deltas: [delta] });
+    const before = store.changeCursor();
+    expect(log.projects()).toEqual(["/fixture-0000000000000000/repo"]);
+    expect(log.reset()).toBe(before + 1);
+    expect(log.projects()).toEqual([]);
+    expect(store.changeCursor()).toBe(before + 1);
+  });
+});

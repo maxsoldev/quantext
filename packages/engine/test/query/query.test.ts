@@ -212,6 +212,14 @@ describe("contextDiff", () => {
     expect(diff?.firstChange).toBe(call?.cacheBoundary?.position);
     expect(diff?.added.find((b) => b.position === diff.firstChange)?.kind).toBe("summary");
     expect(diff?.removed.map((b) => b.kind)).toContain("tool-result");
+    // Content in both, at another position, is moved: neither added nor removed.
+    const hashes = (xs: { hash?: string }[] | undefined) => new Set((xs ?? []).map((b) => b.hash));
+    for (const m of diff?.moved ?? []) {
+      expect(m.from).not.toBe(m.position);
+      expect(hashes(diff?.added).has(m.hash)).toBe(false);
+      expect(hashes(diff?.removed).has(m.hash)).toBe(false);
+    }
+    expect(diff?.moved.length).toBeGreaterThan(0);
   });
 });
 

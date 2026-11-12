@@ -10,7 +10,9 @@ API and the viewer. It makes no network calls. In the repo: `pnpm qx <command>` 
 | `qx sessions [--project <p>] [--search <s>] [--sort ended\|started\|cost\|calls] [--limit <n>] [--offset <n>]` | Main Sessions, newest first, with their subagents |
 | `qx session <id>` | One Session: totals, lanes, compactions (before, after, removed, kept), events, subagents |
 | `qx call <session> <n> [--lane <lane>] [--diff]` | The context of Call `n` (its index in the Session; with `--lane`, the `n`-th Call of that lane): every Block in order with section, kind, source, tokens, basis, cached or not, cost share and a preview; totals by section and by context-bar group. `--diff`: what changed from the lane's previous Call |
-| `qx sql "<select>" [--limit <n>]` | One read-only statement over the tables and views (`docs/schema.md`, "Views"); at most 1000 rows by default |
+| `qx outputs <session> [--sort cost\|tokens\|calls] [--limit <n>]` | The Session's tool outputs by lifetime cost (the query layer's `toolOutputs`; fast for one Session, unlike a filter on `v_tool_outputs`) |
+| `qx blocks <session> [--sort cost\|tokens\|calls] [--limit <n>]` | The Session's Blocks by lifetime cost (`blockLifetimes`) |
+| `qx sql "<select>" [--limit <n>] [--timeout <s>]` | One read-only statement over the tables and views (`docs/schema.md`, "Views"), in its own process, killed after `--timeout` seconds (default 30); at most 1000 rows by default |
 | `qx report` | What ingest could not read or map, the Calls' issues by kind, bytes waiting for a newline |
 | `qx --version`, `qx --help` | |
 
@@ -26,8 +28,8 @@ Every reading command opens the store read-only (no writer lock), so it also wor
 | Code | Meaning |
 |---|---|
 | 0 | Done (`ingest`: also when some files could not be read; they are listed on stderr and in `qx report`) |
-| 1 | Failed: no store, a store of another schema version, the writer lock is held, a SQL error |
-| 2 | Wrong use: unknown command or option, a bad number, an ambiguous session, a statement that is not a single read, `sql` in demo mode |
+| 1 | Failed: no store, a store of another schema version, the writer lock is held, a SQL error, a query over its time limit |
+| 2 | Wrong use: unknown command or option, a bad number, an ambiguous session, a statement that is not a single read (by the text check or SQLite's authorizer), `sql` in demo mode |
 | 3 | Not found: no such session or call |
 
 ## JSON output
@@ -45,6 +47,8 @@ renamed or removed only with a new `apiVersion`. An optional field is left out, 
 | `call` | `CallContext`; with `--diff`, also `diff: ContextDiff` |
 | `sql` | `SqlResult`: `columns`, `rows` (objects by column name; a BLOB as `"<blob N bytes>"`), `truncated` |
 | `report` | `QueryReport` |
+| `outputs` | `Items<ToolOutput>` |
+| `blocks` | `Items<BlockLifetime>` |
 
 ## Demo mode
 
@@ -53,11 +57,14 @@ For showing sessions to an audience. Applied in the query layer, so the API and 
 - Only the allowed projects are visible (`--demo-project`, by exact path); every other Session, its Blocks, media,
   tool calls and memory are not found, and the report lists only their logs' entries (no folder scan issues).
 - Every other project's path (as is, JSON-escaped, percent-encoded, as the harness's encoded folder name, and its
-  folder name as a word of 4 or more characters) becomes `<hidden project>` wherever it shows in visible text.
-- Percent-encoded text is decoded first. Paths in the project are shown relative to it (`src/a.ts`, the project
+  folder name of 4 or more characters as a word, also next to `.`, `_`, `-`, in any case) becomes
+  `<hidden project>` wherever it shows in visible text.
+- Encoded text is decoded first: percent-encoding (also twice), `\/`, `\u002F` and `\u005C` (also escaped again), HTML character references. Paths in the project are shown relative to it (`src/a.ts`, the project
   itself as `.`), the project as its folder name; any home folder (macOS, Linux, Windows, with spaces or letters
   beyond ASCII, JSON-escaped or encoded, also `C--Users-<name>`) as `~`.
 - The user name, in any case, is hidden after `@ / \ - : ~` and before `@` (`git@github.com:<name>/…`,
-  `~<name>`, `<name>@host`), not inside other words. Errors on stderr are redacted the same way.
+  `~<name>`, `<name>@host`), not inside other words. E-mail addresses (but `git@`) become `<email>`, the
+  machine's name and host names made from it or the user name (`<name>-mbp`, `<name>s-MacBook-Pro`, `*<name>*.local`) `<host>`. Errors on stderr are redacted the same way.
+- Text is redacted in full before it is cut to a preview, so that a cut word cannot escape the patterns.
 - Responses carry `redacted: true` and `blurImages: true`: the viewer blurs images, which may show what text hides.
 - `qx sql` refuses to run in demo mode (exit 2): it reads the tables as they are.

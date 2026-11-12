@@ -40,8 +40,11 @@ export interface StoreReport {
 export interface MemoryStore {
   /** Every stored document's mark, by project folder and path. */
   marks(): MemoryMark[];
-  /** Store new and changed documents and delete removed ones, in one transaction. */
-  write(changes: { put: readonly MemoryDocument[]; remove: readonly Pick<MemoryMark, "projectDir" | "path">[] }): void;
+  /** Store new and changed documents and delete removed ones, in one transaction; returns the change cursor after. */
+  write(changes: {
+    put: readonly MemoryDocument[];
+    remove: readonly Pick<MemoryMark, "projectDir" | "path">[];
+  }): number;
 }
 
 export interface Store {
@@ -151,6 +154,8 @@ export async function openStore(options: OpenStoreOptions): Promise<Store> {
             for (const d of remove) {
               sql.get("DELETE FROM project_memory WHERE project_dir = ? AND path = ?").run(d.projectDir, d.path);
             }
+            sql.get("UPDATE change_cursor SET seq = seq + 1").run();
+            return Number(sql.get("SELECT seq FROM change_cursor").get()?.seq);
           }),
       },
       changeCursor: () => Number(sql.get("SELECT seq FROM change_cursor").get()?.seq ?? 0),
@@ -174,6 +179,8 @@ export async function openStore(options: OpenStoreOptions): Promise<Store> {
 export interface OpenReaderOptions {
   /** Runs on the connection before it becomes read-only: for temporary views. */
   setup?: (db: SqlDriver) => void;
+  /** Also let SQLite deny every statement that does more than read, where the runtime can (`readsOnlyEnforced`). */
+  readsOnly?: boolean;
 }
 
 /**
@@ -183,13 +190,17 @@ export interface OpenReaderOptions {
 export async function openReader(dataDir: string, options: OpenReaderOptions = {}): Promise<SqlDriver> {
   const path = join(dataDir, "quantext.db");
   if (!existsSync(path)) throw new Error(`there is no store in ${dataDir}: run \`qx ingest\` first`);
-  return openReadOnlyDriver(path, (db) => {
-    const version = Number(db.prepare("SELECT version FROM schema_version").get()?.version ?? 0);
-    if (version !== SCHEMA_VERSION) {
-      throw new Error(
-        `the store's schema version is ${version}, this engine reads ${SCHEMA_VERSION}: run \`qx ingest\` to migrate it`,
-      );
-    }
-    options.setup?.(db);
-  });
+  return openReadOnlyDriver(
+    path,
+    (db) => {
+      const version = Number(db.prepare("SELECT version FROM schema_version").get()?.version ?? 0);
+      if (version !== SCHEMA_VERSION) {
+        throw new Error(
+          `the store's schema version is ${version}, this engine reads ${SCHEMA_VERSION}: run \`qx ingest\` to migrate it`,
+        );
+      }
+      options.setup?.(db);
+    },
+    options.readsOnly === true,
+  );
 }

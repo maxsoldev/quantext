@@ -110,14 +110,16 @@ GROUP BY p.log, p.block_hash`;
 
 /**
  * Each tool use with its result Block's lifetime cost. `lifetime`: the lifetime rows to join (the view, or a
- * Session's own); `where` filters the tool uses (`t`).
+ * Session's own); `where` filters the tool uses (`t`). `cut`: the input summary is the first 200 characters; false:
+ * the whole input, for a caller that must redact it before it cuts it (demo mode).
  */
-export function toolOutputsSql(lifetime: string, where = ""): string {
+export function toolOutputsSql(lifetime: string, where = "", cut = true): string {
+  const input =
+    "coalesce(t.input, (SELECT json_extract(k.content, '$.input') FROM blocks k WHERE k.hash = t.block_hash))";
   return `
 SELECT t.log, t.session_id, t.id AS tool_use_id, t.name AS tool, t.mcp_server, t.file_path, t.skill, t.is_error,
   c.idx AS call_idx,
-  substr(coalesce(t.input, (SELECT json_extract(k.content, '$.input') FROM blocks k WHERE k.hash = t.block_hash)),
-    1, 200) AS input_summary,
+  ${cut ? `substr(${input}, 1, 200)` : input} AS input_summary,
   t.result_block_hash, l.tokens, l.calls, l.runs,
   (SELECT min(r.first_call) FROM call_blocks r WHERE r.block_hash = t.result_block_hash AND r.log = t.log
     AND r.session_id = t.session_id) AS first_call,

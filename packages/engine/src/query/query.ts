@@ -20,6 +20,7 @@ import type {
   ContextCategory,
   ContextDiff,
   DemoOptions,
+  IngestEvent,
   Items,
   JsonValue,
   LaneSummary,
@@ -41,6 +42,7 @@ import type {
   TokenGroup,
   ToolCallSummary,
   ToolOutput,
+  VisibleEvent,
 } from "@quantext/shared";
 import { blockCosts } from "../core/pricing.ts";
 import type { SqlDriver, SqlRow, SqlValue } from "../store/index.ts";
@@ -53,6 +55,7 @@ import {
   toolCallFromRow,
 } from "../store/index.ts";
 import { categoryOf, emptyCategories, isDeferred } from "./categories.ts";
+import { previewOf } from "./preview.ts";
 import type { Redactor } from "./redact.ts";
 import { createRedactor, lastFolder, projectAllowed, trimSeparators } from "./redact.ts";
 import { API_VERSION } from "./sql.ts";
@@ -73,9 +76,10 @@ export interface QueryOptions {
   /** The adapter's codec: Block text and media from stored content. */
   codec: StoreCodec;
   demo?: DemoOptions;
-  /** The home folder and user name to hide in demo mode. */
+  /** The home folder, user name and machine name to hide in demo mode. */
   home?: string;
   user?: string;
+  host?: string;
   now?: () => number;
   /** A Session is live when its last event is at most this old. Default 5 minutes. */
   liveWindowMs?: number;
@@ -113,6 +117,8 @@ export interface Query {
   /** The memory documents of a project (by its path, or its last folder name), by path. */
   projectMemory(project: string): Items<MemoryDocumentView>;
   ingestReport(): QueryReport;
+  /** A change event as this query's reader may see it: null for a hidden project, no local paths. */
+  visibleEvent(event: IngestEvent): VisibleEvent | null;
 }
 
 const SORTS: Record<NonNullable<SessionFilter["sort"]>, string> = {
@@ -157,6 +163,7 @@ export function createQuery(options: QueryOptions): Query {
         redact: createRedactor({
           ...nonEmpty("home", options.home),
           ...nonEmpty("user", options.user),
+          ...nonEmpty("host", options.host),
           hidden,
           paths: redacting,
         }),
@@ -164,6 +171,11 @@ export function createQuery(options: QueryOptions): Query {
     }
     return redactor.redact;
   };
+  /** Text as demo mode shows it (paths relative to `root`); as it is without demo mode. */
+  const redactText =
+    (root: string | undefined) =>
+    (text: string): string =>
+      demo === undefined ? text : redactorNow()(text, root);
   /** The value with local paths and hidden projects hidden, in demo mode. */
   const hide = <T>(value: T, root?: string): T =>
     demo === undefined ? value : (redactorNow().json(value as unknown as JsonValue, root) as unknown as T);
@@ -339,8 +351,7 @@ export function createQuery(options: QueryOptions): Query {
     const blocks: ContextBlock[] = runs.map((r) => {
       const run = runFromRow(r);
       const source = sourceOf(r);
-      const text = textOf(r.content);
-      const flat = text.replace(/\s+/g, " ").trim();
+      const shown = previewOf(textOf(r.content), previewChars, redactText(found.project));
       const b: ContextBlock = {
         position: run.position,
         section: run.section,
@@ -349,9 +360,7 @@ export function createQuery(options: QueryOptions): Query {
         category: categoryOf(String(r.kind) as BlockKind, run.section, source),
         source,
         inCachedPrefix: run.position < boundary,
-        preview: flat.length > previewChars ? `${flat.slice(0, previewChars - 1)}…` : flat,
-        chars: text.length,
-        truncated: flat.length > previewChars,
+        ...shown,
         run:
           run.lastCall === undefined
             ? { firstCall: run.firstCall }
@@ -582,6 +591,8 @@ export function createQuery(options: QueryOptions): Query {
 
   return {
     listSessions(filter = {}) {
+      // The cursor before the page: a write between them shows up again in the next changedSince, never lost.
+      const cursor = Number(q("SELECT seq FROM change_cursor").get()?.seq ?? 0);
       const params: SqlValue[] = [];
       const where = [
         "(parent_id IS NULL OR NOT EXISTS (SELECT 1 FROM sessions p WHERE p.log = v.log AND p.id = v.parent_id))",
@@ -620,7 +631,6 @@ export function createQuery(options: QueryOptions): Query {
       const issues = issuesOf([...new Set(rows.map((r) => Number(r.log)))]);
       const items = rows.map((r) => summary(r, issues));
       nest(items, subagentsOf(items));
-      const cursor = Number(q("SELECT seq FROM change_cursor").get()?.seq ?? 0);
       return { ...meta, total, offset, items, cursor };
     },
     findSessions(id) {
@@ -705,14 +715,24 @@ export function createQuery(options: QueryOptions): Query {
       const real = (b: ContextBlock) => b.hash !== undefined;
       const before = new Set((was?.blocks ?? []).filter(real).map(runKey));
       const after = new Set(now.blocks.filter(real).map(runKey));
-      const added = now.blocks.filter((b) => real(b) && !before.has(runKey(b)));
-      const removed = (was?.blocks ?? []).filter((b) => real(b) && !after.has(runKey(b)));
-      const changed = [...added, ...removed].map((b) => b.position);
+      const newHere = now.blocks.filter((b) => real(b) && !before.has(runKey(b)));
+      const goneHere = (was?.blocks ?? []).filter((b) => real(b) && !after.has(runKey(b)));
+      // The same content in both, at another position, moved: it is neither added nor removed.
+      const wasAt = new Map(goneHere.map((b) => [b.hash, b.position]));
+      const moved = newHere.flatMap((b) => {
+        const from = wasAt.get(b.hash);
+        return from === undefined ? [] : [{ ...b, from }];
+      });
+      const movedHashes = new Set(moved.map((b) => b.hash));
+      const added = newHere.filter((b) => !movedHashes.has(b.hash));
+      const removed = goneHere.filter((b) => !movedHashes.has(b.hash));
+      const changed = [...added, ...removed].map((b) => b.position).concat(moved.flatMap((b) => [b.position, b.from]));
       const diff: ContextDiff = {
         ...meta,
         call: index,
         added,
         removed,
+        moved,
         uncached: now.blocks.filter((b) => real(b) && before.has(runKey(b)) && !b.inCachedPrefix),
         cacheReadDrop: Math.max(0, (was?.call.usage?.cacheReadTokens ?? 0) - (now.call.usage?.cacheReadTokens ?? 0)),
       };
@@ -840,7 +860,7 @@ export function createQuery(options: QueryOptions): Query {
     toolOutputs(key, options = {}) {
       const found = sessionProject(key);
       if (found === undefined) return { ...meta, items: [] };
-      const sql = toolOutputsSql(`(${SESSION_LIFETIME})`, "WHERE t.log = ? AND t.session_id = ?");
+      const sql = toolOutputsSql(`(${SESSION_LIFETIME})`, "WHERE t.log = ? AND t.session_id = ?", false);
       const rows = db
         .prepare(`${sql} ORDER BY coalesce(${LIFETIME_SORTS[options.sort ?? "cost"]}, 0) DESC, tool_use_id LIMIT ?`)
         .all(key.log, key.id, key.log, key.id, options.limit ?? 50);
@@ -853,7 +873,9 @@ export function createQuery(options: QueryOptions): Query {
           ...lifetimeOf(r),
         };
         if (r.call_idx !== null) o.callIndex = Number(r.call_idx);
-        if (r.input_summary !== null) o.inputSummary = String(r.input_summary);
+        if (r.input_summary !== null) {
+          o.inputSummary = previewOf(String(r.input_summary), 200, redactText(found.project)).preview;
+        }
         if (r.result_block_hash !== null) o.resultBlockHash = String(r.result_block_hash);
         if (r.first_call !== null) o.firstCall = Number(r.first_call);
         if (r.last_call !== null) o.lastCall = Number(r.last_call);
@@ -884,6 +906,31 @@ export function createQuery(options: QueryOptions): Query {
           size: Number(r.size),
         }));
       return { ...meta, items: hide(docs, root === null || root === undefined ? undefined : String(root)) };
+    },
+    visibleEvent(event) {
+      const shown = (project: string) => (redacting ? lastFolder(project) : project);
+      switch (event.kind) {
+        case "calls": {
+          const key = { log: event.logId, id: event.sessionId };
+          if (sessionProject(key) === undefined) return null;
+          const added = event.added.map((id, i) => ({ id, index: event.addedIndexes[i] ?? -1 }));
+          return { kind: "calls", cursor: event.cursor, session: key, added, updated: [...event.updated] };
+        }
+        case "log-removed":
+          return event.projects.some((p) => projectAllowed(p, allowed))
+            ? { kind: "log-removed", cursor: event.cursor, logId: event.logId }
+            : null;
+        case "memory": {
+          const dirs = new Set(event.projectDirs);
+          const projects = q("SELECT DISTINCT l.path, s.project FROM sessions s JOIN logs l ON l.id = s.log")
+            .all()
+            .filter((r) => r.project !== null && dirs.has(parentOf(String(r.path))))
+            .map((r) => String(r.project))
+            .filter((p) => projectAllowed(p, allowed));
+          const unique = [...new Set(projects)].sort();
+          return unique.length === 0 ? null : { kind: "memory", cursor: event.cursor, projects: unique.map(shown) };
+        }
+      }
     },
     ingestReport() {
       const visible = visibleLogs();

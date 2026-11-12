@@ -20,9 +20,15 @@ export interface RedactorOptions {
   hidden?: readonly string[];
   /** Hide paths (relative to the project, home folders as `~`); false: only the hidden projects. Default true. */
   paths?: boolean;
+  /** The machine's name, shown as `<host>`. */
+  host?: string;
 }
 
 export const HIDDEN_PROJECT = "<hidden project>";
+
+/** An e-mail address; `git@` is an SSH remote, not a person. */
+const EMAIL =
+  /(?<![\p{L}\p{N}_.%+-])(?!git@)[\p{L}\p{N}_.%+-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*\.\p{L}{2,}(?![\p{L}\p{N}])/gu;
 
 /** A character of a folder name: anything but a separator, a quote, a line end or what no file name holds. */
 const NAME = "[^\\\\/\"'`\\n\\r\\t<>|*?:]+";
@@ -53,11 +59,25 @@ export function createRedactor(options: RedactorOptions = {}): Redactor {
       : new RegExp(`(?:\\b[A-Za-z]--|(?<![\\w-])-)(?:Users|home)-${escapeRegExp(encode(user))}(?![A-Za-z0-9])`, "gu");
   const hidden = [...(options.hidden ?? [])].map(trimSeparators).sort((a, b) => b.length - a.length);
   const paths = options.paths ?? true;
+  const host =
+    options.host !== undefined && options.host.length >= 3 ? options.host.replace(/\.local$/i, "") : undefined;
+  const hostPattern =
+    host === undefined ? undefined : new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(host)}(?![\\p{L}\\p{N}])`, "giu");
+  const machineNames = [user, host].filter((n): n is string => n !== undefined && n.length >= 3).map(escapeRegExp);
+  /** Host names made from the user's or the machine's name: `<name>-mbp`, `<name>s-MacBook-Pro`, `*<name>*.local`. */
+  const machinePatterns = machineNames.flatMap((n) => [
+    new RegExp(`(?<![\\p{L}\\p{N}_-])[\\p{L}\\p{N}_-]*${n}[\\p{L}\\p{N}_-]*\\.local(?![\\p{L}\\p{N}])`, "giu"),
+    new RegExp(`(?<![\\p{L}\\p{N}])${n}-mbp(?![\\p{L}\\p{N}])`, "giu"),
+    new RegExp(`(?<![\\p{L}\\p{N}])${n}'?s?-macbook[\\p{L}\\p{N}_-]*`, "giu"),
+  ]);
   const redact = ((text: string, root?: string) => {
     let out = decodePercent(text);
     if (paths && root !== undefined && root !== "") out = relative(out, trimSeparators(root));
     for (const project of hidden) out = hide(out, project);
     if (!paths) return out;
+    out = out.replace(EMAIL, "<email>");
+    for (const pattern of machinePatterns) out = out.replace(pattern, "<host>");
+    if (hostPattern !== undefined) out = out.replace(hostPattern, "<host>");
     if (home !== undefined) {
       for (const form of forms(home)) out = out.replace(new RegExp(`${escapeRegExp(form)}${END}`, "gu"), "~");
       out = out.replace(new RegExp(`${escapeRegExp(encode(home))}(?![A-Za-z0-9])`, "g"), "-~");
@@ -105,11 +125,13 @@ function relative(text: string, root: string): string {
 /** A hidden project's path in every form, its encoded folder name, and its folder name as a word, as a placeholder. */
 function hide(text: string, project: string): string {
   let out = text;
-  for (const form of forms(project)) out = out.replaceAll(form, HIDDEN_PROJECT);
-  out = out.replaceAll(encode(project), HIDDEN_PROJECT);
+  const any = (form: string) => new RegExp(escapeRegExp(form), "giu");
+  for (const form of forms(project)) out = out.replace(any(form), HIDDEN_PROJECT);
+  out = out.replace(any(encode(project)), HIDDEN_PROJECT);
   const name = lastFolder(project);
   if (name.length >= 4) {
-    out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}_.-])${escapeRegExp(name)}${END}`, "gu"), HIDDEN_PROJECT);
+    // As a word: next to `.`, `_` or `-` too (`name.git`, `mcp__name__tool`), in any case.
+    out = out.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(name)}(?![\\p{L}\\p{N}])`, "giu"), HIDDEN_PROJECT);
   }
   return out;
 }
@@ -124,9 +146,33 @@ function encode(path: string): string {
   return path.replace(/[^A-Za-z0-9]/g, "-");
 }
 
-/** Percent-encoded runs decoded (`%2F` is `/`); a run that is not valid UTF-8 stays as it is. */
+/**
+ * Encoded separators and text decoded, so that the patterns see plain paths: percent-encoded runs (also encoded
+ * twice, `%252F`), JSON-escaped slashes (`\/`, `\u002F`, also escaped again: `\\u002F`; and `\u005C`) and HTML
+ * character references (`&#x2F;`, `&#47;`).
+ */
 function decodePercent(text: string): string {
-  if (!text.includes("%")) return text;
+  let out = text
+    .replace(/\\{1,2}u002f/gi, "/")
+    .replace(/\\{1,2}u005c/gi, "\\")
+    .replace(/\\\//g, "/")
+    .replace(/&#x([0-9a-f]{1,6});/gi, (ref, hex: string) => character(Number.parseInt(hex, 16), ref))
+    .replace(/&#(\d{1,7});/g, (ref, dec: string) => character(Number(dec), ref));
+  for (let i = 0; i < 3 && out.includes("%"); i++) {
+    const next = decodeRuns(out);
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+/** The character of a code point, or the reference as it was when it names none. */
+function character(code: number, ref: string): string {
+  return code <= 0x10ffff ? String.fromCodePoint(code) : ref;
+}
+
+/** Percent-encoded runs decoded (`%2F` is `/`); a run that is not valid UTF-8 keeps all but its separators. */
+function decodeRuns(text: string): string {
   return text.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
     try {
       return decodeURIComponent(run);

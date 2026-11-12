@@ -1,5 +1,5 @@
 /** `qx` end to end on a temporary data folder, ingested from the fixtures with `qx ingest`. */
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import type { CliIo } from "../../src/cli/index.ts";
@@ -10,6 +10,37 @@ import { copyScenario } from "../ingest/corpus.ts";
 import { onCleanup, tempDir } from "../store/temp.ts";
 
 const QX = join(import.meta.dirname, "../../src/cli/qx.ts");
+
+/** The pid of the first child of `pid`, once it has one. */
+async function childOf(pid: number): Promise<number> {
+  for (let i = 0; i < 200; i++) {
+    const found = spawnSync("pgrep", ["-P", String(pid)], { encoding: "utf8" })
+      .stdout.trim()
+      .split("\n")[0];
+    if (found !== undefined && found !== "") return Number(found);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`process ${pid} started no child`);
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false; // ESRCH: no such process
+  }
+}
+
+/** Whether this runtime's SQLite lets a program deny statements (`node:sqlite` from Node 24). */
+function authorizerSupported(): boolean {
+  if (process.versions.bun !== undefined) return false;
+  const run = spawnSync(process.execPath, [
+    "-e",
+    "process.exit(typeof require('node:sqlite').DatabaseSync.prototype.setAuthorizer === 'function' ? 0 : 1)",
+  ]);
+  return run.status === 0;
+}
 const COMPACTION = "00000000-0000-4000-8000-000000000005";
 
 async function qx(...argv: string[]): Promise<{ code: number; out: string; err: string }> {
@@ -76,7 +107,7 @@ describe("qx", () => {
     expect(call.out).toMatch(/^call 4 of 00000000-0000-4000-8000-000000000005 \(lane /);
     expect(call.out).toMatch(/\n +13 +messages +summary +738 +estimate/);
     expect(call.out).toContain(
-      "against call 2: 8 added, 8 removed, first change at position 13; cache read lost 3,812",
+      "against call 2: 7 added, 7 removed, 1 moved, first change at position 13; cache read lost 3,812",
     );
     const json = JSON.parse(
       (await qx("call", ...data, COMPACTION, "1", "--lane", "eu.anthropic.claude-opus-5-5|sdk", "--json")).out,
@@ -99,6 +130,64 @@ describe("qx", () => {
     expect(write).toMatchObject({ code: EXIT.usage, out: "" });
     expect(write.err).toContain("not DELETE");
     expect((await qx("sql", ...data, "SELECT nope FROM calls")).code).toBe(EXIT.failed);
+  });
+
+  test("stops a query that runs too long, in its own process, with a clear message", { timeout: 20_000 }, async () => {
+    const data = await ingested();
+    const forever = "WITH RECURSIVE r(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM r) SELECT count(*) FROM r";
+    const started = Date.now();
+    const run = await qx("sql", ...data, "--timeout", "1", forever);
+    expect(run.code).toBe(EXIT.failed);
+    expect(run.err).toContain("ran longer than 1 s and was stopped");
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  test.skipIf(!authorizerSupported())("lets SQLite deny anything but reads where the runtime can", async () => {
+    const data = await ingested();
+    // Passes the text check, but names the database's files: a pragma outside the schema ones is denied.
+    const run = await qx("sql", ...data, "SELECT * FROM pragma_database_list");
+    expect(run.code).toBe(EXIT.usage);
+    expect(run.err).toMatch(/not authorized/i);
+  });
+
+  test("lets an agent discover the schema through pragma reads, on every runtime", async () => {
+    const data = await ingested();
+    for (const sql of [
+      "SELECT name FROM pragma_table_list WHERE schema = 'main' ORDER BY name",
+      "SELECT name FROM pragma_table_info('calls')",
+      "SELECT name FROM pragma_index_list('calls')",
+    ]) {
+      const run = await qx("sql", ...data, sql, "--json");
+      expect(run.err).toBe("");
+      expect(JSON.parse(run.out).rows.length).toBeGreaterThan(0);
+    }
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "takes its SQL process along when it is killed",
+    { timeout: 30_000 },
+    async () => {
+      const data = await ingested();
+      const forever = "WITH RECURSIVE r(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM r) SELECT count(*) FROM r";
+      const parent = spawn(process.execPath, [QX, "sql", ...data, "--timeout", "20", forever], { stdio: "ignore" });
+      const child = await childOf(parent.pid ?? 0);
+      parent.kill("SIGKILL");
+      const started = Date.now();
+      while (alive(child) && Date.now() - started < 5000) await new Promise((r) => setTimeout(r, 50));
+      expect(alive(child)).toBe(false);
+    },
+  );
+
+  test("lists one Session's tool outputs and Blocks by lifetime cost", async () => {
+    const data = await ingested();
+    const outputs = await qx("outputs", ...data, "00000000-0000-4000-8000-000000000001", "--limit", "1");
+    expect(outputs.code).toBe(EXIT.ok);
+    expect(outputs.out).toMatch(
+      /^TOOL +CALL +TOKENS +CALLS +LIFETIME +COST +INPUT\nRead +2 +9,907 +5 +49,535 +\$0\.0632/,
+    );
+    const blocks = JSON.parse((await qx("blocks", ...data, "00000000-0000-4000-8000-000000000001", "--json")).out);
+    expect(blocks.items.length).toBeGreaterThan(10);
+    expect(blocks.items[0].costUsd.total).toBeGreaterThanOrEqual(blocks.items[1].costUsd.total);
   });
 
   test("reads while an engine holds the writer lock", async () => {
