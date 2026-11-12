@@ -4,7 +4,7 @@
  * pairs with its result. Deterministic: no model call (`clear-tools.ts`).
  */
 import type { SessionMessage, ToolUseSummary } from "claude-code";
-import { tokens } from "./format.ts";
+import { approx } from "./format.ts";
 
 /** Starts every stub, so a second run sees which inputs are cleared already. */
 export const CLEARED_INPUT = "[Old tool input cleared";
@@ -20,11 +20,6 @@ const HEAD_CHARS = 60;
 const sizeOf = (v: unknown): number => JSON.stringify(v)?.length ?? 0;
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const lineCount = (s: string): number => (s === "" ? 0 : s.split("\n").length);
-/** Tokens at ~4 characters each: `850`, `4.2k`, `12k`. */
-const approx = (chars: number): string => {
-  const n = Math.round(chars / 4);
-  return n < 1000 ? `${n}` : n < 10_000 ? `${(n / 1000).toFixed(1)}k` : tokens(n);
-};
 const head = (s: string): string => {
   const first = s.split("\n")[0] ?? "";
   return first.slice(0, HEAD_CHARS);

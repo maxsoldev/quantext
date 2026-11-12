@@ -1,6 +1,6 @@
 import type { On, SessionMessage } from "claude-code";
 import { expect, mock, test } from "claude-code/testing";
-import { command, toasts } from "./kit.ts";
+import { command, stepper, toasts, usage } from "./kit.ts";
 
 const CLEARED = "[Old tool result content cleared]";
 const STUB = "[Old tool input cleared: Write a.md (2.0k tokens)]";
@@ -83,13 +83,14 @@ test("the old clear commands are gone", async ($, on) => {
 });
 
 test("/compact tools stubs old tool calls and outputs in one pass, in place of a summary", async ($, on) => {
-  mock.clock(on, { now: 1_000_000 });
+  const { step } = stepper(on);
   const seen = toasts(on);
   let summarised = false;
   on("session.compact", () => {
     summarised = true;
     return { messages: [] };
   });
+  await step($, usage(100_000, 0));
   const r = await $.session.compact({ trigger: "manual", instructions: "tools keep 1", messages: chat } as never);
   expect(summarised).toBe(false);
   expect(r.messages?.map((m) => m.toolUses[0]?.input.content ?? m.toolResults?.[0]?.text ?? m.text)).toEqual([
@@ -106,7 +107,11 @@ test("/compact tools stubs old tool calls and outputs in one pass, in place of a
     "2",
     "2",
   ]);
-  expect(seen).toEqual(["Cleared 1 tool calls and 1 tool outputs (~3k tokens), kept the last 1"]);
+  expect(seen).toEqual([
+    "Cleared 1 tool call and 1 tool output, kept the last 1: 11,950 chars less (~3.0k tokens). " +
+      "The next call re-writes ~97k tokens to the cache once (~$0.49 with the 5-min cache, ~$0.78 with 1 h); " +
+      "it pays back after ~374 calls (5 min) or ~617 (1 h).",
+  ]);
 });
 
 test("/compact tools outputs stubs only old tool outputs and keeps the calls", async ($, on) => {
@@ -117,7 +122,9 @@ test("/compact tools outputs stubs only old tool outputs and keeps the calls", a
   expect(r.messages?.[3]).toEqual(chat[3]);
   expect(r.messages?.[2]?.toolResults?.[0]?.text).toBe(CLEARED);
   expect(r.messages?.[4]?.toolResults?.[0]?.text).toBe(CLEARED);
-  expect(seen).toEqual(["Cleared 2 tool outputs (~1k tokens)"]);
+  expect(seen).toEqual([
+    "Cleared 2 tool outputs: 4,040 chars less (~1.0k tokens). The cache re-write cost shows once a call is measured.",
+  ]);
 });
 
 test("the old /compact forms, any other compaction, and a subagent's are left to Claude Code", async ($, on) => {
@@ -155,4 +162,19 @@ test("a failed clear skips the compaction rather than pay for a summary", async 
   } as never);
   expect(outs).toEqual({ skip: "quantext: clearing tool outputs failed" });
   expect(summarised).toBe(false);
+});
+
+test("a clear that would change nothing installs no compaction and says so", async ($, on) => {
+  mock.clock(on, { now: 1_000_000 });
+  const seen = toasts(on);
+  const once = await $.session.compact({ trigger: "manual", instructions: "tools", messages: chat } as never);
+  const again = await $.session.compact({
+    trigger: "manual",
+    instructions: "tools",
+    messages: once.messages,
+  } as never);
+  expect(again).toEqual({ skip: "quantext: nothing to clear" });
+  const short = await $.session.compact({ trigger: "manual", instructions: "tools keep 9", messages: chat } as never);
+  expect(short).toEqual({ skip: "quantext: nothing to clear" });
+  expect(seen).toHaveLength(1);
 });

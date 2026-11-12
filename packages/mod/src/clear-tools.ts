@@ -4,9 +4,11 @@
  * which the mod's `session.compact` hook answers with no model call.
  */
 import type { SessionMessage } from "claude-code";
+import type { Live } from "../types/index.js";
 import { clearToolCalls } from "./clear-tool-calls.ts";
 import { clearToolOutputs } from "./clear-tool-outputs.ts";
-import { tokens } from "./format.ts";
+import { approx, grouped, tokens, usd } from "./format.ts";
+import { CACHE_READ, CACHE_WRITE_1H, CACHE_WRITE_5M, cacheWriteUsd } from "./prices.ts";
 
 export const USAGE = "Usage: /clear-tools [outputs] [keep N]";
 
@@ -42,12 +44,43 @@ export function clearRequest(instructions: string | undefined): ClearArgs | unde
   return a && !("error" in a) ? a : undefined;
 }
 
-/** Clears what `a` asks for, keeping the last `a.keep` of each; `note` is the toast that says what it did. */
-export function clearTools(messages: readonly SessionMessage[], a: ClearArgs) {
+const count = (n: number, what: string): string => `${n} ${what}${n === 1 ? "" : "s"}`;
+
+/**
+ * What the clear costs: the next call writes the whole new context to the cache again (estimated from the last
+ * call's input less the tokens removed), and each later call reads `saved` fewer tokens. The payback is that
+ * write's extra over a read, over the per-call read saving; the TTL is not known, so both are given.
+ */
+function costNote(saved: number, l: Pick<Live, "lastCtx" | "model">): string {
+  if (l.lastCtx === 0) return " The cache re-write cost shows once a call is measured.";
+  const rewrite = Math.max(0, l.lastCtx - saved);
+  const usd5 = l.model === undefined ? undefined : cacheWriteUsd(l.model, rewrite);
+  const usd1 = l.model === undefined ? undefined : cacheWriteUsd(l.model, rewrite, CACHE_WRITE_1H);
+  const price =
+    usd5 === undefined || usd1 === undefined ? "" : ` (~${usd(usd5)} with the 5-min cache, ~${usd(usd1)} with 1 h)`;
+  const payback = (write: number) => Math.ceil((rewrite * (write - CACHE_READ)) / (saved * CACHE_READ));
+  const back =
+    saved > 0
+      ? `; it pays back after ~${payback(CACHE_WRITE_5M)} calls (5 min) or ~${payback(CACHE_WRITE_1H)} (1 h)`
+      : "";
+  return ` The next call re-writes ~${tokens(rewrite)} tokens to the cache once${price}${back}.`;
+}
+
+/**
+ * Clears what `a` asks for, keeping the last `a.keep` of each; `note` is the toast that says what it did and what
+ * it costs (from `l`, the live figures). A clear that would change nothing is a `skip`: no compaction at all.
+ */
+export function clearTools(
+  messages: readonly SessionMessage[],
+  a: ClearArgs,
+  l: Pick<Live, "lastCtx" | "model">,
+): { messages: SessionMessage[]; note: string } | { skip: string } {
   const calls = a.outputsOnly ? undefined : clearToolCalls(messages, a.keep);
   const outputs = clearToolOutputs(calls?.messages ?? messages, a.keep);
-  const parts = [...(calls ? [`${calls.cleared} tool calls`] : []), `${outputs.cleared} tool outputs`];
+  if ((calls?.cleared ?? 0) + outputs.cleared === 0) return { skip: "quantext: nothing to clear" };
+  const parts = [...(calls ? [count(calls.cleared, "tool call")] : []), count(outputs.cleared, "tool output")];
   const chars = (calls?.chars ?? 0) + outputs.chars;
   const kept = a.keep > 0 ? `, kept the last ${a.keep}` : "";
-  return { messages: outputs.messages, note: `Cleared ${parts.join(" and ")} (~${tokens(chars / 4)} tokens)${kept}` };
+  const done = `Cleared ${parts.join(" and ")}${kept}: ${grouped(chars)} chars less (~${approx(chars)} tokens).`;
+  return { messages: outputs.messages, note: done + costNote(Math.round(chars / 4), l) };
 }

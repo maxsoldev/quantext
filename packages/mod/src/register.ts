@@ -99,6 +99,7 @@ export const register: Register = (on) => {
       input: l.input + u.input_tokens + u.cache_creation_input_tokens,
       lastEndAt: endedAt,
       lastCtx: inputOf(u),
+      model: u.model,
     }));
     if (nudge !== undefined) $.ui.toast(nudge);
     return r;
@@ -119,16 +120,19 @@ export const register: Register = (on) => {
   on("session.compact", async ($, e, next) => {
     const asked = e.agentId === undefined ? clearRequest(e.instructions) : undefined;
     let r: Awaited<ReturnType<typeof next>>;
+    let note: string | undefined;
     if (asked === undefined) r = await next(e);
     else {
-      const cleared = clearTools(e.messages, asked);
-      $.ui.toast(cleared.note);
+      const cleared = clearTools(e.messages, asked, await readLive($));
+      if ("skip" in cleared) return cleared; // no change: no compact boundary, no cache re-write
+      note = cleared.note;
       r = { messages: cleared.messages };
     }
     if (e.agentId === undefined && e.trigger !== "precompute" && r.messages !== undefined) {
       await updateLive($, (l) => ({ ...l, bigCtxNudged: false }));
       remeasureSoon($);
     }
+    if (note !== undefined) $.ui.toast(note); // after the update, so a failed clear shows no "Cleared"
     return r;
   }).catch((_$, e, next) => {
     // A failed clear must not fall back to a paid summary; any other failure leaves it to Claude Code.
