@@ -4,7 +4,7 @@
  */
 import type { FSWatcher } from "node:fs";
 import { watch } from "node:fs";
-import { extname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import type { Ingest } from "./ingest.ts";
 
 /** Reports changes under the transcript folder: a path, or undefined when it cannot say which. */
@@ -32,6 +32,8 @@ export interface Watcher {
 }
 
 const isTranscriptFile = (path: string) => path.endsWith(".jsonl") || path.endsWith(".meta.json");
+/** A project's memory document: `<root>/projects/<project>/memory/<name>.md`. */
+const isMemoryFile = (path: string) => path.endsWith(".md") && basename(dirname(path)) === "memory";
 
 export function watchTranscripts(options: WatchOptions): Watcher {
   const { ingest } = options;
@@ -39,6 +41,7 @@ export function watchTranscripts(options: WatchOptions): Watcher {
   const onError = options.onError ?? ((error: unknown) => console.error("quantext: live ingest failed:", error));
   let paths = new Set<string>();
   let everything = false;
+  let memory = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   let running: Promise<void> = Promise.resolve();
@@ -47,15 +50,18 @@ export function watchTranscripts(options: WatchOptions): Watcher {
 
   /** Take the changes gathered so far, and read them after the read in progress. */
   const read = (): Promise<void> => {
-    if (!everything && paths.size === 0) return running;
+    if (!everything && !memory && paths.size === 0) return running;
     const asked = [...paths];
     const all = everything;
+    const notes = memory && !all; // a full read reads the memory too
     paths = new Set();
     everything = false;
+    memory = false;
     running = running.then(async () => {
       try {
         if (all) await ingest.ingestAll(run);
-        else await ingest.ingestPaths(asked, run);
+        else if (asked.length > 0) await ingest.ingestPaths(asked, run);
+        if (notes) for (const e of await ingest.ingestMemory()) onError(new Error(`${e.path}: ${e.error}`));
       } catch (error) {
         onError(error);
       }
@@ -65,6 +71,7 @@ export function watchTranscripts(options: WatchOptions): Watcher {
   const onChange = (path?: string) => {
     if (stopped) return;
     if (path !== undefined && isTranscriptFile(path)) paths.add(path);
+    else if (path !== undefined && isMemoryFile(path)) memory = true;
     else if (path !== undefined && extname(path) !== "")
       return; // another file (a tool output, an image)
     else everything = true; // a folder, or a change it cannot place

@@ -91,6 +91,8 @@ export interface Ingest {
   ingestAll(run?: RunOptions): Promise<IngestSummary>;
   /** Read what is new in the logs of these files (a transcript or meta file, main or subagent). */
   ingestPaths(paths: readonly string[], run?: RunOptions): Promise<IngestSummary>;
+  /** Read the projects' memory folders again (a memory document changed); returns what could not be read. */
+  ingestMemory(): Promise<PathError[]>;
   /**
    * Listen for Calls added or updated, after each write. A listener that throws is reported in the summary's
    * errors and does not stop ingest. Returns a function that stops listening.
@@ -197,6 +199,7 @@ export function createIngest(options: IngestOptions): Ingest {
         }
         return pass(logs, errors, run.signal);
       }),
+    ingestMemory: () => serial(() => ingestMemory(root, store)),
     onCalls(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);

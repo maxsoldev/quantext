@@ -4,7 +4,7 @@
  */
 import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { MemoryDocument } from "@quantext/shared";
 import type { Store } from "../store/index.ts";
 import type { PathError } from "./discover.ts";
@@ -36,7 +36,9 @@ export async function ingestMemory(root: string, store: Store): Promise<PathErro
       }
     }
   }
-  const remove = [...stored.entries()].filter(([key]) => !seen.has(key)).map(([, m]) => m);
+  // Only documents of this root's project folders: another root's are not this scan's to remove.
+  const mine = (m: { projectDir: string }) => dirname(m.projectDir) === join(root, "projects");
+  const remove = [...stored.entries()].filter(([key, m]) => mine(m) && !seen.has(key)).map(([, m]) => m);
   if (put.length > 0 || remove.length > 0) store.memory.write({ put, remove });
   return errors;
 }
