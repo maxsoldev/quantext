@@ -27,7 +27,7 @@ describe("numbers", () => {
   });
 
   test("shares below 10% keep one decimal so small parts do not read as 0%", () => {
-    expect([0, 0.004, 0.0754, 0.776, 1].map(percent)).toEqual(["0%", "0.4%", "7.5%", "78%", "100%"]);
+    expect([0, 0.00001, 0.004, 0.0754, 0.776, 1].map(percent)).toEqual(["0%", "<0.1%", "0.4%", "7.5%", "78%", "100%"]);
   });
 });
 
@@ -52,7 +52,13 @@ describe("time", () => {
     expect(ago("2026-11-09T12:00:00Z", now)).toBe("3 days ago");
   });
   test("durations", () => {
-    expect([800, 42_000, 61_000, 7_260_000].map(duration)).toEqual(["0.8 s", "42 s", "1 min 1 s", "2 h 1 min"]);
+    expect([800, 42_000, 61_000, 7_260_000, 545_940_000].map(duration)).toEqual([
+      "0.8 s",
+      "42 s",
+      "1 min 1 s",
+      "2 h 1 min",
+      "6 days 7 h",
+    ]);
   });
 });
 

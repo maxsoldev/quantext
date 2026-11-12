@@ -1,0 +1,419 @@
+/* Context at call N: head, the context bar, the block list, the category table, the block panel. */
+.context-card {
+  gap: var(--space-4);
+}
+.context-card.stale {
+  opacity: 0.6;
+}
+.context-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.context-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.context-lede {
+  font-size: var(--t-lead);
+  max-width: 80ch;
+  color: var(--ink-2);
+}
+.context-lede .tip-anchor {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+/* The context bar: a tall segmented bar, one block per segment. */
+.ctx-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ctx-annot {
+  height: 24px;
+  position: relative;
+}
+.ctx-hidden {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  min-width: 120px;
+  height: 20px;
+  border: 2px solid var(--ink);
+  border-bottom: 0;
+  border-radius: 4px 4px 0 0;
+  font-size: var(--t-small);
+  font-weight: 700;
+  padding: 0 8px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.ctx-bar {
+  position: relative;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--sunken);
+}
+.ctx-seg {
+  position: absolute;
+  top: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-height: 0;
+  min-width: 1px;
+  border-radius: 0;
+  height: 100%;
+  cursor: pointer;
+}
+/* The 2px surface gap between segments that have room for it. */
+.ctx-seg.gap {
+  box-shadow: inset -2px 0 0 var(--surface);
+}
+.ctx-seg:hover,
+.ctx-seg:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 1px;
+  z-index: 1;
+}
+.ctx-seg.selected {
+  outline: 3px solid var(--ink);
+  outline-offset: 1px;
+}
+.ctx-boundary {
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  width: 3px;
+  margin-left: -1px;
+  background: var(--ink);
+  cursor: help;
+}
+.ctx-scale {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--t-small);
+  color: var(--ink-3);
+  height: 20px;
+}
+.ctx-boundary-label {
+  position: absolute;
+  transform: translateX(calc(-100% - 6px));
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.context-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-5);
+  align-items: start;
+}
+
+/* The block list. */
+.block-list {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-m);
+  overflow: hidden;
+}
+.block-list-head,
+.block-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 80px 72px 92px;
+  gap: var(--space-3);
+  align-items: center;
+  padding: 0 var(--space-3);
+}
+.block-list-head {
+  height: 36px;
+  font-size: var(--t-small);
+  font-weight: 700;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+}
+.block-scroll {
+  max-height: min(60vh, 560px);
+  overflow-y: auto;
+}
+.block-row {
+  height: 48px;
+  border-bottom: 1px solid var(--grid);
+}
+.block-row:hover,
+.block-row:focus-within {
+  background: var(--surface-2);
+}
+.block-row.selected {
+  background: var(--sunken);
+}
+.block-main {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  height: 100%;
+  cursor: pointer;
+  border-radius: 2px;
+}
+.block-main:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: -2px;
+}
+.kind-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+}
+.kind {
+  font-weight: 700;
+  white-space: nowrap;
+}
+.source {
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40%;
+  flex: none;
+}
+.preview {
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  font-size: var(--t-small);
+}
+.tag {
+  font-size: var(--t-small);
+  font-weight: 700;
+  padding: 0 6px;
+  border-radius: var(--radius-s);
+  border: 1px solid currentcolor;
+  white-space: nowrap;
+}
+.tag.deferred {
+  color: var(--cat-tool-definitions);
+}
+.cache-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--t-small);
+  font-weight: 700;
+}
+.cache-tag::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.cache-tag.cached::before {
+  background: var(--cache-read);
+}
+.cache-tag.new {
+  color: var(--ink-2);
+}
+.cache-tag.new::before {
+  border: 2px solid var(--rule-strong);
+  width: 6px;
+  height: 6px;
+}
+.section-row {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-3);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--rule);
+}
+.section-title {
+  font-weight: 800;
+  font-size: var(--t-lead);
+}
+.hidden-tag {
+  font-size: var(--t-small);
+  font-weight: 700;
+  color: var(--select-ink);
+  background: var(--select);
+  border-radius: var(--radius-s);
+  padding: 0 8px;
+}
+
+/* Tokens by category. */
+.cat-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.cat-table th,
+.cat-table td {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--grid);
+  text-align: left;
+  font-weight: 500;
+}
+.cat-table thead th {
+  font-size: var(--t-small);
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.cat-table .right {
+  text-align: right;
+}
+.share {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.share-track {
+  width: 56px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--sunken);
+  overflow: hidden;
+}
+.share-fill {
+  display: block;
+  height: 100%;
+}
+
+/* The block panel: a sheet on the right, above the page. */
+.block-panel {
+  position: fixed;
+  top: 62px;
+  right: 0;
+  bottom: 0;
+  width: min(640px, 92vw);
+  z-index: 15;
+  background: var(--surface);
+  border-left: 1px solid var(--rule-strong);
+  box-shadow: -12px 0 32px rgb(0 0 0 / 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  overflow-y: auto;
+}
+.block-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  align-items: flex-start;
+}
+.block-panel-head h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.block-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+}
+.block-facts dt {
+  font-size: var(--t-small);
+  font-weight: 600;
+  color: var(--ink-3);
+}
+.block-facts dd {
+  margin: 0;
+  font-weight: 600;
+}
+button.link {
+  all: unset;
+  cursor: pointer;
+  text-decoration: underline;
+  font-weight: 700;
+}
+button.link:focus-visible {
+  outline: 3px solid var(--focus);
+}
+.explain {
+  border-left: 4px solid var(--cat-tool-definitions);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-2);
+}
+.block-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-s);
+  padding: var(--space-3);
+  margin: 0;
+}
+.block-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.block-media img {
+  max-width: 100%;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-s);
+}
+.block-media {
+  margin: 0;
+}
+.block-raw summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+.json {
+  font-size: var(--t-small);
+  padding: var(--space-2) 0;
+}
+.j-body {
+  padding-left: 1.25em;
+}
+.j-key {
+  color: var(--ink-2);
+  font-weight: 700;
+}
+.j-str {
+  color: var(--cat-reasoning);
+  word-break: break-word;
+}
+.j-number,
+.j-boolean {
+  color: var(--cat-tool-calls);
+}
+.j-punct,
+.j-summary {
+  color: var(--ink-3);
+}
+.j-plain,
+.j-toggle,
+.j-more {
+  all: unset;
+  cursor: pointer;
+}
+.j-toggle {
+  color: var(--ink-3);
+  padding: 0 4px;
+}
+.j-more {
+  margin-left: var(--space-2);
+  text-decoration: underline;
+  color: var(--ink-2);
+}
+
+@media (max-width: 1200px) {
+  .context-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
