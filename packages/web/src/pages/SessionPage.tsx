@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client.ts";
 import { laneView, mainLane } from "../chart/lane.ts";
 import { TimelineChart } from "../chart/TimelineChart.tsx";
+import { Compactions } from "../compaction/Compactions.tsx";
 import { ContextAt } from "../context/ContextAt.tsx";
 import { CACHE_PARTS, CATEGORIES } from "../context/categories.ts";
 import { DiffCard } from "../diff/DiffCard.tsx";
@@ -140,8 +141,11 @@ export function SessionPage({ route }: { route: SessionRoute }) {
         </dl>
       </header>
       {detail.subagents.length > 0 && <Subagents parent={key} items={detail.subagents} />}
-      <SessionTabs route={route} />
+      <SessionTabs route={route} compactions={detail.compactions.length} />
       {route.view === "tools" && <ToolCalls route={route} session={s} subagents={detail.subagents} version={version} />}
+      {route.view === "compactions" && (
+        <Compactions sessionKey={key} timeline={data.value.timeline} version={version} />
+      )}
       {!route.view && (
         <>
           {view && view.calls.length > 0 ? (
@@ -203,10 +207,11 @@ export function SessionPage({ route }: { route: SessionRoute }) {
 const TABS: { view: SessionRoute["view"]; label: string }[] = [
   { view: undefined, label: "Context" },
   { view: "tools", label: "Tool calls" },
+  { view: "compactions", label: "Compactions" },
 ];
 
 /** The views of a Session, as links: each is its own URL. */
-function SessionTabs({ route }: { route: SessionRoute }) {
+function SessionTabs({ route, compactions }: { route: SessionRoute; compactions: number }) {
   return (
     <nav className="tabs" aria-label="Views of this session">
       {TABS.map((t) => (
@@ -216,6 +221,7 @@ function SessionTabs({ route }: { route: SessionRoute }) {
           aria-current={route.view === t.view ? "page" : undefined}
         >
           {t.label}
+          {t.view === "compactions" && <span className="num tab-count"> {compactions}</span>}
         </Link>
       ))}
     </nav>
