@@ -190,6 +190,56 @@ What could not be mapped or read, so that nothing is dropped in silence.
 
 File errors are in `ingest_files.error`.
 
+## Views
+
+`qx sql` opens the store read-only and makes these views on its connection (TEMP views, defined in
+`packages/engine/src/query/views.ts`, so they change with the engine, not with the schema). The query layer reads
+`v_sessions` itself, so `qx sql`, the CLI and the API give the same numbers. Keys are `(log, session_id)` as in the
+tables; `last_call` in a view is never NULL (an open run ends at the lane's latest Call).
+
+| View | One row per | Columns |
+|---|---|---|
+| `v_sessions` | Session (subagents too: `parent_id`) | the `sessions` columns; `calls`, `models` (comma list, as priced), `input_tokens`, `cache_read_tokens`, `cache_write_tokens`, `output_tokens`, `cost_input_usd`, `cost_cache_read_usd`, `cost_cache_write_usd`, `cost_output_usd`, `cost_total_usd`, `unpriced_calls`, `max_context_tokens` (largest input total of a Call), `cache_hit_rate` (cache read / input total), `calls_with_issues` |
+| `v_calls` | Call | `log`, `session_id`, `idx`, `id`, `lane`, `ts`, `model`, `canonical_model`, `effort`, `reasoning`, `max_tokens`, `usage_basis`, the Usage parts, `input_total`, `cache_hit_rate`, the cost parts, `block_count`, `cache_boundary_tokens`, `cache_boundary_position`, `framing_tokens`, `issue_count`, `issue_kinds` (comma list), `turn_duration_ms` |
+| `v_context` | CallBlock run, with its Block's kind and source | `log`, `session_id`, `lane`, `first_call`, `last_call`, `open`, `position`, `section`, `message`, `block_hash`, `kind`, `tool`, `file_path`, `mcp_server`, `skill`, `attachment`, `tokens`, `basis`, `grp`, `calls` (Calls of the lane in the run) |
+| `v_block_lifetime_cost` | Block of a log | `log`, `block_hash`, kind and source, `runs`, `calls` (Calls it was sent in), `tokens` (per Call, largest), `lifetime_tokens`, and by price part `cache_read_tokens`, `cache_write_tokens`, `input_tokens`, `cost_cache_read_usd`, `cost_cache_write_usd`, `cost_input_usd`; `lifetime_cost_usd` |
+| `v_tool_outputs` | ToolCall | `log`, `session_id`, `tool_use_id`, `tool`, `mcp_server`, `file_path`, `skill`, `is_error`, `call_idx` (the Call that asked for it), `input_summary` (first 200 characters of the input JSON), `result_block_hash`, `tokens`, `calls`, `runs`, `first_call`, `last_call` (the Calls its result stayed in), and the lifetime columns of its result Block |
+| `v_cache_breaks` | Call whose cache read dropped against the previous Call of its lane | `log`, `session_id`, `lane`, `idx`, `call_id`, `ts`, `model`, `prev_idx`, `prev_ts`, `gap_seconds` (a gap over the cache's time to live explains a break), `prev_cache_read_tokens`, `cache_read_tokens`, `drop_tokens`, `cache_write_tokens`, `input_tokens`, `break_position` (where the Cached prefix ended), `block_count`, `break_block_hash`, `break_kind`, `break_tool` (the Block at that position) |
+
+**Lifetime cost.** For each Call a run covers (the Calls of its lane from `first_call` to `last_call`), a Block
+wholly inside the Cached prefix (`position < cache_boundary_position`) counts at that Call's cache read price per
+token; the Block at the boundary has the rest of the cache read; the rest counts at the Call's cache write price,
+or at its input price when the Call wrote no cache. This is the query layer's split by token offset (core
+`blockCosts`) for every Call whose input tokens are its framing tokens (all Calls of the real corpus); otherwise
+the uncached rest of a Block is priced as cache write. A Call with no price adds tokens and no cost.
+
+**Speed** (real corpus, 26,700 Calls, 6.5 million Block-Call pairs, Apple silicon): `v_block_lifetime_cost` and
+`v_tool_outputs` about 3 s for the whole corpus (they price every Block in every Call); the other views under
+0.1 s. Filter by `log` and `session_id` where you can.
+
+**Examples.**
+
+```sql
+-- Top tool outputs by lifetime cost
+SELECT tool, file_path, input_summary, tokens, calls, lifetime_tokens, round(lifetime_cost_usd, 4) AS usd
+FROM v_tool_outputs ORDER BY lifetime_cost_usd DESC LIMIT 10;
+
+-- Where did the cache break
+SELECT session_id, idx, prev_idx, gap_seconds, drop_tokens, break_position, break_kind, break_tool
+FROM v_cache_breaks ORDER BY drop_tokens DESC LIMIT 10;
+
+-- The context of Call 7 of a Session, in order
+SELECT position, kind, tool, file_path, tokens, basis FROM v_context
+WHERE session_id = :session AND first_call <= 7 AND last_call >= 7 ORDER BY position;
+```
+
+**`qx sql` rules.** One statement that starts with `SELECT`, `WITH`, `VALUES` or `EXPLAIN`, and holds no word of a
+write, a schema or connection change (`INSERT`, `UPDATE`, `DELETE`, `CREATE`, `DROP`, `ALTER`, `ATTACH`, `DETACH`,
+`PRAGMA`, `VACUUM`, transactions, …). Comments and quoted text do not count. The connection is also opened
+read-only, with `query_only` set. At most 1000 rows (`--limit`); a BLOB shows as its size. There is no time
+limit: neither `node:sqlite` nor `bun:sqlite` has an interrupt or a progress handler; stop a long query with
+Ctrl-C. Demo mode does not apply to `qx sql`: it reads the tables as they are.
+
 ## Later
 
 Options that are not needed yet, with what they would bring:
