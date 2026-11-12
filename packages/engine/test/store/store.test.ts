@@ -60,6 +60,17 @@ describe("opening the store", () => {
     await expect(openStore({ dataDir: dir })).rejects.toThrow(/schema version 99 is newer than this engine/);
   });
 
+  test("finds the open runs of a lane through the interval index", async () => {
+    const store = await open(tempDir());
+    const plan = store.db
+      .prepare(
+        "EXPLAIN QUERY PLAN SELECT * FROM call_blocks WHERE log = ? AND session_id = ? AND lane = ? AND last_call IS NULL",
+      )
+      .all(1, "s", "l")
+      .map((r) => String(r.detail));
+    expect(plan.join("\n")).toMatch(/USING (COVERING )?INDEX call_blocks_interval/);
+  });
+
   test("finds 'context at call N' through the interval index on the runs", async () => {
     const store = await open(tempDir());
     const plan = store.db
