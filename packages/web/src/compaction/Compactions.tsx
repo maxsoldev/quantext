@@ -7,6 +7,7 @@ import { api } from "../api/client.ts";
 import { CATEGORIES, CATEGORY_LABEL } from "../context/categories.ts";
 import { count, percent, tokens, when } from "../format/format.ts";
 import { Link } from "../nav.tsx";
+import { callNumber } from "../route.ts";
 import { Term } from "../teach/Term.tsx";
 import { Tokens } from "../ui/Num.tsx";
 import { useLoad } from "../ui/useLoad.ts";
@@ -124,7 +125,7 @@ function CompactionCard({
         <div className="summary-call">
           <h3>The call that wrote the summary</h3>
           <p>
-            Call {c.summaryCallIndex} sent the whole context to the model with the request to summarise it.
+            Call {callNumber(c.summaryCallIndex)} sent the whole context to the model with the request to summarise it.
             {summaryCall?.usage && (
               <>
                 {" "}
@@ -150,10 +151,10 @@ function CompactionCard({
       )}
       <p className="compaction-links">
         {c.beforeCallIndex !== undefined && (
-          <Link to={link(c.beforeCallIndex)}>Context before (call {c.beforeCallIndex})</Link>
+          <Link to={link(c.beforeCallIndex)}>Context before (call {callNumber(c.beforeCallIndex)})</Link>
         )}
         {c.afterCallIndex !== undefined && (
-          <Link to={link(c.afterCallIndex)}>Context after and what changed (call {c.afterCallIndex})</Link>
+          <Link to={link(c.afterCallIndex)}>Context after and what changed (call {callNumber(c.afterCallIndex)})</Link>
         )}
       </p>
     </section>

@@ -28,7 +28,8 @@ SELECT s.log, s.id, s.parent_id, s.title, s.title_source, s.agent_name, s.harnes
   coalesce(sum(c.cost_output_usd), 0) AS cost_output_usd,
   coalesce(sum(c.cost_total_usd), 0) AS cost_total_usd,
   count(c.usage_basis) - count(c.cost_total_usd) AS unpriced_calls,
-  coalesce(max(c.input_tokens + c.cache_read_tokens + c.cache_write_tokens), 0) AS max_context_tokens,
+  coalesce(max(CASE WHEN c.usage_basis = 'exact'
+    THEN c.input_tokens + c.cache_read_tokens + c.cache_write_tokens END), 0) AS max_context_tokens,
   CAST(sum(c.cache_read_tokens) AS REAL)
     / nullif(sum(c.input_tokens + c.cache_read_tokens + c.cache_write_tokens), 0) AS cache_hit_rate,
   count(CASE WHEN c.issues <> '[]' THEN 1 END) AS calls_with_issues

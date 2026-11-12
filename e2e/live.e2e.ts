@@ -56,8 +56,8 @@ test("an open Session page follows the new Calls as the harness writes them", as
     const before = await position.textContent();
     appendRest(engine, "basic-tools", half);
     await expect(position).not.toHaveText(before ?? "");
-    await expect(position).toContainText("Call 7");
-    await expect(page.getByTestId("context")).toContainText("Context at call 7");
+    await expect(position).toContainText("Call 8");
+    await expect(page.getByTestId("context")).toContainText("Context at call 8");
   } finally {
     await engine.stop();
   }

@@ -49,8 +49,9 @@ export const BREAK_REASONS: Record<CacheBreakReason, BreakReason> = {
     title: "Prefix change",
     short: "Something early in the request changed, so the cache matched only up to there.",
     what:
-      "Something early in the request changed: a tool was added or removed, the system prompt changed (a date, an " +
-      "edited CLAUDE.md, an MCP server that connected), or an earlier message was edited. The cache matches a " +
+      "Something early in the request changed: a tool was added or removed (an MCP server that connected), the " +
+      "system prompt changed, the context injected into the first message changed (an edited CLAUDE.md, the " +
+      "date), or an earlier message was edited. The cache matches a " +
       "request only from its start up to the first difference, so everything after it was written again.",
     todo:
       "Look at the first change below: that block broke the cache. Keep the start of the request stable: do not " +

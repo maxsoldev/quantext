@@ -30,15 +30,25 @@ const SHOTS: Shot[] = [
     name: "session",
     both: true,
     go: async (page, engine) => {
-      await page.goto(`${await engine.sessionUrl("basic-tools")}?call=3`);
+      await page.goto(`${await engine.sessionUrl("basic-tools")}?call=4`);
       await expect(page.getByTestId("timeline")).toBeVisible();
+    },
+  },
+  {
+    // The chart, the context bar and the strips together: the timeline card scrolled to the top.
+    name: "call",
+    both: true,
+    go: async (page, engine) => {
+      await page.goto(`${await engine.sessionUrl("basic-tools")}?call=4`);
+      await expect(page.getByTestId("context-bar")).toBeVisible();
+      await page.evaluate(`document.querySelector(".timeline-card")?.scrollIntoView({ block: "start" })`);
     },
   },
   {
     name: "context",
     both: true,
     go: async (page, engine) => {
-      await page.goto(`${await engine.sessionUrl("basic-tools")}?call=2`);
+      await page.goto(`${await engine.sessionUrl("basic-tools")}?call=3`);
       await page.getByTestId("context").scrollIntoViewIfNeeded();
       await page.evaluate(`document.getElementById("context-title")?.scrollIntoView({ block: "start" })`);
     },
@@ -47,7 +57,7 @@ const SHOTS: Shot[] = [
     name: "block-panel",
     both: false,
     go: async (page, engine) => {
-      await page.goto(`${await engine.sessionUrl("basic-tools")}?call=2`);
+      await page.goto(`${await engine.sessionUrl("basic-tools")}?call=3`);
       await page.getByTestId("block-row").first().getByRole("button").first().click();
       await expect(page.getByTestId("block-text")).toBeVisible();
     },
@@ -56,7 +66,7 @@ const SHOTS: Shot[] = [
     name: "diff",
     both: true,
     go: async (page, engine) => {
-      await page.goto(`${await engine.sessionUrl("compaction")}?call=4`);
+      await page.goto(`${await engine.sessionUrl("compaction")}?call=5`);
       await expect(page.getByTestId("break-note")).toBeVisible();
       await page.evaluate(`document.getElementById("what-changed")?.scrollIntoView({ block: "start" })`);
     },
@@ -106,7 +116,7 @@ const SHOTS: Shot[] = [
     name: "glossary",
     both: false,
     go: async (page, engine) => {
-      await page.goto(`${await engine.sessionUrl("basic-tools")}?call=3`);
+      await page.goto(`${await engine.sessionUrl("basic-tools")}?call=4`);
       await page.getByRole("button", { name: "What is prompt cache?" }).click();
       await expect(page.getByTestId("glossary")).toBeVisible();
     },

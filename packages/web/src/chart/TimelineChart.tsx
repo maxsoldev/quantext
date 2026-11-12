@@ -5,23 +5,60 @@
  * Call; a click or the arrow keys select one.
  */
 import type { ContextCategory, TimelineCall } from "@quantext/shared";
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactNode, RefObject } from "react";
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CachePart } from "../context/categories.ts";
 import { CACHE_PARTS, CATEGORIES, CATEGORY_LABEL } from "../context/categories.ts";
 import { percent, tokens, usd, when } from "../format/format.ts";
+import { callNumber } from "../route.ts";
 import { BREAK_REASONS } from "../teach/cacheBreaks.ts";
 import type { LaneView } from "./lane.ts";
 import type { Band, Stack } from "./shape.ts";
 import { bandOf, niceTicks, stack, stepArea } from "./shape.ts";
 
-const M = { left: 64, right: 16, top: 30 };
-const RAIL_H = 44;
-const BOTTOM_H = 96;
-const AXIS_H = 28;
-/** The top panel's height: smaller on a short window (a 720px projector) so the scrubber stays in view. */
-function topHeight(): number {
-  return Math.round(Math.min(260, Math.max(160, innerHeight * 0.27)));
+const M = { left: 64, right: 16 };
+/** The cache-break triangles sit in this band between the panels, above the billing panel's head. */
+const MARK_H = 16;
+const AXIS_H = 30;
+/** A window this high or lower is "short" (a 720px projector): smaller panels, so the call cards fit too. */
+export const SHORT_WINDOW = 800;
+
+/** Panel heights: on a short window 150px and 60px, so chart, context bar and strips share one screen. */
+function panelHeights(): { topH: number; bottomH: number } {
+  if (innerHeight <= SHORT_WINDOW) return { topH: 150, bottomH: 60 };
+  return { topH: Math.round(Math.min(260, Math.max(180, innerHeight * 0.27))), bottomH: 96 };
+}
+
+/** The plot's vertical layout, from the panel heights and the measured heights of the two legend rows. */
+export interface Geometry {
+  top: number;
+  topH: number;
+  /** The y of the billing panel's head row. */
+  billHead: number;
+  bottomY0: number;
+  bottomH: number;
+  height: number;
+}
+
+function geometry(topH: number, bottomH: number, topRow: number, billRow: number): Geometry {
+  const top = topRow + 6;
+  const billHead = top + topH + MARK_H;
+  const bottomY0 = billHead + billRow + 4;
+  return { top, topH, billHead, bottomY0, bottomH, height: bottomY0 + bottomH + AXIS_H };
+}
+
+/** The height of an element, kept up to date. */
+function useHeight(ref: RefObject<HTMLElement | null>, initial: number): number {
+  const [h, setH] = useState(initial);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setH(el.offsetHeight));
+    ro.observe(el);
+    setH(el.offsetHeight);
+    return () => ro.disconnect();
+  }, [ref]);
+  return h;
 }
 
 type TopKey = ContextCategory | "unrebuilt";
@@ -62,8 +99,11 @@ export function TimelineChart({
   selected,
   onSelect,
   onBreak,
+  legends,
 }: {
   view: LaneView;
+  /** Each panel's legend, shown in one row with the panel's name, above the panel. */
+  legends: { top: ReactNode; bottom: ReactNode };
   selected: number;
   onSelect: (place: number) => void;
   /** A click on a cache-break mark: after `onSelect`, to show what changed. */
@@ -81,12 +121,16 @@ export function TimelineChart({
     return () => ro.disconnect();
   }, []);
   const plotW = Math.max(100, width - M.left - M.right);
-  const [topH, setTopH] = useState(topHeight);
+  const [heights, setHeights] = useState(panelHeights);
   useLayoutEffect(() => {
-    const onResize = () => setTopH(topHeight());
+    const onResize = () => setHeights(panelHeights());
     addEventListener("resize", onResize);
     return () => removeEventListener("resize", onResize);
   }, []);
+  const topRow = useRef<HTMLDivElement>(null);
+  const billRow = useRef<HTMLDivElement>(null);
+  const g = geometry(heights.topH, heights.bottomH, useHeight(topRow, 24), useHeight(billRow, 24));
+  const plotH = g.bottomY0 + g.bottomH - g.top;
   const band = bandOf(plotW, view.calls.length);
   const top = useMemo(() => stack(view.calls, TOP_KEYS, topValue), [view.calls]);
   const bottom = useMemo(() => stack(view.calls, CACHE_KEYS, cacheShare), [view.calls]);
@@ -99,10 +143,18 @@ export function TimelineChart({
   const hovered = hover === null ? undefined : view.calls[hover];
   return (
     <div className="timeline" ref={wrap}>
+      <div className="panel-head" ref={topRow} style={{ top: 0, left: M.left }}>
+        <span className="panel-label">What the context holds</span>
+        {legends.top}
+      </div>
+      <div className="panel-head" ref={billRow} style={{ top: g.billHead, left: M.left }}>
+        <span className="panel-label">How the input was billed</span>
+        {legends.bottom}
+      </div>
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: the keyboard picks a Call with the arrow keys and the scrubber. */}
       <svg
         width={width}
-        height={M.top + topH + RAIL_H + BOTTOM_H + AXIS_H}
+        height={g.height}
         role="img"
         aria-label={`Context per call, ${view.calls.length} calls. Use the slider below or the arrow keys to choose a call.`}
         onPointerMove={(e) => setHover(place(e))}
@@ -115,18 +167,19 @@ export function TimelineChart({
         }}
         data-testid="timeline"
       >
-        <Layers view={view} top={top} bottom={bottom} band={band} plotW={plotW} topH={topH} />
+        <Layers view={view} top={top} bottom={bottom} band={band} plotW={plotW} g={g} />
         <Cursor
           x={xOf(selected) + (band.mode === "columns" ? (band.step - band.width) / 2 : 0)}
           w={Math.max(2, band.width)}
-          h={topH + RAIL_H + BOTTOM_H}
-          label={`Call ${view.calls[selected]?.index ?? ""}`}
+          g={g}
+          h={plotH}
+          label={`Call ${callNumber(view.calls[selected]?.index ?? 0)}`}
           minX={M.left + 40}
           maxX={M.left + plotW - 40}
           selected
         />
         {hover !== null && hover !== selected && (
-          <Cursor x={xOf(hover)} w={Math.max(1, band.step)} h={topH + RAIL_H + BOTTOM_H} label="" />
+          <Cursor x={xOf(hover)} w={Math.max(1, band.step)} g={g} h={plotH} label="" />
         )}
       </svg>
       {hovered && hover !== null && <CallTip call={hovered} x={xOf(hover) + band.step / 2} width={width} />}
@@ -141,25 +194,29 @@ const Layers = memo(function Layers({
   bottom,
   band,
   plotW,
-  topH,
+  g,
 }: {
   view: LaneView;
   top: Stack<TopKey>;
   bottom: Stack<CachePart>;
   band: Band;
   plotW: number;
-  topH: number;
+  g: Geometry;
 }) {
-  const TOP_H = topH;
-  const topTicks = niceTicks(top.max, 4);
+  const topTicks = niceTicks(top.max, g.topH < 160 ? 3 : 4);
   const bottomTicks = [0, 0.5, 1];
-  const yTop = (v: number) => M.top + TOP_H - (v / (topTicks.at(-1) ?? 1)) * TOP_H;
-  const bottomY0 = M.top + TOP_H + RAIL_H;
-  const yBottom = (v: number) => bottomY0 + BOTTOM_H - (v / (bottomTicks.at(-1) ?? 1)) * BOTTOM_H;
+  const yTop = (v: number) => g.top + g.topH - (v / (topTicks.at(-1) ?? 1)) * g.topH;
+  const { bottomY0, bottomH } = g;
+  const yBottom = (v: number) => bottomY0 + bottomH - (v / (bottomTicks.at(-1) ?? 1)) * bottomH;
   const xOf = (p: number) => M.left + p * band.step;
   const xTicks = callTicks(view.calls.length, plotW);
   return (
     <g>
+      <defs>
+        <pattern id="bill-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="6" />
+        </pattern>
+      </defs>
       <Grid ticks={topTicks} y={yTop} plotW={plotW} />
       <Grid ticks={bottomTicks} y={yBottom} plotW={plotW} format={percent} />
       <Marks
@@ -170,47 +227,43 @@ const Layers = memo(function Layers({
         cls={(k) => (k === "unrebuilt" ? "cat-unrebuilt" : `cat-${k}`)}
       />
       <Marks stack={bottom} y={yBottom} band={band} xOf={xOf} cls={(k) => `cache-${k}`} />
+      {/* The billing texture: one hatch over every billing mark, so a cache part never reads as a category. */}
+      <Marks stack={bottom} y={yBottom} band={band} xOf={xOf} cls={() => "bill-hatch"} />
       {view.calls.map((c, p) =>
         c.usage ? null : (
           <rect
             key={`n${c.index}`}
             className="no-usage"
             x={xOf(p) + (band.mode === "columns" ? (band.step - band.width) / 2 : 0)}
-            y={M.top}
+            y={g.top}
             width={Math.max(1, band.width)}
-            height={TOP_H + RAIL_H + BOTTOM_H}
+            height={bottomY0 + bottomH - g.top}
           />
         ),
       )}
-      <text className="panel-label" x={M.left} y={M.top - 12}>
-        What the context holds
-      </text>
-      <text className="panel-label" x={M.left} y={bottomY0 - 4}>
-        How the input was billed
-      </text>
       {view.compactions.map((c) => (
         <g key={`c${c.index}`} className="compaction-mark">
-          <rect x={xOf(c.at) - 1} y={M.top} width={2} height={TOP_H + RAIL_H + BOTTOM_H} />
-          <text x={xOf(c.at) + 4} y={M.top + 14}>
+          <rect x={xOf(c.at) - 1} y={g.top} width={2} height={bottomY0 + bottomH - g.top} />
+          <text x={xOf(c.at) + 4} y={g.top + 14}>
             Compaction
           </text>
         </g>
       ))}
       {view.breaks.map((b) => {
         const cx = xOf(b.at) + band.step / 2;
-        const y = M.top + TOP_H + 4;
+        const y = g.top + g.topH + 3;
         return (
           <path
             key={`b${b.index}`}
             className="break-mark"
             d={`M${cx - 6},${y}h12l-6,10z`}
-            data-tip={`Cache break at call ${b.index}: ${tokens(b.dropTokens)} fewer tokens read from the cache than call ${b.previous.index}.\n${BREAK_REASONS[b.reason].short}\nClick to see what changed.`}
+            data-tip={`Cache break at call ${callNumber(b.index)}: ${tokens(b.dropTokens)} fewer tokens read from the cache than call ${callNumber(b.previous.index)}.\n${BREAK_REASONS[b.reason].short}\nClick to see what changed.`}
           />
         );
       })}
       {xTicks.map((p) => (
-        <text key={p} className="tick" x={xOf(p) + band.step / 2} y={bottomY0 + BOTTOM_H + 20} textAnchor="middle">
-          {view.calls[p]?.index}
+        <text key={p} className="tick" x={xOf(p) + band.step / 2} y={bottomY0 + bottomH + 20} textAnchor="middle">
+          {callNumber(view.calls[p]?.index ?? 0)}
         </text>
       ))}
       <line className="baseline" x1={M.left} x2={M.left + plotW} y1={yTop(0)} y2={yTop(0)} />
@@ -301,6 +354,7 @@ function Marks<K extends string>({
 function Cursor({
   x,
   w,
+  g,
   h,
   label,
   selected = false,
@@ -309,6 +363,7 @@ function Cursor({
 }: {
   x: number;
   w: number;
+  g: Geometry;
   h: number;
   label: string;
   selected?: boolean;
@@ -317,17 +372,22 @@ function Cursor({
 }) {
   return (
     <g className={selected ? "cursor selected" : "cursor"} pointerEvents="none">
-      <rect x={x} y={M.top} width={w} height={h} />
-      {label && (
-        <text
-          x={x + w / 2 > maxX ? x + w : x + w / 2 < minX ? x : x + w / 2}
-          y={M.top - 12}
-          textAnchor={x + w / 2 > maxX ? "end" : x + w / 2 < minX ? "start" : "middle"}
-          className="cursor-label"
-        >
-          {label}
-        </text>
-      )}
+      <rect x={x} y={g.top} width={w} height={h} />
+      {label && <AxisLabel x={x + w / 2} y={g.bottomY0 + g.bottomH} label={label} minX={minX} maxX={maxX} />}
+    </g>
+  );
+}
+
+/** The selected Call's name on the x axis, on a pill that covers the ticks under it. */
+function AxisLabel({ x, y, label, minX, maxX }: { x: number; y: number; label: string; minX: number; maxX: number }) {
+  const w = label.length * 8.5 + 16;
+  const left = Math.min(Math.max(x - w / 2, minX - 40), maxX + 40 - w);
+  return (
+    <g className="cursor-label">
+      <rect x={left} y={y + 4} width={w} height={22} rx={4} />
+      <text x={left + w / 2} y={y + 20} textAnchor="middle">
+        {label}
+      </text>
     </g>
   );
 }
@@ -359,7 +419,7 @@ function CallTip({ call, x, width }: { call: TimelineCall; x: number; width: num
   return (
     <div ref={box} className="chart-tip" role="status" data-testid="chart-tip">
       <div className="chart-tip-head">
-        <b>Call {call.index}</b>
+        <b>Call {callNumber(call.index)}</b>
         <span className="muted">{when(call.ts)}</span>
       </div>
       <div className="chart-tip-total">

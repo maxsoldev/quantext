@@ -347,7 +347,10 @@ function Row({ s, index, sort, now }: { s: SessionSummary; index: number; sort: 
         />
       </td>
       <td className="right">
-        <Tokens n={s.maxContextTokens} note="The largest input of one call in this session, from its usage." />
+        <Tokens
+          n={s.maxContextTokens}
+          note="The largest input of one call in this session, from its exact usage. Summarising calls (derived usage) are left out."
+        />
       </td>
       <td className="right cell-meter">
         {s.cacheHitRate === undefined ? (

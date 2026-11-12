@@ -39,9 +39,9 @@ export function MemoryPage({ route }: { route: MemoryRoute }) {
         </div>
       </header>
       <p className="memory-lede">
-        Notes the harness keeps for this project across sessions. It adds the index, <code>{INDEX}</code>, to the
-        context of each new session, so every line of it costs tokens in every call. The model reads the other files
-        only when it needs one.
+        Notes the harness keeps for this project across sessions. It adds the first 200 lines or 25 KB of the index,{" "}
+        <code>{INDEX}</code>, to each new session as injected context, so those lines cost tokens in every call; the
+        rest is not loaded. The model reads the other files only when it needs one.
       </p>
       {data.state === "error" && !data.value && (
         <p className="error" role="alert">

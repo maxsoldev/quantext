@@ -1,11 +1,11 @@
 /**
  * One Session: its numbers, the timeline of one lane, a scrubber over its Calls, and the context of the selected
- * Call. The selected Call is in the URL (`?call=<index>`); with none, the page follows the lane's latest Call.
+ * Call. The selected Call is in the URL (`?call=<number>`, 1-based; see `callNumber`); with none, the page follows the lane's latest Call.
  */
-import type { CallContext, ContextDiff, SessionKey, SessionSummary } from "@quantext/shared";
+import type { CallContext, ContextDiff, SessionKey, SessionSummary, TimelineCall } from "@quantext/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client.ts";
-import { laneView, mainLane } from "../chart/lane.ts";
+import { laneNames, laneView, mainLane } from "../chart/lane.ts";
 import { TimelineChart } from "../chart/TimelineChart.tsx";
 import { Compactions } from "../compaction/Compactions.tsx";
 import { ContextAt } from "../context/ContextAt.tsx";
@@ -15,6 +15,7 @@ import { count, duration, percent, projectName, shortModel, usd, when } from "..
 import { useLiveVersion } from "../live/hooks.ts";
 import { Link, navigate } from "../nav.tsx";
 import type { Route } from "../route.ts";
+import { callNumber } from "../route.ts";
 import { Term } from "../teach/Term.tsx";
 import { ToolCalls } from "../tools/ToolCalls.tsx";
 import { Tokens } from "../ui/Num.tsx";
@@ -43,6 +44,7 @@ export function SessionPage({ route }: { route: SessionRoute }) {
     () => (data.value && chosen ? laneView(data.value.timeline, data.value.breaks, chosen) : undefined),
     [data.value, chosen],
   );
+  const names = useMemo(() => laneNames(data.value?.detail.lanes ?? []), [data.value]);
   const last = view ? view.calls.length - 1 : 0;
   const place = view && route.call !== undefined ? (view.at(route.call) ?? view.nearest(route.call)) : last;
   const callIndex = view?.calls[place]?.index;
@@ -116,7 +118,7 @@ export function SessionPage({ route }: { route: SessionRoute }) {
               <button
                 type="button"
                 className="tip-anchor num"
-                data-tip={`At list prices, from each call's exact usage.\n${CACHE_PARTS.map((p) => `${p.label}: ${usd(partCost(s.cost, p.key))}`).join("\n")}${s.unpricedCalls ? `\n${s.unpricedCalls} calls have no price and are not counted.` : ""}`}
+                data-tip={`At list prices, from each call's usage. A compaction's summarising call counts too: its usage is derived from the harness's running totals (it is real spend).\n${CACHE_PARTS.map((p) => `${p.label}: ${usd(partCost(s.cost, p.key))}`).join("\n")}${s.unpricedCalls ? `\n${s.unpricedCalls} calls have no price and are not counted.` : ""}`}
               >
                 {usd(s.cost.totalUsd)}
               </button>
@@ -125,7 +127,10 @@ export function SessionPage({ route }: { route: SessionRoute }) {
           <div>
             <dt>Max context</dt>
             <dd>
-              <Tokens n={s.maxContextTokens} note="The largest input of one call, from its usage." />
+              <Tokens
+                n={s.maxContextTokens}
+                note="The largest input of one call, from its exact usage. Summarising calls (derived usage) are left out."
+              />
             </dd>
           </div>
           <div>
@@ -172,39 +177,58 @@ export function SessionPage({ route }: { route: SessionRoute }) {
                             type="button"
                             aria-pressed={l.lane === chosen}
                             onClick={() => setLane(l.lane)}
-                            data-tip="A lane is the calls that build on each other's context: one model, one purpose. Side queries run in their own lane."
+                            data-tip={`${l.model ? shortModel(l.model) : "Model not in the log"}, ${count(l.calls, "call")}.\nA lane is the calls that build on each other's context: one model, one purpose. Side queries run in their own lane.`}
                           >
-                            {l.model ? shortModel(l.model) : "Unknown model"} <span className="num">({l.calls})</span>
+                            {names.get(l.lane) ?? l.lane} <span className="num">({l.calls})</span>
                           </button>
                         ))}
                     </fieldset>
                   )}
                 </div>
-                <div className="legends">
-                  <Legend />
-                  <BillingLegend noUsage={view.calls.some((c) => !c.usage)} />
-                </div>
               </div>
-              <TimelineChart view={view} selected={place} onSelect={select} onBreak={showDiff} />
+              <TimelineChart
+                view={view}
+                selected={place}
+                onSelect={select}
+                onBreak={showDiff}
+                legends={{
+                  top: <Legend calls={view.calls} />,
+                  bottom: <BillingLegend noUsage={view.calls.some((c) => !c.usage)} />,
+                }}
+              />
             </section>
           ) : (
             <p className="muted">This session has no calls yet.</p>
           )}
-          {callIndex !== undefined && view && (
-            <DiffCard
-              sessionKey={key}
-              ctx={call.ctx.value}
-              diff={call.diff}
-              prev={call.prev.value}
-              breaks={view.breaks}
-              onGoTo={goTo}
-            />
-          )}
-          {callIndex !== undefined && (
-            <ContextAt sessionKey={key} call={callIndex} ctx={call.ctx} openHash={route.block} onOpened={clearBlock} />
-          )}
+          <div className="call-cards">
+            {callIndex !== undefined && view && (
+              <DiffCard
+                sessionKey={key}
+                ctx={call.ctx.value}
+                diff={call.diff}
+                prev={call.prev.value}
+                breaks={view.breaks}
+                onGoTo={goTo}
+              />
+            )}
+            {callIndex !== undefined && (
+              <ContextAt
+                sessionKey={key}
+                call={callIndex}
+                ctx={call.ctx}
+                openHash={route.block}
+                onOpened={clearBlock}
+              />
+            )}
+          </div>
           {view && view.calls.length > 0 && (
-            <Scrubber place={place} last={last} index={callIndex ?? 0} onChange={select} />
+            <Scrubber
+              place={place}
+              last={last}
+              index={callIndex ?? 0}
+              lane={chosen ? names.get(chosen) : undefined}
+              onChange={select}
+            />
           )}
         </>
       )}
@@ -299,10 +323,12 @@ function partCost(c: { cacheReadUsd: number; cacheWriteUsd: number; inputUsd: nu
         : c.outputUsd;
 }
 
-function Legend() {
+/** The categories this lane's Calls hold, in request order (a colour always names the same category). */
+function Legend({ calls }: { calls: readonly TimelineCall[] }) {
+  const present = CATEGORIES.filter((c) => calls.some((x) => x.categories[c.key] > 0));
   return (
     <ul className="legend" aria-label="Context categories">
-      {CATEGORIES.map((c) => (
+      {present.map((c) => (
         <li key={c.key}>
           <button type="button" className="tip-anchor legend-item" data-tip={c.explain}>
             <span className={`swatch cat-${c.key}`} aria-hidden="true" />
@@ -314,6 +340,9 @@ function Legend() {
   );
 }
 
+/** Price per token against plain input, as the billing ramp encodes it (lighter is cheaper). */
+const PRICE: Record<string, string> = { cacheRead: "0.05–0.1×", input: "1×", cacheWrite: "1.25–2×" };
+
 function BillingLegend({ noUsage }: { noUsage: boolean }) {
   return (
     <ul className="legend billing-legend" aria-label="Billing parts">
@@ -321,7 +350,7 @@ function BillingLegend({ noUsage }: { noUsage: boolean }) {
         <li key={p.key}>
           <button type="button" className="tip-anchor legend-item" data-tip={p.explain}>
             <span className={`swatch cache-${p.key}`} aria-hidden="true" />
-            {p.label}
+            {p.label} <span className="muted num">{PRICE[p.key]}</span>
           </button>
         </li>
       ))}
@@ -368,11 +397,13 @@ function Scrubber({
   place,
   last,
   index,
+  lane,
   onChange,
 }: {
   place: number;
   last: number;
   index: number;
+  lane: string | undefined;
   onChange: (p: number) => void;
 }) {
   return (
@@ -387,18 +418,15 @@ function Scrubber({
         value={place}
         onChange={(e) => onChange(Number(e.target.value))}
         aria-label="Call"
-        aria-valuetext={`Call ${index}, ${place + 1} of ${last + 1} in this lane`}
+        aria-valuetext={`Call ${callNumber(index)}${lane ? `, in the ${lane} lane` : ""}`}
         data-testid="scrubber"
       />
       <button type="button" onClick={() => onChange(place + 1)} disabled={place >= last} aria-label="Next call">
         →
       </button>
       <span className="scrubber-pos" data-testid="call-position">
-        Call <b className="num">{index}</b>
-        <span className="muted num">
-          {" "}
-          ({place + 1} of {last + 1})
-        </span>
+        Call <b className="num">{callNumber(index)}</b>
+        {lane && <span className="muted"> in {lane}</span>}
       </span>
       <span className="muted keys">
         <kbd>←</kbd> <kbd>→</kbd> step, <kbd>Shift</kbd> 10, <kbd>Home</kbd> <kbd>End</kbd>

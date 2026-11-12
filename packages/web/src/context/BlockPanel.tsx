@@ -7,6 +7,7 @@ import { useEffect, useRef } from "react";
 import { api } from "../api/client.ts";
 import { tokens } from "../format/format.ts";
 import { navigate, useRoute } from "../nav.tsx";
+import { callNumber } from "../route.ts";
 import { Term } from "../teach/Term.tsx";
 import { JsonView } from "../ui/JsonView.tsx";
 import { Tokens } from "../ui/Num.tsx";
@@ -84,14 +85,14 @@ export function BlockPanel({
             <dd>
               calls{" "}
               <button type="button" className="link" onClick={() => goTo(block.run?.firstCall ?? call)}>
-                {block.run.firstCall}
+                {callNumber(block.run.firstCall)}
               </button>{" "}
               to{" "}
               {block.run.lastCall === undefined ? (
                 "the latest"
               ) : (
                 <button type="button" className="link" onClick={() => goTo(block.run?.lastCall ?? call)}>
-                  {block.run.lastCall}
+                  {callNumber(block.run.lastCall)}
                 </button>
               )}
             </dd>

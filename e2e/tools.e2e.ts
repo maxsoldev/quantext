@@ -22,7 +22,7 @@ test("an Edit shows its change, and a link opens its output in the context", asy
   await expect(panel.locator(".diff-del")).toContainText("Hello");
   await expect(panel.locator(".diff-add")).toContainText("Hi");
   await panel.getByRole("link", { name: /Open its output/ }).click();
-  await expect(page).toHaveURL(/call=7$/);
+  await expect(page).toHaveURL(/call=8$/);
   await expect(page.getByTestId("block-panel")).toContainText("Tool result");
 });
 
@@ -32,5 +32,5 @@ test("an Agent tool call drills down into the subagent's own session", async ({ 
   await page.getByTestId("subagent-link").click();
   await expect(page).toHaveURL(/agent-/);
   await expect(page.getByTestId("timeline")).toBeVisible();
-  await expect(page.getByTestId("call-position")).toContainText("3 of 3");
+  await expect(page.getByTestId("call-position")).toContainText("Call 3");
 });

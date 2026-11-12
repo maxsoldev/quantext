@@ -67,7 +67,7 @@ export interface SessionSummary extends SessionKey {
   cost: CostParts;
   /** Calls with Usage but no price: their tokens count, their cost does not. */
   unpricedCalls: number;
-  /** The largest input total of one Call. */
+  /** The largest input total of one Call with exact usage (a summarising Call's derived usage is left out). */
   maxContextTokens: number;
   /** Cache read over the input total, over all Calls; absent with no input. */
   cacheHitRate?: number;

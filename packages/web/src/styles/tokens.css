@@ -61,11 +61,15 @@
   --cat-compaction-summary: #5f6b7a;
   --cat-other: #aab4bf;
 
-  /* How the input was billed, and the output. */
-  --cache-read: #2f9fc9;
-  --cache-write: #e8952a;
-  --cache-uncached: #cf4f6b;
-  --cache-output: #4b46a8;
+  /*
+   * How the input was billed, and the output: their own system, not categories. One hue (OKLCH h 280, C 0.09),
+   * lighter = cheaper per token (read 0.1x, uncached 1x, write 1.25x, output 5x), plus a hatch (marks.css).
+   * Ordinal check passes in both themes; nearest category: dE 7.5 normal, 6.4 CVD (was 3.6 / 2.5).
+   */
+  --cache-read: #a5abea;
+  --cache-uncached: #7b80bc;
+  --cache-write: #54578f;
+  --cache-output: #303065;
   /* An edit's removed and added lines: tints with a sign, never colour alone. */
   --diff-del-bg: #fbe4e4;
   --diff-del-ink: #8f1f1f;
@@ -102,10 +106,10 @@
     --cat-tool-outputs: #e66767;
     --cat-compaction-summary: #8d99a8;
     --cat-other: #56616e;
-    --cache-read: #2e8fc0;
-    --cache-write: #c97a12;
-    --cache-uncached: #d9507a;
-    --cache-output: #8b86e6;
+    --cache-read: #51548c;
+    --cache-uncached: #787db8;
+    --cache-write: #9fa5e3;
+    --cache-output: #c8ceff;
     --diff-del-bg: #4a1f24;
     --diff-del-ink: #ffc9c9;
     --diff-add-bg: #163a20;
@@ -141,10 +145,10 @@
   --cat-tool-outputs: #e66767;
   --cat-compaction-summary: #8d99a8;
   --cat-other: #56616e;
-  --cache-read: #2e8fc0;
-  --cache-write: #c97a12;
-  --cache-uncached: #d9507a;
-  --cache-output: #8b86e6;
+  --cache-read: #51548c;
+  --cache-uncached: #787db8;
+  --cache-write: #9fa5e3;
+  --cache-output: #c8ceff;
   --diff-del-bg: #4a1f24;
   --diff-del-ink: #ffc9c9;
   --diff-add-bg: #163a20;

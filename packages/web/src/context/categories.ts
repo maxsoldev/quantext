@@ -24,7 +24,9 @@ export const CATEGORIES: readonly Part<ContextCategory>[] = [
   {
     key: "injected-context",
     label: "Injected context",
-    explain: "Text the harness adds to messages: reminders, attached files, skill listings, session context.",
+    explain:
+      "Text the harness adds to the messages: CLAUDE.md files, project memory, the environment, git status, " +
+      "reminders, attached files, skill listings.",
   },
   { key: "user", label: "User messages", explain: "What the user typed." },
   { key: "assistant", label: "Assistant text", explain: "The model's earlier replies, sent back as history." },

@@ -9,9 +9,9 @@ async function scrollBlocksToEnd(page: Page) {
 }
 
 test("the context at call N shows the hidden part, the bar and the blocks by section", async ({ page, engine }) => {
-  await page.goto(`${await engine.sessionUrl("basic-tools")}?call=3`);
+  await page.goto(`${await engine.sessionUrl("basic-tools")}?call=4`);
   const context = page.getByTestId("context");
-  await expect(context).toContainText("Context at call 3");
+  await expect(context).toContainText("Context at call 4");
   await expect(page.getByTestId("hidden-part")).toContainText("hidden part");
   await expect(page.getByTestId("context-bar").locator(".ctx-seg").first()).toBeVisible();
   const list = page.getByTestId("block-list");
@@ -21,14 +21,14 @@ test("the context at call N shows the hidden part, the bar and the blocks by sec
 });
 
 test("stepping to another call loads its context", async ({ page, engine }) => {
-  await page.goto(`${await engine.sessionUrl("basic-tools")}?call=3`);
-  await expect(page.getByTestId("context")).toContainText("Context at call 3");
-  await page.keyboard.press("ArrowRight");
+  await page.goto(`${await engine.sessionUrl("basic-tools")}?call=4`);
   await expect(page.getByTestId("context")).toContainText("Context at call 4");
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByTestId("context")).toContainText("Context at call 5");
 });
 
 test("a deferred MCP tool schema is marked, and a block opens with its full text", async ({ page, engine }) => {
-  await page.goto(`${await engine.sessionUrl("mcp-deferred")}?call=2`);
+  await page.goto(`${await engine.sessionUrl("mcp-deferred")}?call=3`);
   await expect(page.getByTestId("block-row").first()).toBeVisible();
   await scrollBlocksToEnd(page);
   const deferred = page.getByTestId("block-row").filter({ has: page.locator(".tag.deferred") });

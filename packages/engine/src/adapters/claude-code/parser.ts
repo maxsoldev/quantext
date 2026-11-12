@@ -17,7 +17,7 @@ import type {
 import type { Estimator } from "../../core/estimate.ts";
 import { addCounts } from "../../core/graph.ts";
 import { estimateBlock } from "../../providers/anthropic/estimate.ts";
-import { canonicalModel } from "../../providers/anthropic/pricing.ts";
+import { canonicalModel, MAX_CONTEXT_WINDOW } from "../../providers/anthropic/pricing.ts";
 import { Changes } from "./changes.ts";
 import type { Classifier } from "./classify.ts";
 import { attachedTextHash, blockHash, createClassifier, textHash, toolSource } from "./classify.ts";
@@ -746,9 +746,17 @@ class Rows {
         if (canonical !== undefined) call.canonicalModel = canonical;
         const input = derived.usage.inputTokens + derived.usage.cacheReadTokens + derived.usage.cacheWriteTokens;
         const negative = Object.values(derived.usage).some((v) => typeof v === "number" && v < 0);
+        const limit = DERIVED_MARGIN * Math.max(open.preTokens ?? 0, MAX_CONTEXT_WINDOW);
         if (input <= 0 || negative) {
           // Not a usage: the totals do not account for this call. It must not flow into sums or costs.
           const detail = `the running totals give an input of ${input} tokens for the summarising call; it has no usage`;
+          call.issues.push({ kind: "derived-usage-invalid", detail });
+        } else if (input > limit) {
+          // No request can hold this: the totals took in more than this call (seen on real data: 18M tokens).
+          const detail =
+            `the running totals give an input of ${input} tokens for the summarising call, more than ${limit} ` +
+            `(${DERIVED_MARGIN} × the larger of the context before the compaction and the largest context window); ` +
+            "it has no usage";
           call.issues.push({ kind: "derived-usage-invalid", detail });
         } else setUsage(call, derived.usage);
         if (call.usage !== undefined && open.preTokens !== undefined && input < open.preTokens) {
@@ -772,6 +780,9 @@ const COUNTERS = {
   cacheWrite1hTokens: "cacheCreationEphemeral1hInputTokens",
   outputTokens: "outputTokens",
 } as const;
+
+/** A derived input above this multiple of what one request can hold is not the summarising call's usage. */
+const DERIVED_MARGIN = 1.5;
 
 /** Add a Call's Usage to running sums per model, by the names of `cost-state`'s counters. */
 function addUsage(sums: Record<string, UsageSum>, call: Call, usage: Usage): void {

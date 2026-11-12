@@ -29,6 +29,15 @@ describe("the glossary", () => {
       expect(text).toContain(fact);
     }
   });
+  test("the context facts: CLAUDE.md, memory and the environment are injected context, not the system prompt", () => {
+    const hidden = TERMS.find((t) => t.id === "hidden-part")?.body ?? "";
+    expect(hidden).not.toMatch(/system prompt \([^)]*CLAUDE\.md/);
+    expect(hidden).toContain("injected context");
+    // Claude Code loads the first 200 lines or 25 KB of MEMORY.md (code.claude.com/docs/en/memory).
+    const memory = TERMS.find((t) => t.id === "memory")?.body ?? "";
+    expect(memory).toContain("first 200 lines or 25 KB");
+    expect(memory).not.toContain("every line");
+  });
 });
 
 describe("the overlay", () => {

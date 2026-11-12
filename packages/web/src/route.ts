@@ -1,5 +1,5 @@
 /**
- * The viewer's pages as URLs: `/` (Sessions, filters in the query), `/s/<log>/<id>?call=<n>` (the context view),
+ * The viewer's pages as URLs: `/` (Sessions, filters in the query), `/s/<log>/<id>?call=<n>` (the context view; n is the Call's 1-based number),
  * `/s/<log>/<id>/tools?sort=<key>`, `/s/<log>/<id>/compactions`, and `/memory?project=<project>&file=<name>`.
  */
 import type { SessionKey } from "@quantext/shared";
@@ -27,6 +27,13 @@ export type Route =
 const SORTS: readonly string[] = ["ended", "started", "cost", "calls"];
 const TOOL_SORTS: readonly string[] = ["cost", "tokens", "calls", "time"];
 
+/**
+ * A Call's number in the UI (headings, tooltips, the scrubber, `?call=` in URLs) is 1-based and counts every Call
+ * of the Session in log order. The API's `index` is the same order, 0-based. Convert only through these two.
+ */
+export const callNumber = (index: number): number => index + 1;
+export const callIndex = (number: number): number => number - 1;
+
 export function parseRoute(pathname: string, search: string): Route {
   const q = new URLSearchParams(search);
   if (pathname === "/" || pathname === "") {
@@ -52,7 +59,7 @@ export function parseRoute(pathname: string, search: string): Route {
     const sort = q.get("sort");
     if (route.view === "tools" && sort && TOOL_SORTS.includes(sort)) route.sort = sort as ToolSort;
     const call = q.get("call");
-    if (call !== null && /^\d+$/.test(call)) route.call = Number(call);
+    if (call !== null && /^\d+$/.test(call) && Number(call) >= 1) route.call = callIndex(Number(call));
     const block = q.get("block");
     if (block && /^[0-9a-f]+$/.test(block) && !route.view) route.block = block;
     return route;
@@ -64,7 +71,7 @@ export function hrefOf(route: Route): string {
   if (route.page === "session") {
     const path = `/s/${route.key.log}/${encodeURIComponent(route.key.id)}${route.view ? `/${route.view}` : ""}`;
     const q = new URLSearchParams();
-    if (route.call !== undefined) q.set("call", String(route.call));
+    if (route.call !== undefined) q.set("call", String(callNumber(route.call)));
     if (route.block && !route.view) q.set("block", route.block);
     if (route.view === "tools" && route.sort) q.set("sort", route.sort);
     const s = q.toString();
