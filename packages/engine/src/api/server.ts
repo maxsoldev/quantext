@@ -36,7 +36,7 @@ export interface Offload {
 
 export interface ApiOptions {
   query: Query;
-  /** What `/health` tells besides `ok` and `apiVersion`; `dataDir` is left out in demo mode. */
+  /** What `/health` tells besides `ok` and `apiVersion`. */
   info: Omit<Health, "ok" | "apiVersion">;
   /** The viewer's files. */
   staticDir: string;
@@ -85,13 +85,8 @@ export function createApi(options: ApiOptions): Api {
       Promise.resolve(query[method](key, o))) as Offload);
   const files = staticFiles(options.staticDir);
   const events: EventStream = createEventStream({ query, onError, ...options.events });
-  const { dataDir, ...info } = options.info;
-  const health: Health = {
-    apiVersion: API_VERSION,
-    ok: true,
-    ...info,
-    ...(info.demo || dataDir === undefined ? {} : { dataDir }),
-  };
+  const info = options.info;
+  const health: Health = { apiVersion: API_VERSION, ok: true, ...info };
   const ingestStatus =
     options.ingestStatus ??
     ((): IngestStatus => ({
@@ -102,24 +97,14 @@ export function createApi(options: ApiOptions): Api {
       bytesTotal: 0,
       startedAt: info.startedAt,
     }));
-  /** Demo mode shows that a read failed, not its path or message. */
-  const shown = (s: IngestStatus): IngestStatus =>
-    info.demo && s.lastError !== undefined ? { ...s, lastError: "a read failed (hidden in demo mode)" } : s;
   const status = (): EngineStatus => ({
     apiVersion: API_VERSION,
-    engine: { version: info.version, pid: info.pid, startedAt: info.startedAt, demo: info.demo },
-    ingest: shown(ingestStatus()),
+    engine: { version: info.version, pid: info.pid, startedAt: info.startedAt },
+    ingest: ingestStatus(),
     streams: events.clients(),
   });
-  /**
-   * A Block's content never changes under its hash and engine version; demo mode's redaction can, when the store's projects do. So
-   * a demo tag also holds the change cursor, and a demo tag never equals a plain one: no cache entry is shared.
-   */
-  const etagOf = (tag: string) => {
-    // The engine's version too: another version may show the same content differently.
-    const base = `${tag}.${info.version.replace(/[^\w.-]/g, "_")}`;
-    return info.demo ? `"${base}.demo.${query.changeCursor()}"` : `"${base}"`;
-  };
+  /** A Block's content never changes under its hash; another engine version may show it differently. */
+  const etagOf = (tag: string) => `"${tag}.${info.version.replace(/[^\w.-]/g, "_")}"`;
   let port = 0;
   let lastActive = now();
   const sockets = new Set<Socket>();
@@ -238,7 +223,7 @@ export function createApi(options: ApiOptions): Api {
       });
     },
     publish: (event) => events.publish(event),
-    publishIngest: (s) => events.publishIngest(shown(s)),
+    publishIngest: (s) => events.publishIngest(s),
     activity: () => ({ streams: events.clients(), lastActive }),
     close() {
       events.close();

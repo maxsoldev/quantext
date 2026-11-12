@@ -217,27 +217,6 @@ describe("qx", () => {
     expect(none.err).toContain("qx ingest");
   });
 
-  test("hides local paths and other projects in demo mode", async () => {
-    const data = await ingested();
-    const shown = await qx("sessions", ...data, "--demo-project", "/fixture-0000000000000000/repo", "--json");
-    const page = JSON.parse(shown.out);
-    expect(page.redacted).toBe(true);
-    expect(page.items[0].project).toBe("repo");
-    expect(JSON.parse((await qx("sessions", ...data, "--demo-project", "repo", "--json")).out).total).toBe(0);
-    const sql = await qx("sql", ...data, "--demo", "SELECT 1");
-    expect(sql.code).toBe(EXIT.usage);
-    expect(sql.err).toContain("demo mode");
-  });
-
-  test("hides the data folder in its errors in demo mode", async () => {
-    const home = tempDir("qx-home-");
-    let err = "";
-    const io: CliIo = { stdout: () => undefined, stderr: (t) => (err += t), env: {}, home, user: "someone" };
-    expect(await main(["sessions", "--demo", "--data-dir", join(home, "data")], io)).toBe(EXIT.failed);
-    expect(err).not.toContain(home);
-    expect(err).toContain("~/data");
-  });
-
   test("runs as a program: the entry file, with its exit code and no warnings", () => {
     const run = spawnSync(process.execPath, [QX, "--version"], { encoding: "utf8" });
     expect(run).toMatchObject({ status: 0, stderr: "" });

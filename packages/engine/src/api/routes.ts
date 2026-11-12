@@ -1,7 +1,6 @@
 /**
  * The JSON routes under `/api/v1/`, one per query method (docs/api.md). Each route reads its path segments and
- * query string strictly, calls the query layer, and gives its response type, or a 404 for what does not exist or
- * demo mode hides. The query layer applies demo mode, so no route can get around it.
+ * query string strictly, calls the query layer, and gives its response type, or a 404 for what does not exist.
  */
 import type { SessionKey } from "@quantext/shared";
 import type { Query } from "../query/index.ts";
@@ -39,7 +38,7 @@ const found = <T>(value: T | undefined): Reply => {
   return json(value);
 };
 
-/** A Session key from its path segments; 404 when it is not there or demo mode hides it. */
+/** A Session key from its path segments; 404 when it is not there. */
 function session(query: Query, p: Record<string, string>): SessionKey {
   const key = { log: integer(p.log ?? "", "log", 0, MAX_LOG), id: sessionId(p.id ?? "") };
   if (!query.hasSession(key)) throw notFound("no such session");

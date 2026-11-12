@@ -5,12 +5,12 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import type { DemoOptions, LifetimeOptions, SessionKey, SqlResult } from "@quantext/shared";
+import type { LifetimeOptions, SessionKey, SqlResult } from "@quantext/shared";
 import packageJson from "../../package.json" with { type: "json" };
 import { claudeCodeCodec } from "../adapters/claude-code/index.ts";
 import { claudeConfigDir, createIngest } from "../ingest/index.ts";
 import type { Query } from "../query/index.ts";
-import { createQuery, createRedactor, installViews, SqlRejectedError } from "../query/index.ts";
+import { createQuery, installViews, SqlRejectedError } from "../query/index.ts";
 import type { SqlDriver } from "../store/index.ts";
 import { defaultDataDir, openReader, openStore, SCHEMA_VERSION, StoreLockedError } from "../store/index.ts";
 import {
@@ -33,9 +33,6 @@ export interface CliIo {
   stderr(text: string): void;
   env: Readonly<Record<string, string | undefined>>;
   home: string;
-  /** The user name and the machine's name, hidden in demo mode. */
-  user?: string;
-  host?: string;
   /** `qx serve`: a stop signal, a clock, a browser opener and more, in place of the process's own (tests). */
   serve?: Omit<ServeHooks, "out" | "err">;
 }
@@ -67,8 +64,6 @@ Usage:
 Options for every command:
   --data-dir <dir>      The store's folder (default ~/.quantext)
   --json                JSON output: the query layer's response types (docs/cli.md)
-  --demo                Demo mode: hide local paths
-  --demo-project <p>    Demo mode with only these projects (by exact path; repeat for more)
 
 Exit codes: 0 done, 1 failed, 2 wrong use, 3 not found.`;
 
@@ -79,8 +74,6 @@ const OPTIONS = {
   "data-dir": { type: "string" },
   root: { type: "string" },
   json: { type: "boolean" },
-  demo: { type: "boolean" },
-  "demo-project": { type: "string", multiple: true },
   project: { type: "string" },
   search: { type: "string" },
   sort: { type: "string" },
@@ -104,8 +97,7 @@ function parse(argv: readonly string[]) {
 }
 
 /** Run `qx` with these arguments; returns the exit code. */
-export async function main(argv: readonly string[], given: CliIo): Promise<number> {
-  const io = inDemo(argv) ? redactedErrors(given) : given;
+export async function main(argv: readonly string[], io: CliIo): Promise<number> {
   try {
     let parsed: ReturnType<typeof parse>;
     try {
@@ -132,14 +124,7 @@ export async function main(argv: readonly string[], given: CliIo): Promise<numbe
     if (run === undefined) throw new UsageError(`unknown command: ${command}`);
     const db = await openReader(dataDir, { setup: installViews });
     try {
-      const query = createQuery({
-        db,
-        codec: claudeCodeCodec,
-        ...demoOf(values),
-        home: io.home,
-        ...(io.user === undefined ? {} : { user: io.user }),
-        ...(io.host === undefined ? {} : { host: io.host }),
-      });
+      const query = createQuery({ db, codec: claudeCodeCodec });
       return run({ values, args, query, db, io });
     } finally {
       db.close();
@@ -241,9 +226,6 @@ export const DEFAULT_SQL_TIMEOUT_S = 30;
 /** `qx sql`: the statement runs in a child process, killed after the time limit. */
 async function sql(values: Values, args: string[], dataDir: string, io: CliIo): Promise<number> {
   arity(args, 1, 'sql "<select>"');
-  if (demoOf(values).demo !== undefined) {
-    throw new UsageError("qx sql reads the tables as they are: it does not run in demo mode");
-  }
   const limit = integer(values.limit, "--limit") ?? 1000;
   const timeout = integer(values.timeout, "--timeout") ?? DEFAULT_SQL_TIMEOUT_S;
   const reply = await runChild(JSON.stringify({ dataDir, sql: args[0] ?? "", limit }), timeout * 1000);
@@ -343,20 +325,15 @@ async function serveCommand(values: Values, args: string[], dataDir: string, io:
   if (port !== undefined && port > 65_535) throw new UsageError("--port must be from 0 to 65535");
   const idleMinutes = integer(values["idle-minutes"], "--idle-minutes") ?? DEFAULT_IDLE_MINUTES;
   if (idleMinutes < 1) throw new UsageError("--idle-minutes must be at least 1");
-  const demo = demoOf(values).demo;
   return serve(
     {
       dataDir,
       root: values.root ?? claudeConfigDir(io.env, io.home),
       version: packageJson.version,
       ...(port === undefined ? {} : { port }),
-      ...(demo === undefined ? {} : { demo }),
       live,
       idleMinutes,
       open: values.open === true,
-      home: io.home,
-      ...(io.user === undefined ? {} : { user: io.user }),
-      ...(io.host === undefined ? {} : { host: io.host }),
     },
     { out: io.stdout, err: io.stderr, ...io.serve },
   );
@@ -375,27 +352,6 @@ function resolve(query: Query, text: string): SessionKey {
     throw new UsageError(`${text} names more than one session: ${list}`);
   }
   return matches[0] as SessionKey;
-}
-
-/** Demo mode is asked for: known before the arguments are parsed, so that even a parse error is redacted. */
-function inDemo(argv: readonly string[]): boolean {
-  return argv.some((a) => a === "--demo" || a === "--demo-project" || a.startsWith("--demo-project="));
-}
-
-/** The same I/O with local paths and the user name hidden in what goes to stderr. */
-function redactedErrors(io: CliIo): CliIo {
-  const redact = createRedactor({
-    home: io.home,
-    ...(io.user === undefined ? {} : { user: io.user }),
-    ...(io.host === undefined ? {} : { host: io.host }),
-  });
-  return { ...io, stderr: (text) => io.stderr(redact(text)) };
-}
-
-function demoOf(values: Values): { demo?: DemoOptions } {
-  const projects = values["demo-project"];
-  if (projects !== undefined) return { demo: { projects, redactPaths: true } };
-  return values.demo === true ? { demo: { redactPaths: true } } : {};
 }
 
 function lifetimeOptions(values: Values): LifetimeOptions {

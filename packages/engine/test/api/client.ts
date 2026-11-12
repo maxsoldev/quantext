@@ -100,7 +100,6 @@ export async function engine(
       version: "0.0.0-test",
       pid: process.pid,
       startedAt: "2026-11-12T00:00:00.000Z",
-      demo: queryOptions.demo !== undefined,
       dataDir,
     },
     onError: (error) => errors.push(error),

@@ -47,7 +47,7 @@ test(`/health answers in under 200 ms (p95) while a ${CALLS}-call log is ingeste
   const db = await openReader(dataDir, { setup: installViews });
   onCleanup(() => db.close());
   const query = createQuery({ db, codec: claudeCodeCodec });
-  const info = { version: "0.0.0-test", pid: process.pid, startedAt: "", demo: false };
+  const info = { version: "0.0.0-test", pid: process.pid, startedAt: "" };
   const api = createApi({ query, info, staticDir: viewerDir() });
   const port = await api.listen(0);
   onCleanup(() => api.close());
@@ -79,7 +79,7 @@ test(`/health answers in under 200 ms (p95) while a ${CALLS}-call Session's life
   const query = createQuery({ db, codec: claudeCodeCodec });
   const worker = createQueryWorker({ dataDir });
   onCleanup(() => worker.close());
-  const info = { version: "0.0.0-test", pid: process.pid, startedAt: "", demo: false };
+  const info = { version: "0.0.0-test", pid: process.pid, startedAt: "" };
   const api = createApi({ query, info, staticDir: viewerDir(), offload: worker.run });
   const port = await api.listen(0);
   onCleanup(() => api.close());

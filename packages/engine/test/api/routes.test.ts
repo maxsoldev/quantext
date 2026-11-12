@@ -146,32 +146,6 @@ describe("bad requests", () => {
   });
 });
 
-describe("demo mode", () => {
-  test("no route shows a hidden project", async () => {
-    const plain = await basic();
-    const hash = plain.query.contextAt(plain.key, 1)?.blocks.find((b) => b.hash !== undefined)?.hash;
-    const { port } = await engine(
-      ["basic-tools", "image"],
-      {},
-      { demo: { projects: ["/no/such"], redactPaths: true } },
-    );
-    const sessions = (await get(port, "/api/v1/sessions")).json<Page<SessionSummary>>();
-    expect([sessions.total, sessions.items, sessions.redacted]).toEqual([0, [], true]);
-    const { log, id } = plain.key;
-    for (const path of [
-      `/api/v1/sessions/${log}/${id}`,
-      `/api/v1/sessions/${log}/${id}/calls`,
-      `/api/v1/sessions/${log}/${id}/calls/1/context`,
-      `/api/v1/sessions/${log}/${id}/timeline`,
-      `/api/v1/sessions/${log}/${id}/tool-outputs`,
-      `/api/v1/blocks/${log}/${hash}`,
-    ]) {
-      expect([path, (await get(port, path)).status]).toEqual([path, 404]);
-    }
-    expect((await get(port, `/api/v1/session-keys?id=${id}`)).json()).toEqual({ apiVersion: 1, items: [] });
-  });
-});
-
 describe("/api/v1/status", () => {
   const status = {
     phase: "catching-up" as const,
@@ -187,17 +161,10 @@ describe("/api/v1/status", () => {
     const { port } = await engine(["basic-tools"], { ingestStatus: () => status });
     expect((await get(port, "/api/v1/status")).json()).toEqual({
       apiVersion: 1,
-      engine: { version: "0.0.0-test", pid: process.pid, startedAt: "2026-11-12T00:00:00.000Z", demo: false },
+      engine: { version: "0.0.0-test", pid: process.pid, startedAt: "2026-11-12T00:00:00.000Z" },
       ingest: status,
       streams: 0,
     });
-  });
-
-  test("in demo mode, only that a read failed", async () => {
-    const info = { version: "0.0.0-test", pid: 1, startedAt: "2026-11-12T00:00:00.000Z", demo: true };
-    const { port } = await engine(["basic-tools"], { info, ingestStatus: () => status });
-    const reply = (await get(port, "/api/v1/status")).json<{ ingest: { lastError: string } }>();
-    expect(reply.ingest.lastError).toBe("a read failed (hidden in demo mode)");
   });
 });
 
@@ -239,7 +206,7 @@ describe("activity, for the idle exit", () => {
 });
 
 describe("caching of Blocks and media", () => {
-  test("an ETag by content, a 304 when it matches, and never the same tag in demo mode", async () => {
+  test("an ETag by content and engine version, a 304 when it matches", async () => {
     const { port, query } = await basic();
     const [image] = query.findSessions(ID(3));
     if (image === undefined) throw new Error("no image session");
@@ -247,7 +214,6 @@ describe("caching of Blocks and media", () => {
       .contextAt(image, 1)
       ?.blocks.find((b) => b.source.filePath?.endsWith("diagram.png") && b.kind === "tool-result")?.hash;
     const media = query.getBlock(hash ?? "", image.log)?.media[0]?.hash;
-    const demo = await engine(["basic-tools", "image"], {}, { demo: { redactPaths: true } });
     for (const path of [`/api/v1/blocks/${image.log}/${hash}`, `/api/v1/blocks/${image.log}/${hash}/media/${media}`]) {
       const first = await get(port, path);
       const tag = String(first.headers.etag);
@@ -260,10 +226,6 @@ describe("caching of Blocks and media", () => {
       const again = await get(port, path, { "if-none-match": tag });
       expect([path, again.status, again.body]).toEqual([path, 304, ""]);
       expect((await get(port, path, { "if-none-match": '"other"' })).status).toBe(200);
-      const shown = await get(demo.port, path);
-      expect(shown.status).toBe(200);
-      expect(shown.headers.etag).not.toBe(tag);
-      expect((await get(demo.port, path, { "if-none-match": tag })).status).toBe(200);
     }
   });
 });

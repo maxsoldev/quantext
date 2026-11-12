@@ -12,8 +12,7 @@ export interface Health extends Meta {
   pid: number;
   /** ISO 8601. */
   startedAt: string;
-  demo: boolean;
-  /** The data folder; left out in demo mode. */
+  /** The data folder. */
   dataDir?: string;
 }
 
@@ -30,13 +29,13 @@ export interface IngestProgress {
 /** The engine's ingest: catching up after its start, then live, then stopping. */
 export interface IngestStatus extends IngestProgress {
   phase: "catching-up" | "live" | "stopping";
-  /** The last read that failed; in demo mode only that there was one. */
+  /** The last read that failed. */
   lastError?: string;
 }
 
 /** `GET /api/v1/status`: the engine, its ingest, its open event streams. */
 export interface EngineStatus extends Meta {
-  engine: { version: string; pid: number; startedAt: string; demo: boolean };
+  engine: { version: string; pid: number; startedAt: string };
   ingest: IngestStatus;
   streams: number;
 }
