@@ -8,6 +8,7 @@ import { openStore } from "../../src/store/index.ts";
 import { scenarios } from "../fixtures.ts";
 import { copyScenario } from "../ingest/corpus.ts";
 import { onCleanup, tempDir } from "../store/temp.ts";
+import { RELEASE } from "./release.ts";
 
 const QX = join(import.meta.dirname, "../../src/cli/qx.ts");
 
@@ -203,7 +204,7 @@ describe("qx", () => {
     const data = await ingested();
     expect(await qx("--version")).toMatchObject({
       code: EXIT.ok,
-      out: expect.stringMatching(/^qx \d+\.\d+\.\d+ \(store schema \d+\)\n$/),
+      out: expect.stringMatching(new RegExp(`^qx ${RELEASE.replaceAll(".", "\\.")} \\(store schema \\d+\\)\n$`)),
     });
     expect((await qx("--help")).out).toContain("Usage:");
     expect((await qx()).code).toBe(EXIT.usage);

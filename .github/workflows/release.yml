@@ -1,0 +1,137 @@
+name: Release
+
+# On a tag v<version> (the root package.json's version): check, build and publish the plugin (ADR 30).
+# build: pnpm check (the no-egress guard included), the smoke test, dist/plugin, a tarball and the SBOMs.
+# attest: build provenance for the tarball. publish: the plugin branch and the GitHub Release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Check and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # gitleaks scans the full history
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          # No dependency cache: a release builds from a clean install.
+
+      - id: version
+        run: |
+          node scripts/release.ts check-tag "$TAG"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+        env:
+          TAG: ${{ github.ref_name }}
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm check
+
+      # pnpm check built dist/plugin and ran the no-egress guard on it; the smoke test rebuilds only the engine's
+      # own dist, so the tarball below holds the files the guard read.
+      - run: pnpm smoke --runtime node
+
+      - name: Tarball and SBOMs
+        run: |
+          mkdir -p out
+          tar -czf "out/quantext-plugin-$VERSION.tar.gz" -C dist plugin
+          pnpm sbom --sbom-format cyclonedx --sbom-type application --prod --out "out/quantext-plugin-$VERSION.cdx.json"
+          pnpm sbom --sbom-format cyclonedx --sbom-type application --out "out/quantext-build-$VERSION.cdx.json"
+          node -e 'for (const f of process.argv.slice(1)) JSON.parse(require("fs").readFileSync(f, "utf8"))' out/*.cdx.json
+          (cd out && sha256sum -- * > SHA256SUMS)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: out/
+          if-no-files-found: error
+
+  attest:
+    name: Build provenance
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write # a Sigstore certificate for the signature
+      attestations: write # store the attestation
+      artifact-metadata: write # the artifact's storage record
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: out
+
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: out/quantext-plugin-*.tar.gz
+
+  publish:
+    name: Plugin branch and GitHub Release
+    needs: [build, attest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # push the plugin branch, create the release
+    steps:
+      # The one job that pushes, so the only one that keeps the token in git's config.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: out
+
+      # The plugin from the tarball (an artifact would lose engine.js's mode), as the next plugin branch commit.
+      - name: Push the plugin branch
+        run: |
+          (cd out && sha256sum --check SHA256SUMS)
+          mkdir -p unpacked
+          tar -xzf "out/quantext-plugin-$VERSION.tar.gz" -C unpacked
+          # ls-remote exits 2 when there is no plugin branch yet (the first release); any other failure stops here.
+          found=0; git ls-remote --exit-code --heads origin plugin > /dev/null || found=$?
+          if [ "$found" = 0 ]; then git fetch --no-tags origin "+refs/heads/plugin:refs/remotes/origin/plugin";
+          elif [ "$found" != 2 ]; then exit "$found"; fi
+          sha=$(node scripts/release.ts commit-plugin unpacked/plugin refs/remotes/origin/plugin "$GITHUB_SHA")
+          git push origin "$sha:refs/heads/plugin"
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+
+      - name: Create the GitHub Release
+        run: |
+          gh release create "$TAG" out/* --verify-tag --title "Quantext $VERSION" --generate-notes \
+            --notes "Install: \`claude plugin marketplace add $GITHUB_REPOSITORY\`, then \`claude plugin install quantext@quantext\`. Verify the tarball: \`gh attestation verify quantext-plugin-$VERSION.tar.gz --repo $GITHUB_REPOSITORY\`."
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}

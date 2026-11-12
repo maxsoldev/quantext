@@ -13,6 +13,7 @@ import { openStore } from "../../src/store/index.ts";
 import { get } from "../api/client.ts";
 import { layout, writeText } from "../ingest/corpus.ts";
 import { onCleanup, tempDir } from "../store/temp.ts";
+import { RELEASE } from "./release.ts";
 
 const ID = "00000000-0000-4000-8000-000000000001";
 
@@ -147,13 +148,13 @@ describe("qx serve", () => {
     const file = await engineFile(dataDir);
     expect(file).toMatchObject({
       apiVersion: 1,
-      version: "0.0.0",
+      version: RELEASE,
       pid: process.pid,
       url: `http://127.0.0.1:${file.port}/`,
     });
     expect(run.out()).toContain(`quantext engine at ${file.url} (pid ${process.pid})`);
     const health = (await get(file.port, "/health")).json<Health>();
-    expect(health).toMatchObject({ ok: true, version: "0.0.0", pid: process.pid, dataDir });
+    expect(health).toMatchObject({ ok: true, version: RELEASE, pid: process.pid, dataDir });
     // Wait for the catch-up: the half session is there.
     let calls = 0;
     for (let i = 0; i < 200 && calls === 0; i++) {
@@ -167,7 +168,7 @@ describe("qx serve", () => {
       await new Promise((r) => setTimeout(r, 10));
       status = (await get(file.port, "/api/v1/status")).json<EngineStatus>();
     }
-    expect(status).toMatchObject({ engine: { version: "0.0.0", pid: process.pid }, streams: 0 });
+    expect(status).toMatchObject({ engine: { version: RELEASE, pid: process.pid }, streams: 0 });
     const { ingest } = status;
     expect(ingest).toMatchObject({ phase: "live", logsDone: ingest.logsTotal });
     expect(ingest.bytesDone).toBe(ingest.bytesTotal);
@@ -253,14 +254,14 @@ describe("qx serve", () => {
     const run = start(["--root", tempDir("qx-root-"), "--data-dir", dataDir]);
     expect(await run.done).toBe(EXIT.failed);
     expect(run.err()).toBe(
-      `qx: an engine of version 9.9.9 (pid 4242) runs at http://127.0.0.1:${port}/; this is version 0.0.0. ` +
+      `qx: an engine of version 9.9.9 (pid 4242) runs at http://127.0.0.1:${port}/; this is version ${RELEASE}. ` +
         "Stop it first (kill 4242).\n",
     );
   });
 
   test("never prints or opens what another process wrote: the URL comes from the port, text is made printable", async () => {
     const dataDir = tempDir("qx-data-");
-    let version = "0.0.0";
+    let version = RELEASE;
     const fake = createServer((_req, res) => {
       const health: Health = { apiVersion: 1, ok: true, version, pid: 4242, startedAt: "" };
       res.end(JSON.stringify(health));
@@ -269,7 +270,7 @@ describe("qx serve", () => {
     onCleanup(() => new Promise<void>((r) => fake.close(() => r())));
     const address = fake.address();
     const port = typeof address === "object" && address !== null ? address.port : 0;
-    const file = { apiVersion: 1, version: "0.0.0", pid: 4242, port, url: "-a Calculator", startedAt: "" };
+    const file = { apiVersion: 1, version: RELEASE, pid: 4242, port, url: "-a Calculator", startedAt: "" };
     writeFileSync(join(dataDir, "engine.json"), JSON.stringify(file));
     const reuse = start(["--root", tempDir("qx-root-"), "--data-dir", dataDir, "--open"]);
     expect(await reuse.done).toBe(EXIT.ok);

@@ -1,6 +1,5 @@
 {
   "name": "@quantext/engine",
-  "version": "0.0.0",
   "private": true,
   "type": "module",
   "description": "Ingest, store, query and API. Bundled to one file, dist/engine.js.",

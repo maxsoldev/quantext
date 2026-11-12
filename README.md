@@ -29,13 +29,8 @@ agents through SQL and a CLI. Nothing leaves the machine.
 
 ## Install
 
-Install from a clone (installing straight from the marketplace is not supported yet):
-
 ```sh
-git clone https://github.com/maxsoldev/quantext.git && cd quantext
-npm i -g corepack@latest && corepack enable      # Node ≥ 22.18; skip if Corepack is already enabled
-pnpm install && pnpm build:plugin                  # builds dist/plugin: the mod, the engine and the viewer
-claude plugin marketplace add "$PWD"
+claude plugin marketplace add maxsoldev/quantext
 claude plugin install quantext@quantext
 ```
 
@@ -43,8 +38,21 @@ Then start a new Claude Code session (or run `/reload-plugins`) and type `/quant
 ≥ 22.18 or Bun on your `PATH`; the status line and the commands work without them. The first start reads all your
 transcripts once (about 30 s per GB). The engine stops by itself 10 minutes after the last viewer tab closes.
 
-To update: `git pull && pnpm install && pnpm build:plugin`, then `/reload-plugins`. To remove:
-`claude plugin uninstall quantext@quantext` and `rm -rf ~/.quantext`.
+To update: `claude plugin update quantext@quantext`, then start a new session. To remove:
+`claude plugin uninstall quantext@quantext` and `rm -rf ~/.quantext`. Each release has a tarball with build
+provenance (`gh attestation verify <tarball> --repo maxsoldev/quantext`) and CycloneDX SBOMs.
+
+**From source**, for development:
+
+```sh
+git clone https://github.com/maxsoldev/quantext.git && cd quantext
+npm i -g corepack@latest && corepack enable      # Node ≥ 22.18; skip if Corepack is already enabled
+pnpm install && pnpm build:plugin                  # builds dist/plugin: the mod, the engine and the viewer
+claude plugin marketplace add ./dist               # marketplace quantext-dev, read in place
+claude plugin install quantext@quantext-dev
+```
+
+After a change: `pnpm build:plugin`, then `/reload-plugins`.
 
 ## Privacy and security
 

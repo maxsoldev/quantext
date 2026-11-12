@@ -167,7 +167,8 @@ docs/        this file, the store schema (schema.md), decision records (docs/adr
 ```
 
 The release is one plugin folder, `dist/plugin/` from `pnpm build:plugin`: the mod, the bundled engine and the built
-viewer (ADR 27).
+viewer (ADR 27). A tag `v<version>` publishes it to the `plugin` branch, which the marketplace entry names, and to a
+GitHub Release; the root `package.json` holds the one version (ADR 30).
 
 ## Quality bar
 
