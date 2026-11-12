@@ -4,7 +4,42 @@ Quantext reads the session logs of coding agents (Claude Code first), rebuilds e
 every call, and shows where the context tokens go: in a live web viewer, in a status line inside the harness, and to
 agents through SQL and a CLI. Nothing leaves the machine.
 
-**Status: pre-release.** The repository holds the skeleton only. There is nothing to install yet.
+**Status: early release (0.1).** Claude Code only, macOS and Linux. Expect rough edges; see
+[known issues](docs/known-issues.md).
+
+![The session timeline: what the context holds per call, and how its input was billed](docs/screens/session-1440x900.png)
+
+## What you get
+
+- **A status line in Claude Code:** `qx $3.42 · ctx 182k · cache 96%`, from the harness's own numbers.
+- **Nudges** (toasts, never added to the model's context): the prompt cache expired after idle time and the next
+  call re-wrote it; the context passed 200k.
+- **`/clear-tool-outputs [keep N]`:** compacts by replacing old tool outputs with short stubs instead of a summary.
+- **`/quantext view`:** opens a live viewer on `http://127.0.0.1:4747` with every session on the machine:
+  - the context of each call, exactly as the model received it (system prompt, tool schemas, messages), with the
+    tokens and cost of each block, and what was read from the cache or written to it;
+  - what changed since the previous call, and why the cache broke;
+  - each call's answer, tool calls and their lifetime cost, compactions, subagents, project memory;
+  - short explainers of the concepts (press `g`).
+
+## Install
+
+Install from a clone (installing straight from the marketplace is not supported yet):
+
+```sh
+git clone https://github.com/maxsoldev/quantext.git && cd quantext
+npm i -g corepack@latest && corepack enable      # Node ≥ 22.18; skip if Corepack is already enabled
+pnpm install && pnpm build:plugin                  # builds dist/plugin: the mod, the engine and the viewer
+claude plugin marketplace add "$PWD"
+claude plugin install quantext@quantext
+```
+
+Then start a new Claude Code session (or run `/reload-plugins`) and type `/quantext view`. The viewer needs Node
+≥ 22.18 or Bun on your `PATH`; the status line and the commands work without them. The first start reads all your
+transcripts once (about 30 s per GB). The engine stops by itself 10 minutes after the last viewer tab closes.
+
+To update: `git pull && pnpm install && pnpm build:plugin`, then `/reload-plugins`. To remove:
+`claude plugin uninstall quantext@quantext` and `rm -rf ~/.quantext`.
 
 ## Privacy and security
 
