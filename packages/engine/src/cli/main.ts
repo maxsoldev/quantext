@@ -8,7 +8,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import { claudeCodeCodec } from "../adapters/claude-code/index.ts";
 import { claudeConfigDir, createIngest } from "../ingest/index.ts";
 import type { Query } from "../query/index.ts";
-import { createQuery, installViews, runSql, SqlRejectedError } from "../query/index.ts";
+import { createQuery, createRedactor, installViews, runSql, SqlRejectedError } from "../query/index.ts";
 import type { SqlDriver } from "../store/index.ts";
 import { defaultDataDir, openReader, openStore, SCHEMA_VERSION, StoreLockedError } from "../store/index.ts";
 import { printCall, printReport, printSession, printSessions, printSql } from "./print.ts";
@@ -42,7 +42,7 @@ Options for every command:
   --data-dir <dir>      The store's folder (default ~/.quantext)
   --json                JSON output: the query layer's response types (docs/cli.md)
   --demo                Demo mode: hide local paths
-  --demo-project <p>    Demo mode with only these projects (by path or folder name; repeat for more)
+  --demo-project <p>    Demo mode with only these projects (by exact path; repeat for more)
 
 Exit codes: 0 done, 1 failed, 2 wrong use, 3 not found.`;
 
@@ -73,7 +73,8 @@ function parse(argv: readonly string[]) {
 }
 
 /** Run `qx` with these arguments; returns the exit code. */
-export async function main(argv: readonly string[], io: CliIo): Promise<number> {
+export async function main(argv: readonly string[], given: CliIo): Promise<number> {
+  const io = inDemo(argv) ? redactedErrors(given) : given;
   try {
     let parsed: ReturnType<typeof parse>;
     try {
@@ -180,6 +181,9 @@ const COMMANDS: Record<string, (c: Context) => number> = {
   },
   sql({ values, args, db, io }) {
     arity(args, 1, 'sql "<select>"');
+    if (demoOf(values).demo !== undefined) {
+      throw new UsageError("qx sql reads the tables as they are: it does not run in demo mode");
+    }
     const result = runSql(db, args[0] ?? "", { limit: integer(values.limit, "--limit") ?? 1000 });
     io.stdout(values.json === true ? json(result) : printSql(result));
     return EXIT.ok;
@@ -236,6 +240,17 @@ function resolve(query: Query, text: string): SessionKey {
     throw new UsageError(`${text} names more than one session: ${list}`);
   }
   return matches[0] as SessionKey;
+}
+
+/** Demo mode is asked for: known before the arguments are parsed, so that even a parse error is redacted. */
+function inDemo(argv: readonly string[]): boolean {
+  return argv.some((a) => a === "--demo" || a === "--demo-project" || a.startsWith("--demo-project="));
+}
+
+/** The same I/O with local paths and the user name hidden in what goes to stderr. */
+function redactedErrors(io: CliIo): CliIo {
+  const redact = createRedactor({ home: io.home, ...(io.user === undefined ? {} : { user: io.user }) });
+  return { ...io, stderr: (text) => io.stderr(redact(text)) };
 }
 
 function demoOf(values: Values): { demo?: DemoOptions } {

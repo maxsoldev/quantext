@@ -17,7 +17,7 @@ API and the viewer. It makes no network calls. In the repo: `pnpm qx <command>` 
 Every reading command opens the store read-only (no writer lock), so it also works while an engine writes.
 
 **Options for every command:** `--data-dir <dir>` (default `~/.quantext`), `--json`, `--demo` (hide local paths),
-`--demo-project <p>` (demo mode with only these projects, by path or last folder name; repeat for more).
+`--demo-project <p>` (demo mode with only these projects, by exact path; repeat for more).
 
 **A session** is named by its id, a prefix of it, or `<log>:<id>` when the same id is in more than one log.
 
@@ -27,7 +27,7 @@ Every reading command opens the store read-only (no writer lock), so it also wor
 |---|---|
 | 0 | Done (`ingest`: also when some files could not be read; they are listed on stderr and in `qx report`) |
 | 1 | Failed: no store, a store of another schema version, the writer lock is held, a SQL error |
-| 2 | Wrong use: unknown command or option, a bad number, an ambiguous session, a statement that is not a single read |
+| 2 | Wrong use: unknown command or option, a bad number, an ambiguous session, a statement that is not a single read, `sql` in demo mode |
 | 3 | Not found: no such session or call |
 
 ## JSON output
@@ -49,10 +49,14 @@ an optional field is left out, not `null`.
 
 For showing sessions to an audience. Applied in the query layer, so the API and the viewer get the same:
 
-- Only the allowed projects are visible (`--demo-project`); every other Session, its Blocks, tool calls and memory
-  are not found, and the report lists only their logs' entries (no folder scan issues).
-- Paths in the project are shown relative to it (`src/a.ts`, the project itself as `.`); the project as its folder
-  name; other paths in a home folder under `~` (macOS, Linux and Windows forms, also JSON-escaped, and the
-  harness's encoded folder names such as `-Users-<name>-x`).
-- The user name is hidden where it stands next to a path or an address (`name@host`), not in other words.
-- `qx sql` reads the tables as they are: do not use it in a demo.
+- Only the allowed projects are visible (`--demo-project`, by exact path); every other Session, its Blocks, media,
+  tool calls and memory are not found, and the report lists only their logs' entries (no folder scan issues).
+- Every other project's path (as is, JSON-escaped, percent-encoded, as the harness's encoded folder name, and its
+  folder name as a word of 4 or more characters) becomes `<hidden project>` wherever it shows in visible text.
+- Percent-encoded text is decoded first. Paths in the project are shown relative to it (`src/a.ts`, the project
+  itself as `.`), the project as its folder name; any home folder (macOS, Linux, Windows, with spaces or letters
+  beyond ASCII, JSON-escaped or encoded, also `C--Users-<name>`) as `~`.
+- The user name, in any case, is hidden after `@ / \ - : ~` and before `@` (`git@github.com:<name>/…`,
+  `~<name>`, `<name>@host`), not inside other words. Errors on stderr are redacted the same way.
+- Responses carry `redacted: true` and `blurImages: true`: the viewer blurs images, which may show what text hides.
+- `qx sql` refuses to run in demo mode (exit 2): it reads the tables as they are.

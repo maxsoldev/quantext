@@ -238,7 +238,7 @@ write, a schema or connection change (`INSERT`, `UPDATE`, `DELETE`, `CREATE`, `D
 `PRAGMA`, `VACUUM`, transactions, …). Comments and quoted text do not count. The connection is also opened
 read-only, with `query_only` set. At most 1000 rows (`--limit`); a BLOB shows as its size. There is no time
 limit: neither `node:sqlite` nor `bun:sqlite` has an interrupt or a progress handler; stop a long query with
-Ctrl-C. Demo mode does not apply to `qx sql`: it reads the tables as they are.
+Ctrl-C. `qx sql` does not run in demo mode: it reads the tables as they are.
 
 ## Later
 

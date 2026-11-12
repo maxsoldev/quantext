@@ -19,6 +19,8 @@ export interface Ingested {
 export async function ingested(
   names = scenarios().map((s) => s.name),
   prepare?: (root: string) => void,
+  /** Change the written store before it is opened read-only (to move fixtures to other paths). */
+  edit?: (db: SqlDriver) => void,
 ): Promise<Ingested> {
   const root = tempDir("qx-root-");
   const dataDir = tempDir("qx-data-");
@@ -26,6 +28,7 @@ export async function ingested(
   prepare?.(root);
   const store = await openStore({ dataDir });
   const summary = await createIngest({ store, root }).ingestAll();
+  edit?.(store.db);
   store.close();
   if (summary.errors.length > 0) throw new Error(`ingest failed: ${JSON.stringify(summary.errors)}`);
   const db = await openReader(dataDir, { setup: installViews });
