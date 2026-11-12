@@ -46,14 +46,72 @@ describe.each(scenarios)("fixture $version/$scenario", ({ version, scenario }) =
     expect(summariseTranscript(file, readFileSync(join(dir, file), "utf8"))).toEqual(manifest.transcripts[file]);
   });
 
-  test.each(transcripts)("%s: blob and shape hashes match their content", (file) => {
-    const rows = readFileSync(join(dir, file), "utf8")
+  const rowsOf = (file: string) =>
+    readFileSync(join(dir, file), "utf8")
       .split("\n")
       .filter((line) => line !== "")
       .map((line) => JSON.parse(line));
+
+  test("the manifest reports no unresolved tail hashes", () => {
+    expect(manifest.unresolvedTailHashes).toBe(0);
+  });
+
+  test.each(transcripts)("%s: every tail hash names a message, every shape hash a shape", (file) => {
+    const { messages, shapes } = wireIndex(transcripts.flatMap(rowsOf));
+    for (const row of rowsOf(file)) {
+      if (row.type !== "api-request") continue;
+      expect(shapes.has(row.shapeHash), `shape of call ${row.id}`).toBe(true);
+      for (const hash of row.tail) expect(messages.has(hash), `tail of call ${row.id}`).toBe(true);
+    }
+  });
+
+  test.each(transcripts)("%s: each call's base is an earlier call, and keep fits in it", (file) => {
+    const lengths = new Map<string, number>(); // call id -> message count
+    for (const row of rowsOf(file)) {
+      if (row.type !== "api-request") continue;
+      if (row.base === undefined) {
+        expect(row.keep, `call ${row.id} has no base`).toBe(0);
+      } else {
+        expect(lengths.has(row.base), `base of call ${row.id}`).toBe(true);
+        expect(row.keep).toBeLessThanOrEqual(lengths.get(row.base) ?? 0);
+      }
+      lengths.set(row.id, row.keep + row.tail.length);
+    }
+  });
+
+  test.each(transcripts)("%s: blob and shape hashes match their content", (file) => {
+    const rows = rowsOf(file);
     for (const row of rows) {
       if (row.type === "api-request-blob") expect(sha256Sorted(row.message)).toBe(row.hash);
       if (row.type === "api-request-shape") expect(sha256Sorted(row.shape)).toBe(row.shapeHash);
     }
   });
 });
+
+/**
+ * The messages a tail hash may name, by Claude Code's rules (independent of the normaliser): an
+ * `api-request-blob` row; a `user` row (role and content; a string prompt also as one text block); an assistant
+ * message, which is every `assistant` row of one `message.id`, in order.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: transcript rows are untyped JSON in this test
+function wireIndex(rows: any[]): { messages: Set<string>; shapes: Set<string> } {
+  const messages = new Set<string>();
+  const shapes = new Set<string>();
+  const assistant = new Map<string, unknown[]>();
+  for (const row of rows) {
+    if (row.type === "api-request-blob") messages.add(row.hash);
+    if (row.type === "api-request-shape") shapes.add(row.shapeHash);
+    if (row.type === "user" && row.message) {
+      const { role, content } = row.message;
+      messages.add(sha256Sorted({ role, content }));
+      if (typeof content === "string") messages.add(sha256Sorted({ role, content: [{ type: "text", text: content }] }));
+    }
+    if (row.type === "assistant" && row.message) {
+      assistant.set(row.message.id, [...(assistant.get(row.message.id) ?? []), ...row.message.content]);
+    }
+  }
+  for (const content of assistant.values()) {
+    messages.add(sha256Sorted({ role: "assistant", content } as Parameters<typeof sha256Sorted>[0]));
+  }
+  return { messages, shapes };
+}
