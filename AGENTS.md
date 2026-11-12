@@ -30,7 +30,8 @@ quality bar. Decisions that are hard to change are recorded in `docs/adr/`.
 - Well-known packages only, exact versions, lockfile committed. Install scripts are off by default
   (`allowBuilds` in `pnpm-workspace.yaml` lists the few that need them, each with a reason).
 - The engine never makes outbound network calls. The server binds `127.0.0.1`, checks the `Host` header, and sends
-  no CORS headers.
+  no CORS headers. The no-egress guard (`pnpm egress`) checks the built plugin; a new URL or command
+  needs an entry in `scripts/lib/egress-policy.ts` with a reason (SECURITY.md).
 - **Never commit real session data.** Fixtures come only from the scripted dummy repo (`fixtures/README.md`) and must
   pass the personal-data scan. No local paths, user names, account names, emails or keys in the repo.
 
@@ -42,5 +43,6 @@ quality bar. Decisions that are hard to change are recorded in `docs/adr/`.
   (a trade-off, a rejected option, a link to an ADR or a known issue). Leave it out only for trivial commits.
 - **Size:** keep a commit reviewable, as a rule under ~400 changed lines (lockfiles and recorded fixtures do not
   count). A larger commit says in its body why it cannot be split.
-- Every commit passes `pnpm check` (lint, types, tests, layer check, secret scan) on its own. Do not amend or
+- Every commit passes `pnpm check` (lint, types, tests, layer check, secret scan, no-egress guard, supply-chain
+  check) on its own. Do not amend or
   rebase commits that are already pushed.

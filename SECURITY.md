@@ -63,6 +63,44 @@ it does not see native add-ons (there are none). The tripwire works in JavaScrip
 and on Bun it does not reach worker threads (the query worker only reads SQLite; the guard covers it). Node's
 permission model was not used: it has no network switch on Node 22 or 24, and Bun has none.
 
+## How we keep dependencies safe
+
+The plugin ships no third-party package today: the engine, the mod and the viewer are our own code, and the
+engine bundle imports only Node and Bun built-ins. Every dependency is a build or test tool. When the viewer
+bundles React, the same checks cover it. Decision: ADR 28; settings: ADR 7.
+
+| Check | Where | Fails on |
+|---|---|---|
+| `pnpm install --frozen-lockfile` | CI | A package not in the lockfile, or a changed integrity hash |
+| `strictDepBuilds: true`, `allowBuilds: {}` | `pnpm-workspace.yaml` | Any install script (pnpm refuses to install) |
+| `minimumReleaseAge: 1440` | `pnpm-workspace.yaml` | A version less than one day old: the registry and the community get a day to find a hijacked release |
+| `trustPolicy: no-downgrade` | `pnpm-workspace.yaml` | A version with less trust evidence (provenance, signatures) than earlier ones; `trustPolicyExclude` entries need a reason |
+| `blockExoticSubdeps: true`, `saveExact: true` | `pnpm-workspace.yaml` | Git or tarball sub-dependencies; version ranges |
+| `pnpm supply-chain` | `pnpm check` | A lockfile package not from registry.npmjs.org or without sha512 integrity; a weakened setting above; an entry without a reason; an installed package with an install script or `binding.gyp` and no `allowBuilds` entry; a production dependency with a licence off the allowlist |
+| `pnpm audit --prod --audit-level=moderate` | `supply-chain.yml` | A known vulnerability (moderate or worse) in a shipped dependency. Dev ones are reported |
+| OSV-Scanner v2.7.1 | `supply-chain.yml` | Reports known vulnerabilities in the whole lockfile (second database) |
+| `pnpm audit signatures` | `supply-chain.yml` | A package without a valid npm registry signature |
+| Dependency review v5.0.0 | `supply-chain.yml`, PRs | A new dependency with a known vulnerability or a licence off the allowlist (public repo only) |
+| OpenSSF Scorecard v2.5.0 | `scorecard.yml` | Publishes the repo's score (public repo only) |
+| Dependabot | `.github/dependabot.yml` | Proposes updates weekly, grouped, after a one-day cooldown |
+
+`supply-chain.yml` runs on each PR, on push to main, and weekly, so an advisory published after a dependency
+was added is found. Every GitHub Action is pinned by commit SHA, and workflows get `contents: read` only.
+
+**Licence allowlist** (`LICENCE_ALLOWLIST` in `scripts/lib/supply-chain.ts`, and the same list in
+`.github/dependency-review-config.yml`, kept equal by a test): MIT, MIT-0, Apache-2.0, BSD-2-Clause,
+BSD-3-Clause, ISC, 0BSD, BlueOak-1.0.0, CC0-1.0, Unlicense, Python-2.0, CC-BY-4.0. The one exception is
+dev-only: `lightningcss` (MPL-2.0), Vite's CSS tool, which runs at build time and ships nothing.
+`dist/plugin/THIRD_PARTY_NOTICES.md` lists each bundled package with its licence text.
+
+**SBOM.** `pnpm sbom` writes CycloneDX 1.7: `quantext-plugin.cdx.json` (what ships) and
+`quantext-build.cdx.json` (everything, build tools too). CI keeps them as the `sbom` artefact and attaches them
+to each published GitHub release.
+
+**Adding a dependency.** Prefer the platform. If you must: a well-known package, an exact version at least a
+day old, a licence on the list, no install script (else an `allowBuilds` entry with a comment that says why).
+Run `pnpm check` (it runs `pnpm supply-chain` and the no-egress guard).
+
 ## Reporting a vulnerability
 
 Report it privately through GitHub: **Security → Report a vulnerability** on
