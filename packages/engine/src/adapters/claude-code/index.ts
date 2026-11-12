@@ -7,6 +7,7 @@ import { createClaudeCodeParser } from "./parser.ts";
 export type { ClaudeCodeParser, ParseOptions } from "./parser.ts";
 export { createClaudeCodeParser } from "./parser.ts";
 export type { ParserState } from "./state.ts";
+export { claudeCodeRecords } from "./stored.ts";
 
 /** One session's transcripts as text: the main transcript and each subagent transcript (with its meta file). */
 export interface ClaudeCodeTranscripts {
