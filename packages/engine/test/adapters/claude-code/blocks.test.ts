@@ -116,7 +116,7 @@ describe("block kinds and sources", () => {
       ["tool-result", { tool: "Skill", skill: "keybindings-help" }],
       ["reminder", { tool: "Skill", skill: "keybindings-help" }],
     ]);
-    const file = { tool: "Read", filePath: `${REPO}/notes.txt` };
+    const file = { tool: "Read", filePath: `${REPO}/notes.txt`, attachment: "file" };
     expect(blocks.filter((b) => b.kind === "reminder" && b.source.filePath !== undefined).map((b) => b.source)).toEqual(
       [file, file],
     );

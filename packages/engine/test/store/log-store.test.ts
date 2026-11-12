@@ -1,6 +1,6 @@
 import type { SessionDelta } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
-import { claudeCodeRecords, createClaudeCodeParser } from "../../src/adapters/claude-code/index.ts";
+import { claudeCodeCodec, createClaudeCodeParser } from "../../src/adapters/claude-code/index.ts";
 import { emptyGraph, mergeDelta } from "../../src/core/graph.ts";
 import type { LogStore, Store } from "../../src/store/index.ts";
 import { openStore } from "../../src/store/index.ts";
@@ -14,7 +14,7 @@ async function open(dataDir = tempDir()): Promise<Store> {
   return store;
 }
 
-const logOf = (store: Store, path = "/logs/a.jsonl"): LogStore => store.log(path, "claude-code", claudeCodeRecords);
+const logOf = (store: Store, path = "/logs/a.jsonl"): LogStore => store.log(path, "claude-code", claudeCodeCodec);
 
 describe.each(scenarios())("a log of $version/$name in the store", ({ name }) => {
   const input = transcriptsOf(name);
@@ -132,6 +132,58 @@ describe("writing to a log", () => {
       ],
       unreadable: ["main:1", "main:2", "main:3"].map((at) => ({ at, reason: "not JSON" })),
     });
+  });
+});
+
+describe("the store keeps content small", () => {
+  test("images as decoded bytes once in media, tool input by its Block, and no display text", async () => {
+    const store = await open();
+    const log = logOf(store);
+    const deltas = deltasOf(transcriptsOf("image"));
+    log.write({ deltas });
+    const media = store.db.prepare("SELECT media_type, bytes FROM media").all();
+    expect(media.map((m) => m.media_type)).toEqual(["image/png"]);
+    const base64 = Buffer.from(media[0]?.bytes as Uint8Array).toString("base64");
+    const holding = store.db.prepare("SELECT count(*) AS n FROM blocks WHERE instr(content, ?) > 0").get(base64);
+    expect(holding).toEqual({ n: 0 });
+    const inputs = store.db.prepare("SELECT input, block_hash FROM tool_calls").all();
+    expect(inputs.length).toBeGreaterThan(0);
+    expect(inputs.every((r) => r.input === null && r.block_hash !== null)).toBe(true);
+    const columns = store.db
+      .prepare("SELECT name FROM pragma_table_info('blocks')")
+      .all()
+      .map((r) => r.name);
+    expect(columns).toEqual(["hash", "content"]);
+    expect(normal(log.graph())).toEqual(normal(deltas.reduce(mergeDelta, emptyGraph())));
+  });
+
+  test("keeps each log's own kind and source of a Block that two logs share", async () => {
+    const store = await open();
+    const block = { hash: "b1", kind: "user" as const, source: {}, text: "hi", content: { type: "text", text: "hi" } };
+    const delta = (kind: "user" | "reminder") => ({ ...emptyGraph(), records: [], blocks: [{ ...block, kind }] });
+    const a = logOf(store, "/logs/a.jsonl");
+    const b = logOf(store, "/logs/b.jsonl");
+    a.write({ deltas: [delta("user")] });
+    b.write({ deltas: [delta("reminder")] });
+    expect(a.graph().blocks.map((x) => x.kind)).toEqual(["user"]);
+    expect(b.graph().blocks.map((x) => x.kind)).toEqual(["reminder"]);
+    expect(store.db.prepare("SELECT count(*) AS n FROM blocks").get()).toEqual({ n: 1 });
+  });
+});
+
+describe("a log written by another adapter version", () => {
+  test("is emptied when opened, to be read again from the start", async () => {
+    const store = await open();
+    const old = store.log("/logs/a.jsonl", "claude-code", { ...claudeCodeCodec, version: claudeCodeCodec.version - 1 });
+    old.write({
+      deltas: deltasOf(transcriptsOf("basic-tools")),
+      snapshot: { version: 1 },
+      files: [{ path: "/logs/a.jsonl", transcript: "main", kind: "transcript", size: 9, offset: 9 }],
+    });
+    const now = logOf(store);
+    expect(now.graph()).toEqual(emptyGraph());
+    expect(now.files()).toEqual([]);
+    expect(now.snapshot()).toBeUndefined();
   });
 });
 

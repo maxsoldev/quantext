@@ -103,6 +103,45 @@ describe("a message missing from the log", () => {
       },
     });
 
+  test("that comes after its gap was placed fills it from the next Call on, and the gapped Call says so", () => {
+    const late: Json[] = [{ type: "text", text: "The late message." }];
+    let rows = shapeRow + user + step(0, 0, [wire("user", prompt)]) + step(1, 1, ["late-hash"]);
+    for (let i = 2; i < 10; i++) {
+      if (i === 5)
+        rows += line({
+          type: "api-request-blob",
+          sessionId: S,
+          hash: "late-hash",
+          message: { role: "user", content: late },
+        });
+      rows += step(i, i, [wire("assistant", [{ type: "text", text: `Reply ${i - 1}.` }])]);
+    }
+    const graph = parseClaudeCodeSession({ main: rows, subagents: [] });
+    const gaps = (index: number) =>
+      graph.callBlocks.filter(
+        (r) =>
+          r.firstCall <= index &&
+          (r.lastCall ?? Infinity) >= index &&
+          graph.blocks.find((b) => b.hash === r.blockHash)?.kind === "gap",
+      ).length;
+    expect([1, 2, 3, 4, 5, 6, 9].map(gaps)).toEqual([1, 1, 1, 1, 0, 0, 0]);
+    const lateText = graph.blocks.find((b) => b.text === "The late message.");
+    expect(graph.callBlocks.some((r) => r.blockHash === lateText?.hash && r.firstCall === 5)).toBe(true);
+    expect(graph.calls[1]?.issues.map((i) => i.detail)).toEqual([
+      "message late-hash came after this call was split: Calls from index 5 on have it",
+      "message late-hash is not in the log",
+    ]);
+    expect(graph.calls.slice(2).flatMap((c) => c.issues)).toEqual([]);
+    const store = new MemoryStore();
+    let parser = createClaudeCodeParser(undefined, { lookup: store });
+    for (const row of rows.split("\n").filter((l) => l !== "")) {
+      store.apply(parser.push(`${row}\n`));
+      parser = createClaudeCodeParser(JSON.parse(JSON.stringify(parser.snapshot())), { lookup: store });
+    }
+    expect(store.graph().calls.map((c) => c.issues)).toEqual(graph.calls.map((c) => c.issues));
+    expect(store.graph().callBlocks.length).toBe(graph.callBlocks.length);
+  });
+
   test("does not make the rest of the lane unresolved: one gap, one flagged Call", () => {
     let rows = shapeRow + user + step(0, 0, [wire("user", prompt)]) + step(1, 1, ["not-in-the-log"]);
     let keep = 2;

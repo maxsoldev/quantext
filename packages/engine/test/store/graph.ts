@@ -17,7 +17,12 @@ export function normal(graph: SessionGraph): SessionGraph {
     toolCalls: [...graph.toolCalls].sort(by((t) => t.id)),
     compactions: [...graph.compactions].sort(by((c) => c.id)),
     events: [...graph.events].sort(by((e) => e.id)),
-    report: graph.report,
+    // Which kind was seen first depends on how the transcripts of a log were interleaved: compare the counts only.
+    report: {
+      ...graph.report,
+      unknownRecords: [...graph.report.unknownRecords].sort(by((k) => k.kind)),
+      ignoredRecords: [...graph.report.ignoredRecords].sort(by((k) => k.kind)),
+    },
   };
 }
 

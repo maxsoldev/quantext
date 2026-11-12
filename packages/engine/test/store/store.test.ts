@@ -32,10 +32,12 @@ describe("opening the store", () => {
       "ingest_files",
       "log_blocks",
       "logs",
+      "media",
       "messages",
       "records",
       "report_kinds",
       "report_unreadable",
+      "scan_issues",
       "schema_version",
       "session_events",
       "sessions",
@@ -47,7 +49,9 @@ describe("opening the store", () => {
   test("keeps the schema and its data when opened again", async () => {
     const dir = tempDir();
     const first = await openStore({ dataDir: dir });
-    first.db.prepare("INSERT INTO logs (path, harness) VALUES (?, ?)").run("/a.jsonl", "claude-code");
+    first.db
+      .prepare("INSERT INTO logs (path, harness, adapter_version) VALUES (?, ?, 1)")
+      .run("/a.jsonl", "claude-code");
     first.close();
     const again = await open(dir);
     expect(again.schemaVersion).toBe(SCHEMA_VERSION);
@@ -62,7 +66,7 @@ describe("opening the store", () => {
     await expect(openStore({ dataDir: dir })).rejects.toThrow(/schema version 99 is newer than this engine/);
   });
 
-  test("finds the open runs of a lane through the interval index", async () => {
+  test("finds the open runs of a lane through the runs' key, which is their interval", async () => {
     const store = await open(tempDir());
     const plan = store.db
       .prepare(
@@ -70,10 +74,10 @@ describe("opening the store", () => {
       )
       .all(1, "s", "l")
       .map((r) => String(r.detail));
-    expect(plan.join("\n")).toMatch(/USING (COVERING )?INDEX call_blocks_interval/);
+    expect(plan.join("\n")).toMatch(/USING PRIMARY KEY \(log=\? AND session_id=\? AND lane=\?\)/);
   });
 
-  test("finds 'context at call N' through the interval index on the runs", async () => {
+  test("finds 'context at call N' through the runs' key (log, session, lane, first call, position)", async () => {
     const store = await open(tempDir());
     const plan = store.db
       .prepare(
@@ -82,8 +86,32 @@ describe("opening the store", () => {
       )
       .all(1, "s", "l", 5, 5)
       .map((r) => String(r.detail));
-    expect(plan.join("\n")).toMatch(/USING (COVERING )?INDEX call_blocks_interval/);
+    expect(plan.join("\n")).toMatch(/USING PRIMARY KEY \(log=\? AND session_id=\? AND lane=\? AND first_call<\?\)/);
   });
+});
+
+test("tables with a natural key have no rowid", async () => {
+  const store = await open(tempDir());
+  const without = store.db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND sql LIKE '%WITHOUT ROWID%' ORDER BY name")
+    .all()
+    .map((r) => r.name);
+  expect(without).toEqual([
+    "call_blocks",
+    "calls",
+    "compactions",
+    "ingest_files",
+    "log_blocks",
+    "messages",
+    "records",
+    "report_kinds",
+    "report_unreadable",
+    "scan_issues",
+    "session_events",
+    "sessions",
+    "shapes",
+    "tool_calls",
+  ]);
 });
 
 describe("the writer lock", () => {

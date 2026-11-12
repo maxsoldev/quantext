@@ -5,9 +5,9 @@
  */
 import type { FileHandle } from "node:fs/promises";
 import { open, readFile } from "node:fs/promises";
-import type { JsonValue } from "@quantext/shared";
+import type { JsonValue, StoreCodec } from "@quantext/shared";
 import type { ClaudeCodeParser, ParserState } from "../adapters/claude-code/index.ts";
-import { claudeCodeRecords, createClaudeCodeParser } from "../adapters/claude-code/index.ts";
+import { claudeCodeCodec, createClaudeCodeParser } from "../adapters/claude-code/index.ts";
 import type { FileMark, LogStore, Store, WriteResult } from "../store/index.ts";
 import type { LogFiles, PathError } from "./discover.ts";
 import { describe, discoverLogs, logFiles, logOf } from "./discover.ts";
@@ -30,12 +30,18 @@ interface Warm {
 interface Limits {
   batchBytes: number;
   restoreBytes: number;
+  maxLineBytes: number;
 }
+
+/** The longest line read; the parser reports a longer line as unreadable anyway (64 Mi characters). */
+export const DEFAULT_MAX_LINE_BYTES = 64 * 1024 * 1024;
 
 export interface IngestOptions {
   store: Store;
   /** The Claude Code config folder (`~/.claude`, or `CLAUDE_CONFIG_DIR`): transcripts are under `projects/`. */
   root: string;
+  /** How the adapter's data maps to the store; the Claude Code codec by default. */
+  codec?: StoreCodec;
   /** About this many bytes are read, parsed and written per transaction. */
   batchBytes?: number;
   /**
@@ -43,6 +49,8 @@ export interface IngestOptions {
    * file does not keep its whole content in memory. Each log's pass also starts from the snapshot.
    */
   restoreBytes?: number;
+  /** A line longer than this is skipped and reported, so that one huge line cannot fill memory. */
+  maxLineBytes?: number;
 }
 
 /** Calls that one write added or updated in one Session of a log (the main transcript's path). */
@@ -84,9 +92,11 @@ export interface Ingest {
 
 export function createIngest(options: IngestOptions): Ingest {
   const { store, root } = options;
+  const codec = options.codec ?? claudeCodeCodec;
   const limits: Limits = {
     batchBytes: options.batchBytes ?? DEFAULT_BATCH_BYTES,
     restoreBytes: options.restoreBytes ?? DEFAULT_RESTORE_BYTES,
+    maxLineBytes: options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES,
   };
   const listeners = new Set<(event: CallsEvent) => void>();
   /** The parsers of the logs read last, oldest first: a live log is read on without a restore. */
@@ -125,7 +135,7 @@ export function createIngest(options: IngestOptions): Ingest {
       stopped: false,
     };
     for (const files of logs) {
-      const log = store.log(files.main, HARNESS, claudeCodeRecords);
+      const log = store.log(files.main, HARNESS, codec);
       try {
         if (signal?.aborted) {
           summary.stopped = true;
@@ -150,6 +160,10 @@ export function createIngest(options: IngestOptions): Ingest {
     ingestAll: (run = {}) =>
       serial(async () => {
         const found = await discoverLogs(root);
+        store.setScanIssues([
+          ...found.errors.map((e) => ({ path: e.path, issue: e.error })),
+          ...found.links.map((path) => ({ path, issue: "a symbolic link; not followed" })),
+        ]);
         return pass(found.logs, found.errors, run.signal);
       }),
     ingestPaths: (paths, run = {}) =>
@@ -256,9 +270,15 @@ async function ingestLog(
       let offset = old?.offset ?? 0;
       let print = old?.fingerprint;
       let read = false;
-      for await (const piece of completeLines(entry.handle, offset, stat.size, limits.batchBytes)) {
+      const pieces = completeLines(entry.handle, offset, stat.size, limits.batchBytes, limits.maxLineBytes);
+      for await (const piece of pieces) {
         if (signal?.aborted) break;
-        const delta = parserNow().push(piece.text, entry.transcript);
+        // A skipped line is an empty line to the parser (so later lines keep their numbers), and is reported.
+        const delta = parserNow().push("text" in piece ? piece.text : "\n", entry.transcript);
+        if ("skipped" in piece) {
+          const reason = `line is longer than ${limits.maxLineBytes} bytes; skipped`;
+          delta.report.unreadable.push({ at: `${entry.transcript}@${piece.start}`, reason });
+        }
         const bytes = piece.end - offset;
         summary.bytes += bytes;
         offset = piece.end;

@@ -145,7 +145,8 @@ export interface Call {
 /**
  * A flag on a Call. `no-request`: the harness version logs no request, only the response's usage, so the Call has
  * exact usage and cost but no Blocks. `missing-message`: a message of the request is not in the log; a gap Block
- * stands in its place and takes the tokens the other Blocks leave. `unresolved-request`: part of the request is not in the log, so the rebuilt input is
+ * stands in its place and takes the tokens the other Blocks leave. `derived-usage-invalid`: the running totals give
+ * a summarising Call an input of 0 or less, so it has no Usage. `unresolved-request`: part of the request is not in the log, so the rebuilt input is
  * incomplete. `no-usage`: the log holds no Usage, so the Call has no exact total. `unreconciled-tokens`: the exact
  * change from the previous Call does not fit the new Blocks, so the whole total is split by estimate. `no-price`:
  * there is no list price for the model, so the Call has no cost. `price-assumption`: the cost rests on an
@@ -156,6 +157,7 @@ export interface CallIssue {
   kind:
     | "no-request"
     | "missing-message"
+    | "derived-usage-invalid"
     | "unresolved-request"
     | "no-usage"
     | "unreconciled-tokens"
@@ -193,6 +195,8 @@ export interface BlockSource {
   mcpServer?: string;
   /** The skill whose text or call this is. */
   skill?: string;
+  /** The kind of context the harness attached, in its own words (a file, a skill listing, session context, …). */
+  attachment?: string;
 }
 
 /** One unique piece of content sent to the model, identified by the hash of its content. */
@@ -243,6 +247,8 @@ export interface ToolCall {
   name: string;
   input: JsonValue;
   source: BlockSource;
+  /** The Block of the tool use in the response, which holds the input. */
+  blockHash?: string;
   /** The Block that holds the result, once a later Call sends it. */
   resultBlockHash?: string;
   isError: boolean;
@@ -310,10 +316,27 @@ export type StoredRecord =
   | { kind: "shape"; key: string; tools: ContentPart[]; system: ContentPart[] }
   | { kind: "value"; key: string; value: JsonValue };
 
-/** How an adapter's records map to StoredRecords and back: `unpack(pack(r))` equals `r.value`. */
-export interface RecordCodec {
+/** Binary data taken out of content (a base64 image or document), decoded, stored once by the hash of its bytes. */
+export interface Media {
+  hash: string;
+  mediaType: string;
+  bytes: Uint8Array;
+}
+
+/**
+ * How an adapter's data maps to the store and back. `unpack(pack(r))` equals `r.value`, and
+ * `unpackContent(packContent(c).content, …)` equals `c`.
+ */
+export interface StoreCodec {
+  /** Changes when the adapter reads a log differently: the store empties a log of another version, to read it again. */
+  version: number;
   pack(record: AdapterRecord): StoredRecord;
   unpack(stored: StoredRecord): JsonValue;
+  /** Content with its large binary parts taken out as Media; the content names them by hash. */
+  packContent(content: JsonValue): { content: JsonValue; media: Media[] };
+  unpackContent(content: JsonValue, media: (hash: string) => Uint8Array): JsonValue;
+  /** A Block's display text, from its content (the same text the adapter gives the Block). */
+  text(content: JsonValue): string;
 }
 
 /**

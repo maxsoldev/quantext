@@ -24,6 +24,17 @@ describe("a manual compaction", () => {
     ]);
   });
 
+  test("starts the layout of its lane again: the next Call keeps nothing from before the compaction", () => {
+    const next = graph.calls[4];
+    const runs = graph.callBlocks.filter(
+      (r) =>
+        r.lane === next?.lane && r.firstCall <= (next?.index ?? 0) && (r.lastCall ?? Infinity) >= (next?.index ?? 0),
+    );
+    expect(runs.length).toBeGreaterThan(0);
+    expect(runs.every((r) => r.firstCall === next?.index)).toBe(true);
+    expect(next?.issues).toEqual([]);
+  });
+
   test("has a summarising Call in log order, with usage derived from the running totals", () => {
     expect(graph.calls.map((c) => c.usage?.basis)).toEqual(["exact", "exact", "exact", "derived", "exact"]);
     expect(summary).toMatchObject({
@@ -66,5 +77,35 @@ describe("a manual compaction", () => {
       kind: "unreconciled-tokens",
       detail: "derived input 18715 is less than the 99999 tokens of context before the compaction",
     });
+  });
+
+  /** The compaction scenario with the input counters of the running total after it changed by `delta`. */
+  const withInputChange = (delta: (before: number) => number) => {
+    const lines = transcriptsOf("compaction").main.split("\n");
+    const costs = lines.flatMap((l, i) => (l.includes('"type":"cost-state"') ? [i] : []));
+    const [beforeAt, afterAt] = [costs[0] ?? 0, costs[1] ?? 0];
+    const before = JSON.parse(lines[beforeAt] ?? "{}");
+    const after = JSON.parse(lines[afterAt] ?? "{}");
+    for (const [model, totals] of Object.entries(after.modelUsage as Record<string, Record<string, number>>)) {
+      const old = before.modelUsage[model] as Record<string, number>;
+      for (const key of ["inputTokens", "cacheReadInputTokens", "cacheCreationInputTokens"]) {
+        totals[key] = delta(old[key] ?? 0);
+      }
+      totals.cacheCreationEphemeral5mInputTokens = totals.cacheCreationInputTokens ?? 0;
+    }
+    lines[afterAt] = JSON.stringify(after);
+    const graph = parseClaudeCodeSession({ main: lines.join("\n"), subagents: [] });
+    return graph.calls.find((c) => c.id === graph.compactions[0]?.summaryCallId);
+  };
+
+  test.each([
+    ["zero", (b: number) => b],
+    ["negative", (b: number) => Math.max(0, b - 500)],
+  ])("gets no usage and no cost when its derived input is %s, and says why", (_, delta) => {
+    const call = withInputChange(delta);
+    expect(call?.usage).toBeUndefined();
+    expect(call?.cost).toBeUndefined();
+    expect(call?.issues.map((i) => i.kind)).toEqual(["derived-usage-invalid", "unresolved-request"]);
+    expect(call?.issues[0]?.detail).toMatch(/^the running totals give an input of -?\d+ tokens/);
   });
 });

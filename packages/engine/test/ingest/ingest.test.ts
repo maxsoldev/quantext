@@ -1,16 +1,19 @@
 import {
   appendFileSync,
   chmodSync,
+  mkdirSync,
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
+  symlinkSync,
   truncateSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { claudeCodeRecords } from "../../src/adapters/claude-code/index.ts";
+import { claudeCodeCodec } from "../../src/adapters/claude-code/index.ts";
 import type { CallsEvent, Ingest } from "../../src/ingest/index.ts";
 import { createIngest } from "../../src/ingest/index.ts";
 import type { LogStore, Store } from "../../src/store/index.ts";
@@ -47,7 +50,7 @@ async function setup(
   return { root, dataDir, store, ingest, events };
 }
 
-const graphOf = (store: Store, main: string) => normal(store.log(main, "claude-code", claudeCodeRecords).graph());
+const graphOf = (store: Store, main: string) => normal(store.log(main, "claude-code", claudeCodeCodec).graph());
 
 function rowCounts(store: Store): Record<string, number> {
   const tables = store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
@@ -119,9 +122,27 @@ test("logs that share content (one system prompt, one tool set) each give the gr
   const all = scenarios().map(({ name }) => copyScenario(s.root, name));
   await s.ingest.ingestAll();
   for (const files of all) expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
-  const stored = Number(s.store.db.prepare("SELECT count(*) AS n FROM blocks WHERE kind IS NOT NULL").get()?.n);
+  const stored = Number(s.store.db.prepare("SELECT count(DISTINCT hash) AS n FROM log_blocks").get()?.n);
   const reported = all.reduce((n, files) => n + graphOf(s.store, files.main).blocks.length, 0);
   expect(stored).toBeLessThan(reported); // shared Blocks are stored once
+});
+
+test("a new adapter version reads every log again from the start", async () => {
+  const s = await setup();
+  const files = copyScenario(s.root, "basic-tools");
+  await s.ingest.ingestAll();
+  const next = createIngest({
+    store: s.store,
+    root: s.root,
+    codec: { ...claudeCodeCodec, version: claudeCodeCodec.version + 1 },
+  });
+  const summary = await next.ingestAll();
+  expect(summary.bytes).toBe(readFileSync(files.main).length);
+  expect(
+    normal(
+      s.store.log(files.main, "claude-code", { ...claudeCodeCodec, version: claudeCodeCodec.version + 1 }).graph(),
+    ),
+  ).toEqual(expectedScenario(files));
 });
 
 describe("reading again", () => {
@@ -339,6 +360,32 @@ describe("a partial last line", () => {
   });
 });
 
+describe("a line longer than the limit", () => {
+  test("is skipped and reported, and the lines after it are read with their own numbers", async () => {
+    const root = tempDir("qx-root-");
+    const store = await openStore({ dataDir: tempDir("qx-data-") });
+    onCleanup(() => store.close());
+    const ingest = createIngest({ store, root, batchBytes: 1024, maxLineBytes: 4096 });
+    const main = join(root, "projects", "-p", "00000000-0000-4000-8000-00000000abcd.jsonl");
+    const row = (i: number) => JSON.stringify({ type: "attachment", sessionId: "s", n: i });
+    const lines = [
+      ...Array.from({ length: 40 }, (_, i) => row(i)),
+      JSON.stringify({ type: "mode", sessionId: "s", text: "x".repeat(10_000) }),
+      ...Array.from({ length: 40 }, (_, i) => row(40 + i)),
+      "{not json",
+      "",
+    ];
+    writeText(main, lines.join("\n"));
+    await ingest.ingestAll();
+    const start = Buffer.byteLength(`${lines.slice(0, 40).join("\n")}\n`);
+    expect(store.report().unreadable).toEqual([
+      { log: main, at: `main@${start}`, reason: "line is longer than 4096 bytes; skipped" },
+      { log: main, at: "main:82", reason: expect.stringMatching(/^not JSON/) },
+    ]);
+    expect(graphOf(store, main).report.ignoredRecords).toEqual([{ kind: "attachment", count: 80 }]);
+  });
+});
+
 describe("subagents", () => {
   test("that appear after the main transcript was read are linked to it", async () => {
     const s = await setup();
@@ -423,6 +470,34 @@ describe("errors", () => {
     expect(s.store.report().errors).toEqual([]);
     expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
   });
+
+  test.skipIf(process.getuid?.() === 0)(
+    "symbolic links (not followed) and folders that cannot be read are kept in the report until a scan finds them gone",
+    async () => {
+      const s = await setup();
+      const files = copyScenario(s.root, "basic-tools");
+      const link = join(s.root, "projects", "-linked", "00000000-0000-4000-8000-00000000aaaa.jsonl");
+      writeText(join(s.root, "elsewhere.jsonl"), "");
+      mkdirSync(join(link, ".."), { recursive: true });
+      symlinkSync(join(s.root, "elsewhere.jsonl"), link);
+      const closed = join(s.root, "projects", "-closed");
+      mkdirSync(closed);
+      chmodSync(closed, 0o000);
+      onCleanup(() => chmodSync(closed, 0o755));
+      const summary = await s.ingest.ingestAll();
+      const scan = [
+        { path: closed, issue: expect.stringMatching(/EACCES/) },
+        { path: link, issue: "a symbolic link; not followed" },
+      ];
+      expect(s.store.report().scan).toEqual(scan);
+      expect(summary.errors).toEqual([{ path: closed, error: expect.stringMatching(/EACCES/) }]);
+      chmodSync(closed, 0o755);
+      rmSync(link);
+      await s.ingest.ingestAll();
+      expect(s.store.report().scan).toEqual([]);
+      expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
+    },
+  );
 
   test("unknown row types are counted in the report", async () => {
     const s = await setup();

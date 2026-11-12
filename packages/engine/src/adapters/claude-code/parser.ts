@@ -20,7 +20,7 @@ import { estimateBlock } from "../../providers/anthropic/estimate.ts";
 import { canonicalModel } from "../../providers/anthropic/pricing.ts";
 import { Changes } from "./changes.ts";
 import type { Classifier } from "./classify.ts";
-import { createClassifier, textHash, toolSource } from "./classify.ts";
+import { attachedTextHash, blockHash, createClassifier, textHash, toolSource } from "./classify.ts";
 import type { Json, JsonObject } from "./json.ts";
 import { arr, num, obj, str } from "./json.ts";
 import { laneOf, splitCall } from "./lane.ts";
@@ -30,7 +30,7 @@ import { get, put } from "./records.ts";
 import type { Row } from "./rows.ts";
 import { countIgnored, countUnknown, readLine } from "./rows.ts";
 import type { CallSpec, Lane, ParserState, TranscriptState, UsageSum } from "./state.ts";
-import { emptyState } from "./state.ts";
+import { emptyState, STATE_VERSION } from "./state.ts";
 import { addAssistantRow, addBlob, addUserRow, blocksOf, resolve } from "./wire.ts";
 
 export interface ParseOptions {
@@ -61,6 +61,8 @@ export const HARNESS = "claude-code";
 
 /** Rows that can bring a missing part of a waiting request. */
 const WIRE_ROWS = new Set(["api-request-blob", "api-request-shape", "api-request", "user", "assistant"]);
+/** Attached texts remembered until a Block with that text is classified, newest first. */
+const MAX_ATTACHMENTS = 64;
 /** Open ToolCalls kept in the snapshot, newest first. */
 const MAX_OPEN_TOOL_CALLS = 64;
 /** Calls kept waiting for a missing part; older ones stay unresolved. */
@@ -70,6 +72,11 @@ export function createClaudeCodeParser(
   state: ParserState = emptyState(),
   options: ParseOptions = {},
 ): ClaudeCodeParser {
+  if (state.version !== STATE_VERSION) {
+    throw new Error(
+      `a parser snapshot version ${String(state.version)} cannot be restored (this parser: ${STATE_VERSION})`,
+    );
+  }
   const estimator = options.estimator ?? estimateBlock;
   let changes = new Changes();
   const store = new Content(state, options.lookup ?? NO_LOOKUP, (record) => changes.records.set(record.key, record));
@@ -263,6 +270,9 @@ class Rows {
       case "cost-state":
         this.costState(data);
         break;
+      case "attachment":
+        this.attachment(data);
+        break;
       case "ai-title":
       case "custom-title":
       case "agent-name":
@@ -283,6 +293,28 @@ class Rows {
         countIgnored(this.changes().report, row.type); // known rows that hold nothing for the domain
         break;
     }
+  }
+
+  /**
+   * The texts an attachment row says the harness rendered: a Block with exactly that text gets the attachment as
+   * its source when it is classified. A row that renders nothing holds nothing for the domain.
+   */
+  private attachment(data: JsonObject): void {
+    const attachment = obj(data.attachment);
+    const parts = (arr(data.rendered) ?? []).flatMap((p) => str(obj(p)?.content) ?? []);
+    const type = str(attachment?.type);
+    if (type === undefined || parts.length === 0) {
+      countIgnored(this.changes().report, "attachment");
+      return;
+    }
+    const path = str(attachment?.filename) ?? str(attachment?.path);
+    for (const text of parts) {
+      const hash = attachedTextHash(text);
+      delete this.state.attachments[hash]; // newest last
+      put(this.state.attachments, hash, path === undefined ? { type } : { type, path });
+    }
+    const hashes = Object.keys(this.state.attachments);
+    for (const old of hashes.slice(0, Math.max(0, hashes.length - MAX_ATTACHMENTS))) delete this.state.attachments[old];
   }
 
   /** A title (the user's own wins over the harness's) or an agent name for the Session. */
@@ -606,6 +638,7 @@ class Rows {
         callId,
         name,
         input,
+        blockHash: blockHash("assistant", raw ?? null),
         source: toolSource(name, obj(input)),
         isError: false,
         parallel: 1,
@@ -679,6 +712,10 @@ class Rows {
     if (before !== undefined) compaction.beforeTokens = before;
     if (after !== undefined) compaction.afterTokens = after;
     if (this.t.lastCallId !== undefined) compaction.beforeCallId = this.t.lastCallId;
+    // The context was replaced: the lane's next Call keeps nothing of the layout before (no kept prefix).
+    const last = this.t.lastCallId === undefined ? undefined : this.store.call(this.t.lastCallId);
+    const lane = last === undefined ? undefined : get(this.state.lanes, `${session.id}|${last.lane}`);
+    if (lane !== undefined) delete lane.shapeKey;
     const summary = this.newCall(session.id, `${id}:summary`, ts, "", "compaction");
     summary.issues.push({
       kind: "unresolved-request",
@@ -707,9 +744,14 @@ class Rows {
         call.model = derived.model;
         const canonical = canonicalModel(derived.model);
         if (canonical !== undefined) call.canonicalModel = canonical;
-        setUsage(call, derived.usage);
         const input = derived.usage.inputTokens + derived.usage.cacheReadTokens + derived.usage.cacheWriteTokens;
-        if (open.preTokens !== undefined && input < open.preTokens) {
+        const negative = Object.values(derived.usage).some((v) => typeof v === "number" && v < 0);
+        if (input <= 0 || negative) {
+          // Not a usage: the totals do not account for this call. It must not flow into sums or costs.
+          const detail = `the running totals give an input of ${input} tokens for the summarising call; it has no usage`;
+          call.issues.push({ kind: "derived-usage-invalid", detail });
+        } else setUsage(call, derived.usage);
+        if (call.usage !== undefined && open.preTokens !== undefined && input < open.preTokens) {
           const detail = `derived input ${input} is less than the ${open.preTokens} tokens of context before the compaction`;
           call.issues.push({ kind: "unreconciled-tokens", detail });
         }
@@ -834,6 +876,7 @@ function coldLane(lane: Lane): Lane {
     groupCount: {},
     partial: {},
     deferred: [],
+    gaps: lane.gaps, // positions stay valid: the layout is rebuilt from the same open runs
   };
   if (lane.lastIndex !== undefined) cold.lastIndex = lane.lastIndex;
   if (lane.lastCallId !== undefined) cold.lastCallId = lane.lastCallId;

@@ -16,8 +16,11 @@ import type {
 import type { Estimate } from "../../core/estimate.ts";
 import type { Json, JsonObject } from "./json.ts";
 
+/** The format of ParserState: a snapshot of another version is refused. */
+export const STATE_VERSION = 4;
+
 export interface ParserState {
-  version: 1;
+  version: typeof STATE_VERSION;
   transcripts: Record<string, TranscriptState>;
   /** Every message a `tail` may name, by its hash. */
   messages: Record<string, WireMessage>;
@@ -55,6 +58,8 @@ export interface ParserState {
   /** Hashes of compaction summary texts, and of skill texts with the skill's name. */
   summaries: Record<string, 1>;
   skills: Record<string, string>;
+  /** Texts the harness attached (by text hash), with the attachment's type and file, newest last (bounded). */
+  attachments: Record<string, { type: string; path?: string }>;
   /** Subagents: the tool use that started each agent id; the agent id and meta tool use of each transcript. */
   agentToolUse: Record<string, string>;
   transcriptAgent: Record<string, string>;
@@ -144,11 +149,13 @@ export interface Lane {
   partial: Record<string, 1>;
   /** Deferred tool schemas placed after a tool reference: position, tool name and schema hash. */
   deferred: { position: number; tool: string; hash: string }[];
+  /** Gap Blocks in the layout: position, the missing message's hash, and the Call that got the gap first. */
+  gaps: { position: number; message: string; callId: string }[];
 }
 
 export function emptyState(): ParserState {
   return {
-    version: 1,
+    version: STATE_VERSION,
     transcripts: {},
     messages: {},
     assistant: {},
@@ -171,6 +178,7 @@ export function emptyState(): ParserState {
     compactions: {},
     summaries: {},
     skills: {},
+    attachments: {},
     agentToolUse: {},
     transcriptAgent: {},
     metaToolUse: {},

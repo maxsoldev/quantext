@@ -54,6 +54,7 @@ export function laneOf(state: ParserState, key: string, sessionId: string): Lane
       groupCount: {},
       partial: {},
       deferred: [],
+      gaps: [],
     })
   );
 }
@@ -68,7 +69,8 @@ export function splitCall(ctx: SplitContext, call: Call, spec: CallSpec, usage: 
   if (shape === undefined) return;
   const messages = messagesOf(ctx, spec, lane);
   let shared = lane.shapeKey === shape.key ? commonPrefix(messages, lane.messages) : 0;
-  shared = Math.min(shared, deferredLimit(lane, shape), thinkingLimit(store, lane, messages, call));
+  const filled = filledGaps(store, lane, shared);
+  shared = Math.min(shared, deferredLimit(lane, shape), thinkingLimit(store, lane, messages, call), ...filled.limits);
   const keptPos =
     lane.shapeKey !== shape.key ? 0 : shared === 0 ? shape.refs.length : (lane.messageEnds[shared - 1] ?? 0);
 
@@ -107,6 +109,7 @@ export function splitCall(ctx: SplitContext, call: Call, spec: CallSpec, usage: 
   lane.messages.length = Math.min(lane.messages.length, keptPos === 0 ? 0 : shared);
   lane.messageEnds.length = lane.messages.length;
   if (keptPos === 0) lane.deferred = [];
+  noteFilled(store, changes, filled.gaps, call.index);
   lane.shapeKey = shape.key;
   lane.shapeCount = shape.refs.length;
   appendFresh(lane, fresh, result.fresh, messages, call, changes);
@@ -206,6 +209,29 @@ function commonPrefix(a: readonly string[], b: readonly string[]): number {
   let i = 0;
   while (i < a.length && i < b.length && a[i] === b[i]) i++;
   return i;
+}
+
+/**
+ * Gaps among the kept messages whose message has come to the log since: the kept prefix ends before each, so
+ * this Call gets the message's own Blocks in place of the gap.
+ */
+function filledGaps(store: Content, lane: Lane, shared: number) {
+  const gaps = lane.gaps.filter(
+    (g) => (lane.messageOf[g.position] ?? 0) < shared && store.message(g.message) !== undefined,
+  );
+  return { gaps, limits: gaps.map((g) => lane.messageOf[g.position] ?? 0) };
+}
+
+/** The Call that got a gap first says that its message came later, and from which Call on the lane has it. */
+function noteFilled(store: Content, changes: Changes, gaps: readonly Lane["gaps"][number][], index: number): void {
+  for (const gap of gaps) {
+    const call = store.call(gap.callId);
+    if (call === undefined) continue;
+    const detail = `message ${gap.message} came after this call was split: Calls from index ${index} on have it`;
+    if (call.issues.some((i) => i.detail === detail)) continue;
+    call.issues.push({ kind: "missing-message", detail });
+    changes.calls.add(call.id);
+  }
 }
 
 /** Kept messages must not hold a deferred tool schema that this Call's shape gives differently. */
@@ -369,6 +395,7 @@ function truncate(lane: Lane, keptPos: number, changes: Changes): void {
   lane.prefix.length = keptPos + 1;
   lane.lone.length = keptPos + 1;
   lane.deferred = lane.deferred.filter((d) => d.position < keptPos);
+  lane.gaps = lane.gaps.filter((g) => g.position < keptPos);
 }
 
 function replaceKept(lane: Lane, shares: readonly Share[]): void {
@@ -405,6 +432,8 @@ function appendFresh(
     setShare(lane, p, shares[k] ?? { tokens: 0, basis: "estimate" });
     if (entry.deferredTool !== undefined)
       lane.deferred.push({ position: p, tool: entry.deferredTool, hash: entry.ref.hash });
+    if (entry.ref.kind === "gap")
+      lane.gaps.push({ position: p, message: messages[entry.message] ?? "", callId: call.id });
     openRun(lane, p, call, changes);
     if (entry.section === "messages") lane.messageEnds[entry.message] = p + 1;
   });

@@ -25,6 +25,21 @@ One request from the harness to the model, with the response and its usage. The 
 tokens, thinking, effort, betas) belong to the Call, not to its Shape.
 _Avoid_: turn, request, message, step
 
+**Usage-only Call**:
+A Call whose request the log does not hold, only the response's Usage (harness versions that log no requests):
+it has exact Usage and cost, but no Blocks.
+_Avoid_: partial call, stub
+
+**Request log**:
+Whether the log holds a Session's requests: `present`, `partial` or `absent` (only Usage-only Calls). Without
+it, the context of the Session's Calls cannot be rebuilt.
+_Avoid_: format, legacy mode
+
+**Session event**:
+Something on a Session's timeline besides its Calls: a mode change, a move to another folder, a note of the
+harness, a linked pull request, a link to the Session it went on in or forked from.
+_Avoid_: log entry, activity
+
 **Usage**:
 The token counts that the model provider reports for one Call: input, cache read, cache write and output.
 _Avoid_: token stats, metrics
@@ -53,14 +68,15 @@ _Avoid_: chunk, segment, message, part
 
 **Block kind**:
 What a Block is by its role in the request: a tool schema, a system block, a user text, a reminder, an assistant
-text, reasoning, a tool call, a tool result, an image, a document, or a summary. A **reminder** is text that the
+text, reasoning, a tool call, a tool result, an image, a document, a summary, or a gap. A **reminder** is text that the
 harness adds to a message for the model, not typed by the user: context, notices, an attached file, a skill's text.
-A **summary** is the text that replaces the context after a Compaction.
+A **summary** is the text that replaces the context after a Compaction. A **gap** stands for a message that
+is not in the log: it takes the tokens the other Blocks leave, so later Calls can be rebuilt around it.
 _Avoid_: type (the provider's content block type is a different, finer thing)
 
 **Block source**:
 Where a Block's content came from, as far as the log tells: the tool, the file it read or wrote, the MCP server,
-the skill.
+the skill, the kind of context the harness attached.
 _Avoid_: origin, provenance
 
 **CallBlock**:

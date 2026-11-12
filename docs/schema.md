@@ -1,8 +1,8 @@
 # Store schema (version 1)
 
 The engine keeps everything in one SQLite database, `~/.quantext/quantext.db` (WAL mode). Only the engine writes
-it, under the writer lock `~/.quantext/writer.lock`. The decisions behind this schema are in ADR 19; the domain
-terms are in `GLOSSARY.md`. This file is the reference for the query layer, its SQL views, and agents that use
+it, under the writer lock `~/.quantext/writer.lock` (an OS file lock, ADR 22). The decisions behind this schema
+are in ADR 19 and ADR 20; the domain terms are in `GLOSSARY.md`. This file is the reference for the query layer, its SQL views, and agents that use
 `qx sql`.
 
 ## Conventions
@@ -14,6 +14,8 @@ terms are in `GLOSSARY.md`. This file is the reference for the query layer, its 
   open run).
 - **JSON columns are text.** Read them with `json_each` and `->>`.
 - **Positions and indexes are 0-based.** `calls.idx` is the Call's position in its Session.
+- **Hashes are hex text**, so that they can be read and pasted (binary hashes: see "Later").
+- **Tables with a natural key have no rowid** (`WITHOUT ROWID`); only `blocks` and `media` keep one.
 
 ## Tables
 
@@ -28,6 +30,7 @@ One row: `version`, the schema version of the database.
 | `id` | The log's key, used by every other table |
 | `path` | The path of the main transcript |
 | `harness` | `claude-code` |
+| `adapter_version` | The adapter version that wrote the log; a log of another version is emptied and read again |
 | `snapshot` | The parser's snapshot after the last write (JSON): the open frontier only |
 
 ### `ingest_files`
@@ -42,14 +45,16 @@ One row per file of a log that ingest has looked at.
 | `kind` | `transcript` or `meta` (a subagent's `.meta.json`) |
 | `file_id` | `device:inode`; another value at the same path means the file was replaced |
 | `size`, `mtime_ms` | As last seen |
-| `byte_offset` | Bytes read: up to the end of the last complete line. `size - byte_offset` bytes wait for a newline |
+| `byte_offset` | Bytes read: up to the end of the last complete line. `size - byte_offset` bytes wait for a newline. While a read is not at the end of the file yet, `size` is `byte_offset` |
 | `fingerprint` | A hash of the first 4 KiB and of the 1 KiB before `byte_offset`, to see a file rewritten in place |
 | `error` | Why the file could not be read the last time, else NULL |
 
 ### `sessions`
 
 `log`, `id`, `parent_id` (the Session that started a subagent), `harness`, `harness_version`, `project`, `cwd`,
-`started`, `ended` (ISO 8601).
+`started`, `ended` (ISO 8601), `request_log` (`present`: every Call's request is logged; `absent`: the harness
+version logs only usage, so its Calls are usage-only and have no Blocks; `partial`: both), `title` and
+`title_source` (`user`: the user's own title; `harness`: one the harness made), `agent_name`.
 
 ### `calls`
 
@@ -72,29 +77,31 @@ One row per file of a log that ingest has looked at.
 | `cache_breakpoints` | JSON list of the positions that carry a cache breakpoint |
 | `cache_boundary_tokens`, `cache_boundary_position` | The Cached prefix: cache read tokens, and the number of leading Blocks wholly inside it |
 | `framing_tokens` | Input tokens after the last Block; the Call's runs plus these add up to its input total |
-| `issues` | JSON list of `{kind, detail}`: `unresolved-request`, `no-usage`, `unreconciled-tokens`, `no-price`, `price-assumption`, `estimate-clamped` |
+| `issues` | JSON list of `{kind, detail}`, sorted by kind and detail: `no-request` (a usage-only Call), `missing-message` (a gap Block stands for a message, or the message came after the Call was split), `derived-usage-invalid` (a summarising Call whose derived input is 0 or less: it has no usage), `unresolved-request`, `no-usage`, `unreconciled-tokens`, `no-price`, `price-assumption`, `estimate-clamped` |
+| `turn_duration_ms` | On the last Call of a turn: how long the turn took |
 
 ### `blocks`
 
-One row per unique content block, for all logs (keyed by hash only).
+One row per unique content block, for all logs: `hash` (the Block hash) and `content` (the content block as sent
+to the provider, JSON). Long base64 data in it (images, documents) is replaced by `{"$media": "<hash>"}`, and
+its bytes are in `media`. A content block that no Call has used yet is only here, not in `log_blocks`.
 
-| Column | Meaning |
-|---|---|
-| `hash` | The Block hash |
-| `content` | The content block as sent to the provider (JSON) |
-| `kind` | The Block kind; NULL while no Call has used the content (it is only part of a message so far) |
-| `tool`, `file_path`, `mcp_server`, `skill` | The Block source |
-| `text` | Plain text for display |
+### `media`
 
-Two logs with the same content share the row; its kind and source come from the first log that reported it.
+`hash` (sha256 of the bytes), `media_type`, `bytes` (BLOB, decoded): each image or document once, for all logs.
 
 ### `log_blocks`
 
-`(log, hash)`: the Blocks a log reported. A log's Blocks are `blocks` joined with `log_blocks` on its id.
+The Blocks a log reported, with that log's classification: `(log, hash)`, `kind` (the Block kind, also `gap`:
+a stand-in for a message that is not in the log), and the Block source `tool`, `file_path`, `mcp_server`,
+`skill`, `attachment` (the kind of context the harness attached, in its own words, when an attachment row
+rendered exactly this text: `file`, `skill_listing`, `session_context`, …). The display text of a Block is not
+stored: the engine derives it from the content.
 
 ### `call_blocks`
 
 One row per CallBlock run: one Block at one position over consecutive Calls of one lane, with the same tokens.
+The primary key is `(log, session_id, lane, first_call, position)`: there is one Block per position per Call.
 
 | Column | Meaning |
 |---|---|
@@ -107,11 +114,13 @@ One row per CallBlock run: one Block at one position over consecutive Calls of o
 | `grp` | Blocks of one group were split from one exact total: their tokens add up to it |
 | `first_call`, `last_call` | The `calls.idx` range; `last_call` is NULL while the run goes on to the lane's latest Call |
 
-The Blocks of Call N, in order, are one range lookup on the index `call_blocks_interval`:
+The Blocks of Call N, in order, are one range lookup on that key:
 
 ```sql
-SELECT r.position, r.tokens, r.basis, b.kind, b.tool, b.text
-FROM call_blocks r JOIN blocks b ON b.hash = r.block_hash
+SELECT r.position, r.tokens, r.basis, b.kind, b.tool, c.content
+FROM call_blocks r
+JOIN log_blocks b ON b.log = r.log AND b.hash = r.block_hash
+JOIN blocks c ON c.hash = r.block_hash
 WHERE r.log = :log AND r.session_id = :session AND r.lane = :lane
   AND r.first_call <= :idx AND (r.last_call IS NULL OR r.last_call >= :idx)
 ORDER BY r.position;
@@ -123,8 +132,9 @@ for an open run).
 
 ### `tool_calls`
 
-`log`, `id` (the tool use id), `session_id`, `call_id` (the Call whose response holds the tool use), `name`,
-`input` (JSON), the source columns `tool`, `file_path`, `mcp_server`, `skill`, `result_block_hash` (the Block that
+`log`, `id` (the tool use id), `session_id`, `call_id` (the Call whose response holds the tool use, or the
+usage-only Call), `name`, `input` (JSON; NULL when the tool use Block holds it), `block_hash` (the tool use Block:
+its content's `input` is the input), the source columns `tool`, `file_path`, `mcp_server`, `skill`, `result_block_hash` (the Block that
 holds the result), `is_error` (0 or 1), `duration_ms`, `parallel` (tool uses in the same response),
 `child_session_id` (the Session a subagent tool started).
 
@@ -132,6 +142,20 @@ holds the result), `is_error` (0 or 1), `duration_ms`, `parallel` (tool uses in 
 
 `log`, `id`, `session_id`, `ts`, `trigger` (`manual`, `auto`), `before_tokens`, `after_tokens`,
 `before_call_id` (the last Call before), `summary_call_id` (the Call that wrote the summary).
+
+### `session_events`
+
+A Session's timeline besides its Calls: `(log, id)`, `session_id`, `ts` (a row without a time gets the time of
+the latest row before it), `kind`, `value` and `detail` (JSON):
+
+| `kind` | `value` | `detail` |
+|---|---|---|
+| `mode` | the permission mode | |
+| `cwd` | the folder the Session moved to | |
+| `note` | a summary the harness wrote (for example while the user was away) | |
+| `pr` | the pull request's URL | `number`, `repository` |
+| `continued-in` | the Session it went on in | |
+| `forked-from` | the Session whose context it started from | `contextLength`, `parentLastUuid` |
 
 ### `messages`, `shapes`, `records`
 
@@ -142,15 +166,31 @@ reports: use the domain tables.
 - `shapes`: `(log, key)`, `tools`, `system`: JSON lists of Block hashes.
 - `records`: `(log, key)`, `value`: any other record, as JSON.
 
-### `report_unknown`, `report_unreadable`
+### `report_kinds`, `report_unreadable`, `scan_issues`
 
-What the adapter could not map, per log, so that nothing is dropped in silence.
+What could not be mapped or read, so that nothing is dropped in silence.
 
-- `report_unknown`: `(log, kind)`, `count`, `seq` (the order first seen). `kind` is the harness's name of a
-  record type it does not know, such as a new row type.
-- `report_unreadable`: `(log, seq)`, `at` (`<transcript>:<line>` or `<transcript>.meta`), `reason`.
+- `report_kinds`: `(log, status, kind)`, `count`, `seq` (the order first seen). `status` is `unknown` (a record
+  type the adapter does not know, such as a new row type) or `ignored` (a known type that holds nothing for the
+  domain, such as UI state).
+- `report_unreadable`: `(log, seq)`, `at` (`<transcript>:<line>`, `<transcript>.meta`, or `<transcript>@<byte>`
+  for a line longer than the limit), `reason`.
+- `scan_issues`: `path`, `issue`: what the last full scan of the transcript folder could not read (folders) or
+  did not follow (symbolic links).
 
 File errors are in `ingest_files.error`.
+
+## Later
+
+Options that are not needed yet, with what they would bring:
+
+- **Binary hashes** (BLOB of 32 bytes instead of 64 hex characters) would save about a third of the key space of
+  `blocks`, `log_blocks`, `call_blocks` and `messages`. Hex text stays while agents read hashes in `qx sql`.
+- **A lanes table with integer ids** (N5): `call_blocks` and `calls` repeat the lane key (`model|query source`)
+  and the session id in every row; an integer lane id would make their keys several times smaller.
+- **Peak memory of a full import on Bun** (N4): about 800–900 MB for the 1.2 GB real corpus (Node: about
+  750 MB). Ingest memory is bounded per batch; the rest is the runtime's heap growth. Watch it when the corpus
+  grows; a smaller `restoreBytes` lowers it at some cost in time.
 
 ## Changing the schema
 

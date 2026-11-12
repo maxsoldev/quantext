@@ -202,20 +202,16 @@ export function call(r: SqlRow): Call {
   return c;
 }
 
-export const BLOCK_COLUMNS = ["hash", "content", "kind", "tool", "file_path", "mcp_server", "skill", "text"];
+export const LOG_BLOCK_COLUMNS = ["hash", "kind", "tool", "file_path", "mcp_server", "skill", "attachment"];
 
-export function blockRow(b: Block, content: string): SqlValue[] {
-  return [b.hash, content, b.kind, ...sourceRow(b.source), b.text].map(nul);
+/** A Block's classification in one log: its kind and source. Its content is stored once, by hash. */
+export function logBlockRow(b: Block): SqlValue[] {
+  return [b.hash, b.kind, ...sourceRow(b.source)].map(nul);
 }
 
-export function block(r: SqlRow): Block {
-  return {
-    hash: text(r.hash),
-    kind: text(r.kind) as BlockKind,
-    source: source(r),
-    text: text(r.text),
-    content: json(r.content),
-  };
+/** A Block from its log row and its content; the display text is derived from the content. */
+export function block(r: SqlRow, content: JsonValue, display: string): Block {
+  return { hash: text(r.hash), kind: text(r.kind) as BlockKind, source: source(r), text: display, content };
 }
 
 export const RUN_COLUMNS = [
@@ -274,10 +270,12 @@ export const TOOL_CALL_COLUMNS = [
   "call_id",
   "name",
   "input",
+  "block_hash",
   "tool",
   "file_path",
   "mcp_server",
   "skill",
+  "attachment",
   "result_block_hash",
   "is_error",
   "duration_ms",
@@ -285,13 +283,15 @@ export const TOOL_CALL_COLUMNS = [
   "child_session_id",
 ];
 
-export function toolCallRow(t: ToolCall): SqlValue[] {
+/** A ToolCall's row; `byBlock`: its input is the input of its tool use Block, so it is not stored again. */
+export function toolCallRow(t: ToolCall, byBlock: boolean): SqlValue[] {
   return [
     t.id,
     t.sessionId,
     t.callId,
     t.name,
-    JSON.stringify(t.input),
+    byBlock ? undefined : JSON.stringify(t.input),
+    t.blockHash,
     ...sourceRow(t.source),
     t.resultBlockHash,
     t.isError ? 1 : 0,
@@ -301,17 +301,20 @@ export function toolCallRow(t: ToolCall): SqlValue[] {
   ].map(nul);
 }
 
-export function toolCall(r: SqlRow): ToolCall {
+/** A ToolCall from its row; `content` gives a Block's content, for an input stored by its Block. */
+export function toolCall(r: SqlRow, content: (hash: string) => JsonValue): ToolCall {
+  const fromBlock = r.input === null ? content(text(r.block_hash)) : undefined;
   const t: ToolCall = {
     id: text(r.id),
     sessionId: text(r.session_id),
     callId: text(r.call_id),
     name: text(r.name),
-    input: json(r.input),
+    input: r.input === null ? ((fromBlock as { input?: JsonValue } | null)?.input ?? null) : json(r.input),
     source: source(r),
     isError: Number(r.is_error) === 1,
     parallel: Number(r.parallel),
   };
+  put(t, "blockHash", r.block_hash);
   put(t, "resultBlockHash", r.result_block_hash);
   putNumber(t, "durationMs", r.duration_ms);
   put(t, "childSessionId", r.child_session_id);
@@ -363,7 +366,7 @@ export function event(r: SqlRow): SessionEvent {
 }
 
 function sourceRow(s: BlockSource): (string | undefined)[] {
-  return [s.tool, s.filePath, s.mcpServer, s.skill];
+  return [s.tool, s.filePath, s.mcpServer, s.skill, s.attachment];
 }
 
 function source(r: SqlRow): BlockSource {
@@ -372,6 +375,7 @@ function source(r: SqlRow): BlockSource {
   put(s, "filePath", r.file_path);
   put(s, "mcpServer", r.mcp_server);
   put(s, "skill", r.skill);
+  put(s, "attachment", r.attachment);
   return s;
 }
 

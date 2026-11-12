@@ -1,6 +1,6 @@
 # 19. Store schema v1: rows per log, content once, runs with an interval index
 
-Status: accepted
+Status: accepted; revised by ADR 20 before release
 
 ## Context
 

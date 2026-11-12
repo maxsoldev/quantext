@@ -66,8 +66,8 @@ describe("parseClaudeCodeSession on basic-tools", () => {
     expect(graph.report.unreadable).toEqual([]);
     expect(graph.report.ignoredRecords).toEqual([
       { kind: "queue-operation", count: 2 },
-      { kind: "attachment", count: 11 },
       { kind: "atis-latch", count: 4 },
+      { kind: "attachment", count: 2 },
       { kind: "last-prompt", count: 4 },
       { kind: "tools-used", count: 3 },
     ]);
