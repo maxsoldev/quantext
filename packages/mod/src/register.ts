@@ -128,7 +128,11 @@ export const register: Register = (on) => {
       remeasureSoon($);
     }
     return r;
-  }).catch((_$, e, next) => next(e)); // a failed hook leaves the compaction to Claude Code
+  }).catch((_$, e, next) => {
+    // A failed clear must not fall back to a paid summary; any other failure leaves it to Claude Code.
+    const clearing = e.agentId === undefined && toolOutputsKeep(e.instructions) !== undefined;
+    return clearing && !next.called ? { skip: "quantext: clearing tool outputs failed" } : next(e);
+  });
 
   // A /clear ends this conversation and goes on with a new one: start its figures over.
   on("session.end", async ($, e, next) => {

@@ -40,8 +40,11 @@ agents (SQL, CLI, later MCP). Nothing leaves the machine.
 1. `$.http.fetch('http://127.0.0.1:<port>/health')`, with the port from `~/.quantext/engine.json` (4747 when free;
    ADR 25). If it answers, go to step 4.
 2. Find a runtime: `node` ≥ 22.18, else `bun`, else show a clear message with install steps.
-3. Start it detached: `$.process.run(['sh', '-c', 'umask 077; mkdir -p "$3" && nohup "$0" "$1" serve --live while-viewer >>"$2" 2>&1 </dev/null &', runtime, '<plugin root>/engine/engine.js', log, dataDir])`,
-   paths as arguments (ADR 27). Poll `/health` up to 10 s.
+3. Start it detached: `$.process.run(['sh', '-c', 'umask 077; mkdir -p "$3" && chmod 700 "$3" && cd "$3" && nohup "$0" "$1" serve --live while-viewer >>"$2" 2>&1 </dev/null &', runtime, '<plugin root>/engine/engine.js', log, dataDir])`,
+   paths as arguments (ADR 27). Poll `/health` up to 10 s. Every command, the version probes too, runs in
+   `<plugin root>/engine` and the engine in `~/.quantext/`, never in the project folder, so Bun loads no project
+   `bunfig.toml` preload or `.env`. Trust boundary: `node`, `bun` and `open` resolve through PATH and the engine
+   inherits Claude Code's environment, the same trust as the Bash tool.
 4. Open the URL: `open` on macOS, `xdg-open` on Linux (there is no open-URL API in the mod).
 
 The engine:
