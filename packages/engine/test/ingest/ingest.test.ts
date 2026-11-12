@@ -1,0 +1,322 @@
+import {
+  appendFileSync,
+  chmodSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
+import { describe, expect, test } from "vitest";
+import { claudeCodeRecords } from "../../src/adapters/claude-code/index.ts";
+import type { CallsEvent, Ingest } from "../../src/ingest/index.ts";
+import { createIngest } from "../../src/ingest/index.ts";
+import type { Store } from "../../src/store/index.ts";
+import { openStore } from "../../src/store/index.ts";
+import { scenarios } from "../fixtures.ts";
+import { normal, random } from "../store/graph.ts";
+import { onCleanup, tempDir } from "../store/temp.ts";
+import { copyScenario, expectedGraph, expectedScenario, layout, writeText } from "./corpus.ts";
+
+interface Setup {
+  root: string;
+  dataDir: string;
+  store: Store;
+  ingest: Ingest;
+  events: CallsEvent[];
+}
+
+async function setup(options: { root?: string; dataDir?: string; batchBytes?: number } = {}): Promise<Setup> {
+  const root = options.root ?? tempDir("qx-root-");
+  const dataDir = options.dataDir ?? tempDir("qx-data-");
+  const store = await openStore({ dataDir });
+  onCleanup(() => store.close());
+  const ingest = createIngest({ store, root, ...(options.batchBytes ? { batchBytes: options.batchBytes } : {}) });
+  const events: CallsEvent[] = [];
+  ingest.onCalls((e) => events.push(e));
+  return { root, dataDir, store, ingest, events };
+}
+
+const graphOf = (store: Store, main: string) => normal(store.log(main, "claude-code", claudeCodeRecords).graph());
+
+function rowCounts(store: Store): Record<string, number> {
+  const tables = store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
+  return Object.fromEntries(
+    tables.map((t) => [
+      String(t.name),
+      Number(store.db.prepare(`SELECT count(*) AS n FROM "${String(t.name)}"`).get()?.n),
+    ]),
+  );
+}
+
+describe.each(scenarios())("ingest of $version/$name", ({ name }) => {
+  test("from an empty store gives the adapter's graph of the scenario", async () => {
+    const s = await setup();
+    const files = copyScenario(s.root, name);
+    const summary = await s.ingest.ingestAll();
+    expect(summary.errors).toEqual([]);
+    expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
+  });
+
+  test("of a file that grows in pieces adds only new rows and ends with the same graph", async () => {
+    const s = await setup();
+    const files = layout(s.root, name);
+    const next = random(11);
+    const text = readFileSync(files.source);
+    const added = new Set<string>();
+    let rows = rowCounts(s.store);
+    for (let at = 0; at < text.length; ) {
+      const size = 1 + Math.floor(next() * 30000);
+      writeText(files.main, text.subarray(0, at + size));
+      at += size;
+      await s.ingest.ingestAll();
+      const now = rowCounts(s.store);
+      for (const table of ["sessions", "calls", "call_blocks", "blocks"]) {
+        expect(now[table]).toBeGreaterThanOrEqual(rows[table] ?? 0);
+      }
+      rows = now;
+    }
+    for (const e of s.events)
+      for (const id of e.added) {
+        expect(added.has(id)).toBe(false);
+        added.add(id);
+      }
+    expect(graphOf(s.store, files.main)).toEqual(expectedGraph(text));
+    expect(added.size).toBe(graphOf(s.store, files.main).calls.length);
+  });
+
+  test("goes on from its snapshot after the store is closed at a random point, also inside a line", async () => {
+    for (const seed of [1, 2, 3]) {
+      const root = tempDir("qx-root-");
+      const dataDir = tempDir("qx-data-");
+      const files = copyScenario(root, name);
+      const text = readFileSync(files.source);
+      const cut = Math.floor(random(seed)() * text.length);
+      writeText(files.main, text.subarray(0, cut));
+      const first = await openStore({ dataDir });
+      await createIngest({ store: first, root }).ingestAll();
+      first.close();
+      writeText(files.main, text);
+      const s = await setup({ root, dataDir });
+      await s.ingest.ingestAll();
+      expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
+    }
+  });
+});
+
+test("logs that share content (one system prompt, one tool set) each give the graph they give alone", async () => {
+  const s = await setup();
+  const all = scenarios().map(({ name }) => copyScenario(s.root, name));
+  await s.ingest.ingestAll();
+  for (const files of all) expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
+  const stored = Number(s.store.db.prepare("SELECT count(*) AS n FROM blocks WHERE kind IS NOT NULL").get()?.n);
+  const reported = all.reduce((n, files) => n + graphOf(s.store, files.main).blocks.length, 0);
+  expect(stored).toBeLessThan(reported); // shared Blocks are stored once
+});
+
+describe("reading again", () => {
+  test("an unchanged corpus writes no row and reports no Call", async () => {
+    const s = await setup();
+    for (const { name } of scenarios()) copyScenario(s.root, name);
+    await s.ingest.ingestAll();
+    const counts = rowCounts(s.store);
+    s.events.length = 0;
+    const summary = await s.ingest.ingestAll();
+    expect(rowCounts(s.store)).toEqual(counts);
+    expect(s.events).toEqual([]);
+    expect(summary.bytes).toBe(0);
+  });
+
+  test("in batches much smaller than the file gives the same graph", async () => {
+    const s = await setup({ batchBytes: 2048 });
+    const files = copyScenario(s.root, "compaction");
+    await s.ingest.ingestAll();
+    expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
+  });
+});
+
+describe("a file that changes under the reader", () => {
+  test("truncated below the read position is read again from the start", async () => {
+    const s = await setup();
+    const files = copyScenario(s.root, "basic-tools");
+    await s.ingest.ingestAll();
+    const text = readFileSync(files.main);
+    const half = text.subarray(0, text.indexOf("\n", text.length / 2) + 1);
+    truncateSync(files.main, half.length);
+    await s.ingest.ingestAll();
+    expect(graphOf(s.store, files.main)).toEqual(expectedGraph(half));
+    appendFileSync(files.main, text.subarray(half.length));
+    await s.ingest.ingestAll();
+    expect(graphOf(s.store, files.main)).toEqual(expectedGraph(text));
+  });
+
+  test("replaced by another file (a new inode) is read again from the start", async () => {
+    const s = await setup();
+    const files = copyScenario(s.root, "basic-tools");
+    await s.ingest.ingestAll();
+    const other = readFileSync(layout(s.root, "image").source);
+    writeText(`${files.main}.new`, other);
+    renameSync(`${files.main}.new`, files.main);
+    await s.ingest.ingestAll();
+    expect(graphOf(s.store, files.main)).toEqual(expectedGraph(other));
+  });
+
+  test("rewritten in place with other content of at least the same size is read again", async () => {
+    const s = await setup();
+    const files = copyScenario(s.root, "image");
+    await s.ingest.ingestAll();
+    const other = readFileSync(layout(s.root, "basic-tools").source);
+    const inode = statSync(files.main).ino;
+    writeFileSync(files.main, other); // same inode, truncated and written again
+    expect(statSync(files.main).ino).toBe(inode);
+    await s.ingest.ingestAll();
+    expect(graphOf(s.store, files.main)).toEqual(expectedGraph(other));
+  });
+});
+
+describe("a partial last line", () => {
+  test("is not read until its newline comes, and is shown as pending", async () => {
+    const s = await setup();
+    const files = layout(s.root, "basic-tools");
+    const text = readFileSync(files.source);
+    const end = text.indexOf("\n", 5000) + 1;
+    writeText(files.main, text.subarray(0, end + 25));
+    await s.ingest.ingestAll();
+    const report = s.store.report();
+    expect(report.unreadable).toEqual([]);
+    expect(report.files).toEqual([{ path: files.main, pendingBytes: 25 }]);
+    writeText(files.main, text);
+    await s.ingest.ingestAll();
+    expect(s.store.report().files).toEqual([]);
+    expect(graphOf(s.store, files.main)).toEqual(expectedGraph(text));
+  });
+
+  test("holds back a multi-byte character cut by the write, without breaking it", async () => {
+    const s = await setup({ batchBytes: 64 });
+    const main = join(s.root, "projects", "-p", "s.jsonl");
+    const line = `${JSON.stringify({ type: "mode", sessionId: "s", text: "naïve ✓ ünïcödé".repeat(20) })}\n`;
+    const bytes = Buffer.from(line.repeat(3));
+    const cut = bytes.indexOf(Buffer.from("✓")) + 1;
+    writeText(main, bytes.subarray(0, cut));
+    await s.ingest.ingestAll();
+    writeText(main, bytes);
+    await s.ingest.ingestAll();
+    expect(s.store.report().unreadable).toEqual([]);
+    expect(graphOf(s.store, main)).toEqual(expectedGraph(bytes));
+  });
+});
+
+describe("subagents", () => {
+  test("that appear after the main transcript was read are linked to it", async () => {
+    const s = await setup();
+    const files = layout(s.root, "subagent");
+    writeText(files.main, readFileSync(files.source));
+    await s.ingest.ingestAll();
+    for (const agent of files.subagents) {
+      writeText(agent.path, readFileSync(agent.source));
+      await s.ingest.ingestAll();
+      if (agent.meta !== undefined && agent.sourceMeta !== undefined)
+        writeText(agent.meta, readFileSync(agent.sourceMeta));
+    }
+    await s.ingest.ingestAll();
+    const graph = graphOf(s.store, files.main);
+    expect(graph.toolCalls.find((t) => t.name === "Agent")?.childSessionId).toMatch(/:agent-/);
+    expect(graph.sessions).toHaveLength(2);
+  });
+
+  test("and the main transcript growing together give the same graph as one read", async () => {
+    const s = await setup();
+    const files = layout(s.root, "subagent");
+    const main = readFileSync(files.source);
+    const agent = files.subagents[0];
+    if (agent === undefined) throw new Error("the subagent scenario has a subagent");
+    const sub = readFileSync(agent.source);
+    if (agent.meta !== undefined && agent.sourceMeta !== undefined)
+      writeText(agent.meta, readFileSync(agent.sourceMeta));
+    for (let i = 1; i <= 4; i++) {
+      writeText(files.main, main.subarray(0, Math.floor((main.length * i) / 4)));
+      writeText(agent.path, sub.subarray(0, Math.floor((sub.length * i) / 4)));
+      await s.ingest.ingestAll();
+    }
+    expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
+  });
+});
+
+describe("errors", () => {
+  test("a line that is not JSON is recorded in the report with its place", async () => {
+    const s = await setup();
+    const files = copyScenario(s.root, "basic-tools");
+    const lines = readFileSync(files.main, "utf8").split("\n").length - 1;
+    appendFileSync(files.main, "{not json\n");
+    await s.ingest.ingestAll();
+    expect(s.store.report().unreadable).toEqual([
+      { log: files.main, at: `main:${lines + 1}`, reason: expect.stringMatching(/^not JSON/) },
+    ]);
+  });
+
+  test.skipIf(process.getuid?.() === 0)("a file that cannot be read is reported, and read once it can", async () => {
+    const s = await setup();
+    const files = copyScenario(s.root, "basic-tools");
+    chmodSync(files.main, 0o000);
+    onCleanup(() => chmodSync(files.main, 0o644));
+    const summary = await s.ingest.ingestAll();
+    expect(summary.errors).toEqual([{ path: files.main, error: expect.stringMatching(/EACCES/) }]);
+    expect(s.store.report().errors).toEqual([{ path: files.main, error: expect.stringMatching(/EACCES/) }]);
+    chmodSync(files.main, 0o644);
+    await s.ingest.ingestAll();
+    expect(s.store.report().errors).toEqual([]);
+    expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
+  });
+
+  test("unknown row types are counted in the report", async () => {
+    const s = await setup();
+    const files = copyScenario(s.root, "basic-tools");
+    appendFileSync(files.main, `${JSON.stringify({ type: "brand-new-row", sessionId: "x" })}\n`.repeat(2));
+    await s.ingest.ingestAll();
+    expect(s.store.report().unknownRecords).toContainEqual({ kind: "brand-new-row", count: 2 });
+  });
+});
+
+describe("the transcript folder", () => {
+  test.skipIf(process.getuid?.() === 0)(
+    "is only read: ingest works on a read-only folder and adds nothing to it",
+    async () => {
+      const s = await setup();
+      const files = copyScenario(s.root, "subagent");
+      const list = () =>
+        readdirSync(s.root, { recursive: true, withFileTypes: true }).map((d) => {
+          const path = join(d.parentPath, d.name);
+          return [path, statSync(path).mtimeMs];
+        });
+      const before = list();
+      const dirs = [
+        s.root,
+        ...readdirSync(s.root, { recursive: true, withFileTypes: true })
+          .filter((d) => d.isDirectory())
+          .map((d) => join(d.parentPath, d.name)),
+      ];
+      for (const dir of dirs) chmodSync(dir, 0o555);
+      onCleanup(() => {
+        for (const dir of dirs) chmodSync(dir, 0o755);
+      });
+      expect((await s.ingest.ingestAll()).errors).toEqual([]);
+      expect(list()).toEqual(before);
+      expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
+    },
+  );
+});
+
+describe("Calls events", () => {
+  test("name the Calls each read added and updated, by Session", async () => {
+    const s = await setup();
+    const files = copyScenario(s.root, "subagent");
+    await s.ingest.ingestAll();
+    const graph = graphOf(s.store, files.main);
+    const sessions = new Set(s.events.map((e) => e.sessionId));
+    expect(sessions).toEqual(new Set(graph.sessions.map((x) => x.id)));
+    expect(s.events.every((e) => e.log === files.main)).toBe(true);
+    expect(new Set(s.events.flatMap((e) => e.added))).toEqual(new Set(graph.calls.map((c) => c.id)));
+  });
+});
