@@ -80,7 +80,7 @@ export interface LogStore {
   write(batch: LogBatch): WriteResult;
   /** Delete everything of this log (rows, report, file marks, snapshot) in one transaction, to read it again. */
   reset(): void;
-  /** The log as one SessionGraph: its rows, and the Blocks its messages, shapes and runs name. */
+  /** The log as one SessionGraph: its rows and the Blocks its deltas reported. */
   graph(): SessionGraph;
 }
 
@@ -131,7 +131,10 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
       return r === undefined ? undefined : codec.unpack({ kind: "value", key, value: json(r.value) });
     },
     block(hash): Block | undefined {
-      const r = sql.get("SELECT * FROM blocks WHERE hash = ? AND kind IS NOT NULL").get(hash);
+      const r = one(
+        "SELECT b.* FROM log_blocks l JOIN blocks b ON b.hash = l.hash WHERE l.log = ? AND l.hash = ?",
+        hash,
+      );
       return r === undefined ? undefined : block(r);
     },
     call(callId): Call | undefined {
@@ -173,8 +176,9 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
     }
     for (const b of delta.blocks) {
       const known = sql.get("SELECT kind FROM blocks WHERE hash = ?").get(b.hash);
-      if (known?.kind !== null && known !== undefined) continue;
-      sql.get(UPSERT_BLOCK).run(...blockRow(b, JSON.stringify(b.content)));
+      if (known === undefined || known.kind === null)
+        sql.get(UPSERT_BLOCK).run(...blockRow(b, JSON.stringify(b.content)));
+      sql.get("INSERT INTO log_blocks (log, hash) VALUES (?, ?) ON CONFLICT DO NOTHING").run(id, b.hash);
     }
     for (const s of delta.sessions) sql.get(UPSERT_SESSION).run(id, ...sessionRow(s));
     for (const c of delta.calls) {
@@ -249,16 +253,9 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
     },
     graph(): SessionGraph {
       const rows = (table: string) => all(`SELECT * FROM ${table} WHERE log = ? ORDER BY rowid`);
-      const blocks = sql
-        .get(
-          `SELECT * FROM blocks WHERE kind IS NOT NULL AND hash IN (
-             SELECT block_hash FROM call_blocks WHERE log = ?
-             UNION SELECT j.value FROM messages m, json_each(m.blocks) j WHERE m.log = ?
-             UNION SELECT j.value FROM shapes s, json_each(s.tools) j WHERE s.log = ?
-             UNION SELECT j.value FROM shapes s, json_each(s.system) j WHERE s.log = ?)
-           ORDER BY rowid`,
-        )
-        .all(id, id, id, id);
+      const blocks = all(
+        "SELECT b.* FROM log_blocks l JOIN blocks b ON b.hash = l.hash WHERE l.log = ? ORDER BY b.rowid",
+      );
       return {
         sessions: rows("sessions").map(session),
         calls: rows("calls").map(call),

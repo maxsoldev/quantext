@@ -15,6 +15,17 @@ export interface OpenStoreOptions {
   dataDir: string;
 }
 
+export interface StoreReport {
+  /** Unknown record kinds with their counts, summed over logs, most frequent first. */
+  unknownRecords: { kind: string; count: number }[];
+  /** Records that could not be read, by log (the main transcript's path) and place. */
+  unreadable: { log: string; at: string; reason: string }[];
+  /** Files that could not be read, or whose log failed to ingest, and why. */
+  errors: { path: string; error: string }[];
+  /** Files whose last bytes are not a complete line yet: held back until the newline comes. */
+  files: { path: string; pendingBytes: number }[];
+}
+
 export interface Store {
   readonly path: string;
   readonly schemaVersion: number;
@@ -22,6 +33,8 @@ export interface Store {
   readonly db: SqlDriver;
   /** The log of one main transcript (by path), created when new. `codec` maps the adapter's records to rows. */
   log(path: string, harness: string, codec: RecordCodec): LogStore;
+  /** What could not be read, over all logs: the report rows, file errors, and lines still being written. */
+  report(): StoreReport;
   /** The paths of every log in the store, oldest first. */
   logs(): string[];
   close(): void;
@@ -43,6 +56,30 @@ export async function openStore(options: OpenStoreOptions): Promise<Store> {
       schemaVersion,
       db: opened,
       log: (logPath, harness, codec) => openLog(opened, sql, logPath, harness, codec),
+      report: () => ({
+        unknownRecords: sql
+          .get("SELECT kind, sum(count) AS count FROM report_unknown GROUP BY kind ORDER BY count DESC, kind")
+          .all()
+          .map((r) => ({ kind: String(r.kind), count: Number(r.count) })),
+        unreadable: sql
+          .get(
+            `SELECT l.path, r.at, r.reason FROM report_unreadable r JOIN logs l ON l.id = r.log
+             ORDER BY r.log, r.seq`,
+          )
+          .all()
+          .map((r) => ({ log: String(r.path), at: String(r.at), reason: String(r.reason) })),
+        errors: sql
+          .get("SELECT path, error FROM ingest_files WHERE error IS NOT NULL ORDER BY path")
+          .all()
+          .map((r) => ({ path: String(r.path), error: String(r.error) })),
+        files: sql
+          .get(
+            `SELECT path, size - byte_offset AS pending FROM ingest_files
+             WHERE kind = 'transcript' AND error IS NULL AND size > byte_offset ORDER BY path`,
+          )
+          .all()
+          .map((r) => ({ path: String(r.path), pendingBytes: Number(r.pending) })),
+      }),
       logs: () =>
         sql
           .get("SELECT path FROM logs ORDER BY id")

@@ -29,6 +29,7 @@ describe("opening the store", () => {
       "calls",
       "compactions",
       "ingest_files",
+      "log_blocks",
       "logs",
       "messages",
       "records",
