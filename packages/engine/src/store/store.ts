@@ -16,7 +16,7 @@ export function defaultDataDir(home: string): string {
 }
 
 export interface OpenStoreOptions {
-  /** The folder of the database (`quantext.db`) and the writer lock (`writer.lock`); created when missing. */
+  /** The folder of the database (`quantext.db`) and the writer lock (`writer.lock`, `writer.pid`); created when missing. */
   dataDir: string;
 }
 
@@ -48,7 +48,7 @@ export interface Store {
 /** Open the store for writing: take the writer lock, open the database, migrate it to the current schema. */
 export async function openStore(options: OpenStoreOptions): Promise<Store> {
   mkdirSync(options.dataDir, { recursive: true });
-  const lock = acquireLock(join(options.dataDir, "writer.lock"));
+  const lock = await acquireLock(join(options.dataDir, "writer.lock"), join(options.dataDir, "writer.pid"));
   const path = join(options.dataDir, "quantext.db");
   let db: SqlDriver | undefined;
   try {

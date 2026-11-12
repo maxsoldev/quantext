@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -94,7 +95,7 @@ describe("the writer lock", () => {
   test("is released on close", async () => {
     const dir = tempDir();
     (await openStore({ dataDir: dir })).close();
-    expect(existsSync(join(dir, "writer.lock"))).toBe(false);
+    expect(existsSync(join(dir, "writer.pid"))).toBe(false);
     await open(dir);
   });
 
@@ -106,18 +107,37 @@ describe("the writer lock", () => {
     expect((error as StoreLockedError).pid).toBe(process.pid);
   });
 
-  test("is taken over when the process that held it is gone", async () => {
+  test("does not depend on the pid: a pid file that names a running process does not block", async () => {
     const dir = tempDir();
-    const deadPid = 2 ** 22 + 12345; // above every platform's pid limit, so never a running process
-    writeFileSync(join(dir, "writer.lock"), JSON.stringify({ pid: deadPid, token: "old" }));
+    writeFileSync(join(dir, "writer.pid"), String(process.ppid)); // a running process that holds no lock
     await open(dir);
-    expect(JSON.parse(readFileSync(join(dir, "writer.lock"), "utf8")).pid).toBe(process.pid);
+    expect(readFileSync(join(dir, "writer.pid"), "utf8")).toBe(String(process.pid));
   });
 
-  test("is taken over when the lock file is not readable as a lock", async () => {
+  test("replaces a lock file of an older engine that is not a lock database", async () => {
     const dir = tempDir();
-    writeFileSync(join(dir, "writer.lock"), "not json");
+    writeFileSync(join(dir, "writer.lock"), JSON.stringify({ pid: process.pid, token: "old" }));
     await open(dir);
-    expect(JSON.parse(readFileSync(join(dir, "writer.lock"), "utf8")).pid).toBe(process.pid);
+  });
+
+  test("is held by another process until it dies, also when it is killed", { timeout: 30_000 }, async () => {
+    const dir = tempDir();
+    const child = spawn(process.execPath, [join(import.meta.dirname, "hold-store.ts"), dir], {
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    onCleanup(() => {
+      child.kill("SIGKILL");
+    });
+    await new Promise<void>((resolve, reject) => {
+      child.stdout.on("data", (d: Buffer) => d.toString().includes("ready") && resolve());
+      child.on("exit", (code) => reject(new Error(`the holder exited with ${code}`)));
+    });
+    const error = await openStore({ dataDir: dir }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StoreLockedError);
+    expect((error as StoreLockedError).pid).toBe(child.pid);
+    const exited = new Promise((resolve) => child.on("exit", resolve));
+    child.kill("SIGKILL");
+    await exited;
+    await open(dir);
   });
 });

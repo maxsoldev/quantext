@@ -35,12 +35,16 @@ export interface RawDatabase {
   close(): void;
 }
 
+/** Open (or create) a database file with the runtime's built-in SQLite, with no settings changed. */
+export async function openRaw(path: string): Promise<RawDatabase> {
+  return process.versions.bun === undefined
+    ? (await import("./node-driver.ts")).openNode(path)
+    : (await import("./bun-driver.ts")).openBun(path);
+}
+
 /** Open (or create) the database file with the runtime's built-in SQLite: WAL, foreign keys, a busy timeout. */
 export async function openDriver(path: string): Promise<SqlDriver> {
-  const raw =
-    process.versions.bun === undefined
-      ? (await import("./node-driver.ts")).openNode(path)
-      : (await import("./bun-driver.ts")).openBun(path);
+  const raw = await openRaw(path);
   raw.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
   raw.exec("PRAGMA journal_mode = WAL");
   raw.exec("PRAGMA synchronous = NORMAL");
