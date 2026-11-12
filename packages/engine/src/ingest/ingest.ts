@@ -329,9 +329,7 @@ async function ingestLog(
     for (const entry of entries) await openEntry(entry);
     let marks = new Map(log.files().map((m) => [m.path, m]));
     if (await anyReplaced(entries, marks)) {
-      const projects = log.projects();
-      const cursor = log.reset();
-      removed({ kind: "log-removed", logId: log.id, cursor, projects });
+      removed({ kind: "log-removed", logId: log.id, cursor: log.reset() });
       marks = new Map();
       delete warm.parser;
       warm.sinceRestore = 0;

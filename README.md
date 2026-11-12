@@ -24,6 +24,7 @@ agents through SQL and a CLI. Nothing leaves the machine.
 
 - [Architecture](docs/ARCHITECTURE.md): layers, domain model, release plan, quality bar.
 - [Glossary](docs/GLOSSARY.md) and [decision records](docs/adr/).
+- [Known issues](docs/known-issues.md): what we know is wrong or missing, and chose to defer.
 - [Working rules](AGENTS.md) for contributors and coding agents.
 
 Licence: [Apache-2.0](LICENSE).

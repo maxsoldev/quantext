@@ -1,12 +1,12 @@
 /**
  * The SSE stream of change events (`GET /api/v1/events`). Each ingest event goes through the query layer's
- * `visibleEvent` (demo mode), is kept in a ring of recent events, and is written to every client. A client that
+ * `publicEvent`, is kept in a ring of recent events, and is written to every client. A client that
  * comes back with a cursor gets what it missed from the ring, or `resync` when the ring no longer holds it. A
  * client that does not read is dropped once its unsent bytes pass a limit: memory never grows with a slow client.
  * The replay is written in parts, each after the last one drained, so a long replay never trips that limit.
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { IngestEvent, IngestStatus, SseIngest, SseReady, SseResync, VisibleEvent } from "@quantext/shared";
+import type { IngestEvent, IngestStatus, PublicEvent, SseIngest, SseReady, SseResync } from "@quantext/shared";
 import type { Query } from "../query/index.ts";
 import { securityHeaders } from "./http.ts";
 import { badRequest } from "./params.ts";
@@ -50,7 +50,7 @@ interface Position {
 }
 
 interface Kept extends Position {
-  event: VisibleEvent;
+  event: PublicEvent;
 }
 
 const after = (a: Position, b: Position) => a.c > b.c || (a.c === b.c && a.o > b.o);
@@ -160,9 +160,9 @@ export function createEventStream(options: EventStreamOptions): EventStream {
 
   return {
     publish(event) {
-      let shown: VisibleEvent | null;
+      let shown: PublicEvent | null;
       try {
-        shown = query.visibleEvent(event);
+        shown = query.publicEvent(event);
       } catch (error) {
         // Clients that come back must not think they missed nothing.
         floor = { c: Math.max(floor.c, event.cursor), o: Number.POSITIVE_INFINITY };
@@ -226,7 +226,7 @@ export function createEventStream(options: EventStreamOptions): EventStream {
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
       });
-      // A write may change the store without an event this stream shows (a hidden project, a scan).
+      // A write may change the store without an event this stream shows (memory of no known project, a scan).
       latest = Math.max(latest, query.changeCursor());
       clients.set(res, { live: false });
       const gone = () => clients.delete(res);

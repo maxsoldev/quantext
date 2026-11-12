@@ -1,7 +1,6 @@
 /**
  * A worker thread for the query methods that can take a second on a long Session (lifetimes over every Call),
- * so that the engine's event loop keeps answering meanwhile. It has its own read-only connection and the same
- * query options (demo mode). Messages: `{ id, method, args }` in, `{ id, result }` or `{ id, error }` out.
+ * so that the engine's event loop keeps answering meanwhile. It has its own read-only connection. Messages: `{ id, method, args }` in, `{ id, result }` or `{ id, error }` out.
  */
 import { parentPort, workerData } from "node:worker_threads";
 import { claudeCodeCodec } from "../adapters/claude-code/index.ts";
@@ -14,14 +13,7 @@ const options = workerData as QueryWorkerOptions;
 const port = parentPort;
 if (port === null) throw new Error("query-worker runs as a worker thread");
 const db = await openReader(options.dataDir, { setup: installViews });
-const query = createQuery({
-  db,
-  codec: claudeCodeCodec,
-  ...(options.demo === undefined ? {} : { demo: options.demo }),
-  ...(options.home === undefined ? {} : { home: options.home }),
-  ...(options.user === undefined ? {} : { user: options.user }),
-  ...(options.host === undefined ? {} : { host: options.host }),
-});
+const query = createQuery({ db, codec: claudeCodeCodec });
 port.on("message", (message: { id: number; method: OffloadMethod; args: unknown[] }) => {
   const { id, method, args } = message;
   try {

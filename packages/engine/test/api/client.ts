@@ -87,10 +87,9 @@ export function viewerDir(): string {
 export async function engine(
   names: string[] = ["basic-tools", "image"],
   options: Partial<Omit<ApiOptions, "query">> = {},
-  queryOptions: Partial<Parameters<typeof createQuery>[0]> = {},
 ): Promise<Engine> {
   const { db, dataDir, root } = await ingested(names);
-  const query = createQuery({ db, codec: claudeCodeCodec, ...queryOptions });
+  const query = createQuery({ db, codec: claudeCodeCodec });
   const staticDir = options.staticDir ?? viewerDir();
   const errors: unknown[] = [];
   const api = createApi({
@@ -100,7 +99,6 @@ export async function engine(
       version: "0.0.0-test",
       pid: process.pid,
       startedAt: "2026-11-12T00:00:00.000Z",
-      demo: queryOptions.demo !== undefined,
       dataDir,
     },
     onError: (error) => errors.push(error),

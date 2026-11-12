@@ -598,7 +598,7 @@ describe("Calls events", () => {
     writeText(join(s.root, "projects", "-fixture-image", "memory", "MEMORY.md"), "note\n");
     await s.ingest.ingestAll();
     const removed = all.find((e) => e.kind === "log-removed");
-    expect(removed).toMatchObject({ logId: 1, projects: ["/fixture-0000000000000000/repo"] });
+    expect(removed).toMatchObject({ kind: "log-removed", logId: 1 });
     const memory = all.find((e) => e.kind === "memory");
     expect(memory).toMatchObject({ projectDirs: [join(s.root, "projects", "-fixture-image")] });
     const cursors = all.map((e) => e.cursor);

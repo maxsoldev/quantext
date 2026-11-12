@@ -74,9 +74,7 @@ describe("changes that are not Calls", () => {
     const log = store.log("/logs/a.jsonl", "claude-code", claudeCodeCodec);
     for (const delta of deltasOf(transcriptsOf("image"))) log.write({ deltas: [delta] });
     const before = store.changeCursor();
-    expect(log.projects()).toEqual(["/fixture-0000000000000000/repo"]);
     expect(log.reset()).toBe(before + 1);
-    expect(log.projects()).toEqual([]);
     expect(store.changeCursor()).toBe(before + 1);
   });
 });

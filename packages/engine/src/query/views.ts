@@ -117,7 +117,7 @@ const NO_LIFETIME = `(SELECT NULL AS log, NULL AS block_hash, NULL AS tokens, NU
 /**
  * Each tool use with its result Block's lifetime cost (null `lifetime`: none, the caller adds them). `lifetime`: the lifetime rows to join (the view, or a
  * Session's own); `where` filters the tool uses (`t`). `cut`: the input summary is the first 200 characters; false:
- * the whole input, for a caller that must redact it before it cuts it (demo mode).
+ * the whole input, for a caller that makes its own preview (`previewOf`).
  */
 export function toolOutputsSql(lifetime: string | null, where = "", cut = true): string {
   const input =

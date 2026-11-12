@@ -264,7 +264,7 @@ write, a schema or connection change (`INSERT`, `UPDATE`, `DELETE`, `CREATE`, `D
 The statement runs in a child process. The parent kills it after `--timeout` seconds (default 30), and passes on
 Ctrl-C; a watchdog thread in the child kills it a second later, or as soon as the parent is gone, so a killed `qx`
 leaves nothing running. Neither SQLite module can interrupt a statement. At most 1000 rows (`--limit`); a BLOB
-shows as its size. `qx sql` does not run in demo mode: it reads the tables as they are.
+shows as its size.
 
 ## Later
 

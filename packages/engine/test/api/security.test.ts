@@ -234,7 +234,7 @@ describe("headers", () => {
 });
 
 describe("/health", () => {
-  test("tells the engine's version, pid, start and demo mode, and its data folder outside demo mode", async () => {
+  test("tells the engine's version, pid, start and data folder", async () => {
     const { port, dataDir } = await engine(["basic-tools"]);
     expect((await get(port, "/health")).json<Health>()).toEqual({
       apiVersion: 1,
@@ -242,15 +242,8 @@ describe("/health", () => {
       version: "0.0.0-test",
       pid: process.pid,
       startedAt: "2026-11-12T00:00:00.000Z",
-      demo: false,
       dataDir,
     });
-    const demo = await engine(["basic-tools"], {
-      info: { version: "0.0.0-test", pid: 1, startedAt: "2026-11-12T00:00:00.000Z", demo: true, dataDir },
-    });
-    const health = (await get(demo.port, "/health")).json<Health>();
-    expect(health.demo).toBe(true);
-    expect(health.dataDir).toBeUndefined();
   });
 });
 

@@ -6,7 +6,7 @@
  */
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { DemoOptions, EngineFile, IngestStatus } from "@quantext/shared";
+import type { EngineFile, IngestStatus } from "@quantext/shared";
 import { claudeCodeCodec } from "../adapters/claude-code/index.ts";
 import type { Api } from "../api/index.ts";
 import { createApi } from "../api/index.ts";
@@ -31,14 +31,10 @@ export interface ServeOptions {
   version: string;
   /** Set by `--port`: this port or fail. Unset: `DEFAULT_PORT`, else a free one. */
   port?: number;
-  demo?: DemoOptions;
   /** `while-viewer`: stop after `idleMinutes` with no event stream and no request. `always`: never. */
   live: "always" | "while-viewer";
   idleMinutes: number;
   open: boolean;
-  home: string;
-  user?: string;
-  host?: string;
 }
 
 /** What the process gives the engine; tests pass their own. */
@@ -126,14 +122,7 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
   let catchUp: Promise<unknown> = Promise.resolve();
   try {
     reader = await openReader(dataDir, { setup: installViews });
-    const query = createQuery({
-      db: reader,
-      codec: claudeCodeCodec,
-      home: options.home,
-      ...(options.demo === undefined ? {} : { demo: options.demo }),
-      ...(options.user === undefined ? {} : { user: options.user }),
-      ...(options.host === undefined ? {} : { host: options.host }),
-    });
+    const query = createQuery({ db: reader, codec: claudeCodeCodec });
     const ingest = createIngest({ store, root: options.root });
     let phase: IngestStatus["phase"] = "catching-up";
     let lastError: string | undefined;
@@ -147,13 +136,7 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
       lastError = message;
       hooks.err(`qx: ${message}\n`);
     };
-    const slow = createQueryWorker({
-      dataDir,
-      home: options.home,
-      ...(options.demo === undefined ? {} : { demo: options.demo }),
-      ...(options.user === undefined ? {} : { user: options.user }),
-      ...(options.host === undefined ? {} : { host: options.host }),
-    });
+    const slow = createQueryWorker({ dataDir });
     worker = slow;
     const engineApi = createApi({
       query,
@@ -161,7 +144,7 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
       offload: slow.run,
       ingestStatus,
       staticDir: hooks.staticDir ?? defaultStaticDir(),
-      info: { version, pid: process.pid, startedAt, demo: options.demo !== undefined, dataDir },
+      info: { version, pid: process.pid, startedAt, dataDir },
       onError: (e) => hooks.err(`qx: ${e instanceof Error ? e.message : String(e)}\n`),
     });
     api = engineApi;

@@ -153,7 +153,7 @@ describe("qx serve", () => {
     });
     expect(run.out()).toContain(`quantext engine at ${file.url} (pid ${process.pid})`);
     const health = (await get(file.port, "/health")).json<Health>();
-    expect(health).toMatchObject({ ok: true, version: "0.0.0", pid: process.pid, demo: false, dataDir });
+    expect(health).toMatchObject({ ok: true, version: "0.0.0", pid: process.pid, dataDir });
     // Wait for the catch-up: the half session is there.
     let calls = 0;
     for (let i = 0; i < 200 && calls === 0; i++) {
@@ -167,7 +167,7 @@ describe("qx serve", () => {
       await new Promise((r) => setTimeout(r, 10));
       status = (await get(file.port, "/api/v1/status")).json<EngineStatus>();
     }
-    expect(status).toMatchObject({ engine: { version: "0.0.0", pid: process.pid, demo: false }, streams: 0 });
+    expect(status).toMatchObject({ engine: { version: "0.0.0", pid: process.pid }, streams: 0 });
     const { ingest } = status;
     expect(ingest).toMatchObject({ phase: "live", logsDone: ingest.logsTotal });
     expect(ingest.bytesDone).toBe(ingest.bytesTotal);
@@ -234,7 +234,7 @@ describe("qx serve", () => {
   test("says so when an engine of another version runs", async () => {
     const dataDir = tempDir("qx-data-");
     const other = createServer((_req, res) => {
-      const health: Health = { apiVersion: 1, ok: true, version: "9.9.9", pid: 4242, startedAt: "", demo: false };
+      const health: Health = { apiVersion: 1, ok: true, version: "9.9.9", pid: 4242, startedAt: "" };
       res.end(JSON.stringify(health));
     });
     await new Promise<void>((r) => other.listen(0, "127.0.0.1", r));
@@ -262,7 +262,7 @@ describe("qx serve", () => {
     const dataDir = tempDir("qx-data-");
     let version = "0.0.0";
     const fake = createServer((_req, res) => {
-      const health: Health = { apiVersion: 1, ok: true, version, pid: 4242, startedAt: "", demo: false };
+      const health: Health = { apiVersion: 1, ok: true, version, pid: 4242, startedAt: "" };
       res.end(JSON.stringify(health));
     });
     await new Promise<void>((r) => fake.listen(0, "127.0.0.1", r));

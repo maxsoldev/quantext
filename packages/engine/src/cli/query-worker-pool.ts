@@ -3,7 +3,6 @@
  * the slow query methods, with a time limit per request, a bounded queue, and identical requests shared.
  */
 import { Worker } from "node:worker_threads";
-import type { DemoOptions } from "@quantext/shared";
 import type { Offload } from "../api/index.ts";
 import { HttpError } from "../api/index.ts";
 
@@ -12,10 +11,6 @@ export type OffloadMethod = (typeof OFFLOAD_METHODS)[number];
 
 export interface QueryWorkerOptions {
   dataDir: string;
-  demo?: DemoOptions;
-  home?: string;
-  user?: string;
-  host?: string;
 }
 
 /** `.ts` in the repo, `.js` in the bundle (`dist/query-worker.js`). */
