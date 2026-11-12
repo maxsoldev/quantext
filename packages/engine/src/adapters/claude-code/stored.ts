@@ -14,7 +14,7 @@ const parts = (role: string, content: readonly Json[]): ContentPart[] =>
   content.map((c) => ({ hash: blockHash(role, c), content: c }));
 
 /** The adapter's version: bump it when a change reads logs differently, so that stored logs are read again. */
-export const ADAPTER_VERSION = 2;
+export const ADAPTER_VERSION = 3;
 
 /** Base64 data shorter than this stays in the content. */
 const MEDIA_MIN_CHARS = 128;

@@ -713,9 +713,14 @@ class Rows {
         call.model = derived.model;
         const canonical = canonicalModel(derived.model);
         if (canonical !== undefined) call.canonicalModel = canonical;
-        setUsage(call, derived.usage);
         const input = derived.usage.inputTokens + derived.usage.cacheReadTokens + derived.usage.cacheWriteTokens;
-        if (open.preTokens !== undefined && input < open.preTokens) {
+        const negative = Object.values(derived.usage).some((v) => typeof v === "number" && v < 0);
+        if (input <= 0 || negative) {
+          // Not a usage: the totals do not account for this call. It must not flow into sums or costs.
+          const detail = `the running totals give an input of ${input} tokens for the summarising call; it has no usage`;
+          call.issues.push({ kind: "derived-usage-invalid", detail });
+        } else setUsage(call, derived.usage);
+        if (call.usage !== undefined && open.preTokens !== undefined && input < open.preTokens) {
           const detail = `derived input ${input} is less than the ${open.preTokens} tokens of context before the compaction`;
           call.issues.push({ kind: "unreconciled-tokens", detail });
         }
