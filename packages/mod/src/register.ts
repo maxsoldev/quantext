@@ -4,6 +4,7 @@ import { clearToolOutputs, parseKeep, toolOutputsKeep } from "./clear-tool-outpu
 import { tokens } from "./format.ts";
 import { EMPTY, inputOf, readLive, statusLabel, updateLive } from "./live.ts";
 import { cacheExpiryNudge, contextNudge } from "./nudges.ts";
+import { openViewer } from "./viewer.ts";
 
 /**
  * Queues `/compact tool-outputs keep N`, which the session.compact hook answers. `$.session.compact()` would
@@ -52,6 +53,11 @@ export const register: Register = (on) => {
       description: "Clear old tool outputs from the context and keep all else (also: /compact tool-outputs)",
       argumentHint: "[keep N]",
     });
+    await $.command.register({
+      name: "quantext",
+      description: "Quantext: open the live context viewer (starts the engine when it is not running)",
+      argumentHint: "view",
+    });
     if (e.isInteractive) remeasureSoon($); // show the context before the first call
     return started;
   });
@@ -95,6 +101,17 @@ export const register: Register = (on) => {
     return r;
   });
 
+  on("command.run", { command: "quantext" }, async ($, e) => {
+    if (e.args.trim().toLowerCase() !== "view") return { text: "Usage: /quantext view" };
+    // The flow waits up to ~11 s, past a hook's budget: it runs from a timer and answers with toasts.
+    $.clock.after(
+      0,
+      () =>
+        void openViewer($).catch((error: unknown) => $.ui.toast(`quantext: /quantext view failed: ${String(error)}`)),
+    );
+    return { text: "quantext: opening the viewer…" };
+  });
+
   // Answers /clear-tool-outputs and `/compact tool-outputs [keep N]` in Claude Code's place: no summary.
   on("session.compact", async ($, e, next) => {
     const keep = e.agentId === undefined ? toolOutputsKeep(e.instructions) : undefined;
@@ -111,7 +128,7 @@ export const register: Register = (on) => {
       remeasureSoon($);
     }
     return r;
-  });
+  }).catch((_$, e, next) => next(e)); // a failed hook leaves the compaction to Claude Code
 
   // A /clear ends this conversation and goes on with a new one: start its figures over.
   on("session.end", async ($, e, next) => {
