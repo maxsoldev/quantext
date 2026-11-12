@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": [
+    "scripts/**/*.ts",
+    "fixtures/**/*.ts",
+    "packages/web/vite.config.ts",
+    "e2e/**/*.ts",
+    "playwright.config.ts"
+  ]
+}

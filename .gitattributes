@@ -1,0 +1,2 @@
+fixtures/claude-code/** -text linguist-generated
+packages/mod/vendor/** linguist-generated

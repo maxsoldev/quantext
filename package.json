@@ -1,0 +1,38 @@
+{
+  "name": "quantext-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.18.0+sha512.9d7882d5dc82147ecfc4e062aa34834e0ad0296710a1837a1115ae012127d36b7109e321ac1598a1dd0a65597681b1e99917e12ed0d749eae91187943363beb3",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "qx": "node packages/engine/src/cli/qx.ts",
+    "build": "pnpm -F @quantext/web build && node scripts/build-engine.ts",
+    "smoke": "pnpm build && node scripts/smoke-engine.ts",
+    "lint": "biome ci .",
+    "format": "biome check --write .",
+    "typecheck": "tsc -p tsconfig.json && pnpm -r typecheck",
+    "test": "vitest run",
+    "test:bun": "bun test ./fixtures ./packages/engine ./packages/shared ./packages/web ./scripts",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:mod && pnpm layers && pnpm scan && pnpm egress && pnpm supply-chain",
+    "layers": "node scripts/check-layers.ts",
+    "check:bun": "bun test ./fixtures ./packages/engine ./packages/shared ./packages/web ./scripts && bun scripts/check-layers.ts && bun scripts/scan-personal-data.ts && bun scripts/scan-personal-data.ts --history",
+    "scan": "node scripts/scan-personal-data.ts && pnpm scan:history && sh scripts/gitleaks.sh",
+    "scan:history": "node scripts/scan-personal-data.ts --history",
+    "test:mod": "node scripts/test-mod.ts",
+    "build:plugin": "pnpm build && node scripts/build-plugin.ts",
+    "egress": "pnpm build:plugin && node scripts/check-egress.ts",
+    "supply-chain": "node scripts/check-supply-chain.ts",
+    "e2e": "pnpm build && playwright test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.6",
+    "@playwright/test": "1.65.0",
+    "@types/node": "22.20.5",
+    "rolldown": "1.2.18",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}

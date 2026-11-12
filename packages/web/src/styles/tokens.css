@@ -1,0 +1,158 @@
+/*
+ * Design tokens. Light is the projector theme; dark is selected (its own validated steps), not a flip.
+ * The OS setting picks one; the toggle stamps data-theme on <html>, which wins both ways.
+ * Category and cache colours: validated with the dataviz validator against each surface.
+ */
+@import "@fontsource-variable/atkinson-hyperlegible-next/wght.css";
+@import "@fontsource-variable/atkinson-hyperlegible-mono/wght.css";
+
+:root {
+  color-scheme: light;
+  --font-ui: "Atkinson Hyperlegible Next Variable", system-ui, sans-serif;
+  --font-content: "Atkinson Hyperlegible Mono Variable", ui-monospace, monospace;
+
+  /* Type scale: 16px base, ratio 1.25. Nothing on screen is smaller than --t-small. */
+  --t-small: 0.875rem; /* 14 */
+  --t-body: 1rem; /* 16 */
+  --t-lead: 1.25rem; /* 20 */
+  --t-h2: 1.5625rem; /* 25 */
+  --t-h1: 1.953rem; /* 31 */
+  --t-hero: 2.441rem; /* 39 */
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --radius-s: 4px;
+  --radius-m: 8px;
+
+  /* Surfaces and ink: a cool drafting-film paper with deep slate ink. */
+  --page: #eceff2;
+  --surface: #fafbfc;
+  --surface-2: #f2f4f6;
+  --sunken: #e2e6ea;
+  --ink: #172433;
+  --ink-2: #44515f;
+  --ink-3: #5e6b79;
+  --rule: #d5dbe1;
+  --rule-strong: #b6c0ca;
+  --grid: #e3e7eb;
+  --focus: #172433;
+  --select: #172433;
+  --select-ink: #fafbfc;
+
+  /* Status: reserved, always with an icon and a label. */
+  --good: #0a7d0a;
+  --warning: #b07500;
+  --critical: #c23434;
+
+  /* Context categories, in request order (the stack order). */
+  --cat-tool-definitions: #2a78d6;
+  --cat-base-instructions: #eb6834;
+  --cat-injected-context: #1baf7a;
+  --cat-user: #eda100;
+  --cat-assistant: #e87ba4;
+  --cat-reasoning: #008300;
+  --cat-tool-calls: #6250d6;
+  --cat-tool-outputs: #e34948;
+  --cat-compaction-summary: #5f6b7a;
+  --cat-other: #aab4bf;
+
+  /*
+   * How the input was billed, and the output: their own system, not categories. One hue (OKLCH h 280, C 0.09),
+   * lighter = cheaper per token (read 0.1x, uncached 1x, write 1.25x, output 5x; in dark, darker = cheaper).
+   * Ordinal check passes in both themes. The three input parts are 15+ dE apart (normal and CVD) in both themes;
+   * nearest category: CVD dE 6.2 light, 7.0 dark, so each part also wears its own texture (marks.css):
+   * read diagonal lines, uncached dots, write a cross-hatch. Dark steps are L 0.47 / 0.62 / 0.86.
+   */
+  --cache-read: #a5abea;
+  --cache-uncached: #767ab5;
+  --cache-write: #494c83;
+  --cache-output: #262659;
+  /* An edit's removed and added lines: tints with a sign, never colour alone. */
+  --diff-del-bg: #fbe4e4;
+  --diff-del-ink: #8f1f1f;
+  --diff-add-bg: #dff3df;
+  --diff-add-ink: #0a5a0a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #11161c;
+    --surface: #182029;
+    --surface-2: #1e2731;
+    --sunken: #0d1217;
+    --ink: #e8edf2;
+    --ink-2: #b7c2cd;
+    --ink-3: #95a2b0;
+    --rule: #2c3743;
+    --rule-strong: #445260;
+    --grid: #25303b;
+    --focus: #e8edf2;
+    --select: #e8edf2;
+    --select-ink: #11161c;
+    --good: #2fb52f;
+    --warning: #e0a020;
+    --critical: #ef6a6a;
+    --cat-tool-definitions: #3987e5;
+    --cat-base-instructions: #d95926;
+    --cat-injected-context: #199e70;
+    --cat-user: #c98500;
+    --cat-assistant: #d55181;
+    --cat-reasoning: #008300;
+    --cat-tool-calls: #9085e9;
+    --cat-tool-outputs: #e66767;
+    --cat-compaction-summary: #8d99a8;
+    --cat-other: #56616e;
+    --cache-read: #51548c;
+    --cache-uncached: #7d82b0;
+    --cache-write: #c5cbff;
+    --cache-output: #e9ecff;
+    --diff-del-bg: #4a1f24;
+    --diff-del-ink: #ffc9c9;
+    --diff-add-bg: #163a20;
+    --diff-add-ink: #bff0bf;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #11161c;
+  --surface: #182029;
+  --surface-2: #1e2731;
+  --sunken: #0d1217;
+  --ink: #e8edf2;
+  --ink-2: #b7c2cd;
+  --ink-3: #95a2b0;
+  --rule: #2c3743;
+  --rule-strong: #445260;
+  --grid: #25303b;
+  --focus: #e8edf2;
+  --select: #e8edf2;
+  --select-ink: #11161c;
+  --good: #2fb52f;
+  --warning: #e0a020;
+  --critical: #ef6a6a;
+  --cat-tool-definitions: #3987e5;
+  --cat-base-instructions: #d95926;
+  --cat-injected-context: #199e70;
+  --cat-user: #c98500;
+  --cat-assistant: #d55181;
+  --cat-reasoning: #008300;
+  --cat-tool-calls: #9085e9;
+  --cat-tool-outputs: #e66767;
+  --cat-compaction-summary: #8d99a8;
+  --cat-other: #56616e;
+  --cache-read: #51548c;
+  --cache-uncached: #7d82b0;
+  --cache-write: #c5cbff;
+  --cache-output: #e9ecff;
+  --diff-del-bg: #4a1f24;
+  --diff-del-ink: #ffc9c9;
+  --diff-add-bg: #163a20;
+  --diff-add-ink: #bff0bf;
+}

@@ -1,0 +1,482 @@
+/**
+ * Split one Call's input over its Blocks, against the latest split Call of its lane. Blocks the Call keeps in place
+ * keep their tokens and their open runs; only the changed part is classified, estimated and attributed, so a long
+ * session costs time and memory in proportion to its new content.
+ */
+import type { Call, CallBlock, RequestSection, TokenBasis, Usage } from "@quantext/shared";
+import type { FreshBlock, Share } from "../../core/attribute.ts";
+import { attributeCall, cachedPrefixLength, reconcile } from "../../core/attribute.ts";
+import type { Estimator } from "../../core/estimate.ts";
+import { replaysThinking } from "../../providers/anthropic/content.ts";
+import type { Changes } from "./changes.ts";
+import type { BlockRef, Classifier, ShapeRefs } from "./classify.ts";
+import type { Content } from "./lookup.ts";
+import { get, put } from "./records.ts";
+import type { CallSpec, Lane, ParserState } from "./state.ts";
+
+export interface SplitContext {
+  store: Content;
+  classifier: Classifier;
+  changes: Changes;
+  estimator: Estimator;
+}
+
+interface FreshEntry {
+  ref: BlockRef;
+  section: RequestSection;
+  message: number;
+  /** For a deferred tool schema placed after its tool reference: the tool. */
+  deferredTool?: string;
+}
+
+export function laneOf(state: ParserState, key: string, sessionId: string): Lane {
+  const id = `${sessionId}|${key}`;
+  return (
+    get(state.lanes, id) ??
+    put(state.lanes, id, {
+      key,
+      sessionId,
+      shapeCount: 0,
+      messages: [],
+      messageEnds: [],
+      blocks: [],
+      sections: [],
+      messageOf: [],
+      contentOf: [],
+      tokens: [],
+      basis: [],
+      group: [],
+      estimates: [],
+      prefix: [0],
+      lone: [0],
+      runs: [],
+      reasoning: [],
+      groupCount: {},
+      partial: {},
+      deferred: [],
+      gaps: [],
+    })
+  );
+}
+
+/** Split a Call with a complete request and a Usage; sets its tokens, framing, cache boundary and runs. */
+export function splitCall(ctx: SplitContext, call: Call, spec: CallSpec, usage: Usage): void {
+  const { store, classifier, changes } = ctx;
+  const state = store.state;
+  const lane = laneOf(state, spec.lane, call.sessionId);
+  if (lane.cold) warmLane(ctx, lane);
+  const shape = spec.shapeHash === undefined ? undefined : classifier.shape(spec.shapeHash);
+  if (shape === undefined) return;
+  const messages = messagesOf(ctx, spec, lane);
+  let shared = lane.shapeKey === shape.key ? commonPrefix(messages, lane.messages) : 0;
+  const filled = filledGaps(store, lane, shared);
+  shared = Math.min(shared, deferredLimit(lane, shape), thinkingLimit(store, lane, messages, call), ...filled.limits);
+  const keptPos =
+    lane.shapeKey !== shape.key ? 0 : shared === 0 ? shape.refs.length : (lane.messageEnds[shared - 1] ?? 0);
+
+  const fresh = freshEntries(classifier, shape, messages, keptPos === 0 ? 0 : shared, keptPos === 0);
+  applyOutputAnchor(state, lane, messages, fresh, call);
+  const pool = droppedPool(lane, keptPos);
+  const breakpoints = spec.breakpoints.flatMap((path) => positionOf(path, lane, shape, shared, keptPos, fresh));
+  const { keptExact, partialAfter } = keptExactness(lane, keptPos);
+  const result = attributeCall({
+    id: call.id,
+    usage,
+    kept: {
+      count: keptPos,
+      tokens: lane.prefix[keptPos] ?? 0,
+      exact: keptExact,
+      estimates: () => lane.estimates.slice(0, keptPos),
+    },
+    fresh: fresh.map((f): FreshBlock => {
+      const carried = pool.get(f.ref.hash)?.shift();
+      return carried === undefined ? { estimate: f.ref.estimate } : { estimate: f.ref.estimate, carried };
+    }),
+    ...(breakpoints.length > 0 ? { lastBreakpoint: Math.max(...breakpoints) } : {}),
+    groupSize: (g) => store.groupSize(g) ?? 0,
+  });
+  for (const g of result.groups) store.putGroupSize(g.id, g.size);
+
+  // A Call that is not split has no blocks (no blockCount), so runs may go on across it; only a new split restarts.
+  const restart = result.kept !== undefined;
+  truncate(lane, keptPos, changes);
+  lane.partial = partialAfter;
+  if (restart) {
+    for (let p = 0; p < keptPos; p++) closeRun(lane, p, changes);
+    if (result.kept !== undefined) replaceKept(lane, result.kept);
+    for (let p = 0; p < keptPos; p++) openRun(lane, p, call, changes);
+  }
+  lane.messages.length = Math.min(lane.messages.length, keptPos === 0 ? 0 : shared);
+  lane.messageEnds.length = lane.messages.length;
+  if (keptPos === 0) lane.deferred = [];
+  noteFilled(store, changes, filled.gaps, call.index);
+  lane.shapeKey = shape.key;
+  lane.shapeCount = shape.refs.length;
+  appendFresh(lane, fresh, result.fresh, messages, call, changes);
+  lane.lastIndex = call.index;
+  lane.lastCallId = call.id;
+  call.blockCount = lane.blocks.length;
+  call.cacheBreakpoints = breakpoints;
+  call.framingTokens = result.framingTokens;
+  call.issues.push(...result.issues);
+  const read = usage.cacheReadTokens;
+  call.cacheBoundary = {
+    tokens: read,
+    position: cachedPrefixLength((i) => lane.prefix[i] ?? 0, lane.blocks.length, read),
+  };
+  linkResults(store, fresh, changes);
+}
+
+/**
+ * The message hashes of a request: the base's first `keep` messages, then the tail. A base that is the latest Call
+ * of any lane has its list at hand; only a base older than that needs a walk back along the chain of requests.
+ */
+function messagesOf(ctx: SplitContext, spec: CallSpec, lane: Lane | undefined): string[] {
+  const chain: CallSpec[] = [];
+  let start: readonly string[] = [];
+  for (let at: CallSpec | undefined = spec; at !== undefined; ) {
+    chain.push(at);
+    if (at.baseId === undefined) break;
+    const known = lane !== undefined && at.baseId === lane.lastCallId ? lane : latestLaneOf(ctx, at.baseId);
+    if (known !== undefined) {
+      start = known.messages;
+      break;
+    }
+    at = ctx.store.spec(at.baseId);
+  }
+  const list = [...start];
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const s = chain[i] as CallSpec;
+    list.length = Math.min(list.length, s.baseId === undefined ? 0 : s.keep);
+    for (const hash of s.tail) list.push(hash);
+  }
+  return list;
+}
+
+/** The lane whose latest split Call is `callId`, warmed if it came from a snapshot. */
+function latestLaneOf(ctx: SplitContext, callId: string): Lane | undefined {
+  for (const lane of Object.values(ctx.store.state.lanes)) {
+    if (lane.lastCallId !== callId) continue;
+    if (lane.cold) warmLane(ctx, lane);
+    return lane;
+  }
+  return undefined;
+}
+
+/**
+ * Rebuild a lane restored from a snapshot: its layout is the open runs that the caller kept, and its message list
+ * is its latest Call's, walked back along the requests the caller kept as records.
+ */
+function warmLane(ctx: SplitContext, lane: Lane): void {
+  const { store } = ctx;
+  delete lane.cold;
+  const runs = store.lookup.openRuns(lane.sessionId, lane.key).sort((a, b) => a.position - b.position);
+  const contentIndex = new Map<number, number>();
+  for (const run of runs) {
+    const p = lane.blocks.length;
+    const block = store.lookup.block(run.blockHash);
+    const message = run.message ?? -1;
+    const deferred = run.section === "messages" && block?.kind === "tool-schema";
+    lane.blocks.push(run.blockHash);
+    lane.sections.push(run.section);
+    lane.messageOf.push(message);
+    const index = contentIndex.get(message) ?? 0;
+    lane.contentOf.push(deferred ? -1 : index);
+    if (!deferred) contentIndex.set(message, index + 1);
+    const known = block !== undefined && block.kind !== "gap";
+    lane.estimates.push(known ? ctx.estimator(block) : { tokens: 0, method: "unknown" });
+    lane.reasoning.push(block?.kind === "reasoning");
+    lane.runs.push(structuredClone(run));
+    setShare(lane, p, {
+      tokens: run.tokens ?? 0,
+      basis: run.basis ?? "estimate",
+      ...(run.group ? { group: run.group } : {}),
+    });
+    if (deferred) lane.deferred.push({ position: p, tool: block?.source.tool ?? "", hash: run.blockHash });
+    if (message >= 0) lane.messageEnds[message] = p + 1;
+  }
+  for (const g of Object.keys(lane.groupCount)) {
+    if ((get(lane.groupCount, g) ?? 0) < (store.groupSize(g) ?? 0)) put(lane.partial, g, 1);
+  }
+  const spec = lane.lastCallId === undefined ? undefined : store.spec(lane.lastCallId);
+  lane.messages = spec === undefined ? [] : messagesOf(ctx, spec, undefined);
+  for (let m = 0; m < lane.messages.length; m++) {
+    lane.messageEnds[m] ??= m === 0 ? lane.shapeCount : (lane.messageEnds[m - 1] ?? lane.shapeCount);
+  }
+}
+
+function commonPrefix(a: readonly string[], b: readonly string[]): number {
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  return i;
+}
+
+/**
+ * Gaps among the kept messages whose message has come to the log since: the kept prefix ends before each, so
+ * this Call gets the message's own Blocks in place of the gap.
+ */
+function filledGaps(store: Content, lane: Lane, shared: number) {
+  const gaps = lane.gaps.filter(
+    (g) => (lane.messageOf[g.position] ?? 0) < shared && store.message(g.message) !== undefined,
+  );
+  return { gaps, limits: gaps.map((g) => lane.messageOf[g.position] ?? 0) };
+}
+
+/** The Call that got a gap first says that its message came later, and from which Call on the lane has it. */
+function noteFilled(store: Content, changes: Changes, gaps: readonly Lane["gaps"][number][], index: number): void {
+  for (const gap of gaps) {
+    const call = store.call(gap.callId);
+    if (call === undefined) continue;
+    const detail = `message ${gap.message} came after this call was split: Calls from index ${index} on have it`;
+    if (call.issues.some((i) => i.detail === detail)) continue;
+    call.issues.push({ kind: "missing-message", detail });
+    changes.calls.add(call.id);
+  }
+}
+
+/** Kept messages must not hold a deferred tool schema that this Call's shape gives differently. */
+function deferredLimit(lane: Lane, shape: ShapeRefs): number {
+  let limit = Number.POSITIVE_INFINITY;
+  for (const d of lane.deferred) {
+    if (get(shape.deferred, d.tool)?.hash === d.hash) continue;
+    const message = lane.messageOf[d.position] ?? 0;
+    limit = Math.min(limit, message);
+  }
+  return limit;
+}
+
+/**
+ * A model that drops the thinking of earlier turns sends the last assistant message differently once a newer
+ * assistant message follows it: from that message on, nothing is kept unchanged.
+ */
+function thinkingLimit(store: Content, lane: Lane, messages: readonly string[], call: Call): number {
+  if (replaysThinking(call.canonicalModel)) return Number.POSITIVE_INFINITY;
+  const role = (hash: string | undefined) => store.message(hash ?? "")?.role;
+  for (let m = lane.messages.length - 1; m >= 0; m--) {
+    if (role(lane.messages[m]) !== "assistant") continue;
+    const start = m === 0 ? lane.shapeCount : (lane.messageEnds[m - 1] ?? 0);
+    if (!lane.reasoning.slice(start, lane.messageEnds[m] ?? 0).some(Boolean)) return Number.POSITIVE_INFINITY;
+    for (let k = m + 1; k < messages.length; k++) if (role(messages[k]) === "assistant") return m;
+    return Number.POSITIVE_INFINITY;
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
+/** The Blocks after the kept part: shape Blocks when nothing is kept, then the new messages. */
+function freshEntries(
+  classifier: Classifier,
+  shape: ShapeRefs,
+  messages: readonly string[],
+  from: number,
+  withShape: boolean,
+) {
+  const out: FreshEntry[] = [];
+  if (withShape) {
+    for (const [i, ref] of shape.refs.entries()) out.push({ ref, section: shape.sections[i] ?? "system", message: -1 });
+  }
+  for (let m = from; m < messages.length; m++) {
+    const hash = messages[m] ?? "";
+    for (const ref of classifier.message(hash) ?? [classifier.gap(hash)]) {
+      out.push({ ref, section: "messages", message: m });
+      for (const tool of ref.references) {
+        const schema = get(shape.deferred, tool);
+        if (schema !== undefined) out.push({ ref: schema, section: "messages", message: m, deferredTool: tool });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The previous Call's response comes back as the assistant message of the next tail. Its output tokens are a far
+ * better weight than its characters: thinking gets the reasoning tokens (none if the model drops it), the other
+ * Blocks the rest, split by characters. The split stays an estimate, reconciled to the exact change.
+ */
+function applyOutputAnchor(
+  state: ParserState,
+  lane: Lane,
+  messages: readonly string[],
+  fresh: FreshEntry[],
+  call: Call,
+): void {
+  const response = lane.lastCallId === undefined ? undefined : get(state.responses, lane.lastCallId);
+  if (response?.hash === undefined) return;
+  const m = messages.indexOf(response.hash);
+  const own = fresh.filter((f) => f.message === m && m >= 0 && f.deferredTool === undefined);
+  if (own.length === 0) return;
+  const thinking = own.filter((f) => f.ref.kind === "reasoning");
+  const others = own.filter((f) => f.ref.kind !== "reasoning");
+  const reasoning = replaysThinking(call.canonicalModel) ? (response.reasoningTokens ?? 0) : 0;
+  const rest = Math.max(0, response.outputTokens - (response.reasoningTokens ?? 0));
+  const weigh = (entries: FreshEntry[], total: number) =>
+    reconcile(
+      entries.map((f) => f.ref.estimate),
+      total,
+    ).forEach((tokens, i) => {
+      const entry = entries[i];
+      if (entry !== undefined) entry.ref = { ...entry.ref, estimate: { tokens, method: "output" } };
+    });
+  weigh(thinking, reasoning);
+  weigh(others, rest);
+  // The other new Blocks of the Call (tool results) take what the response leaves.
+  for (const f of fresh) {
+    if (f.message !== m && f.message >= 0) f.ref = { ...f.ref, estimate: { ...f.ref.estimate, method: "rest" } };
+  }
+}
+
+/** The tokens of the Blocks after the kept part, by content: the next Call may send them again elsewhere. */
+function droppedPool(lane: Lane, keptPos: number): Map<string, Share[]> {
+  const pool = new Map<string, Share[]>();
+  for (let p = keptPos; p < lane.blocks.length; p++) {
+    const hash = lane.blocks[p] ?? "";
+    const g = lane.group[p];
+    const share: Share = { tokens: lane.tokens[p] ?? 0, basis: lane.basis[p] ?? "estimate" };
+    if (g !== null && g !== undefined) share.group = g;
+    pool.set(hash, [...(pool.get(hash) ?? []), share]);
+  }
+  return pool;
+}
+
+/** The kept sum is exact when no group in it lost members and no Block in it is a lone estimate. */
+function keptExactness(lane: Lane, keptPos: number) {
+  const partialAfter: Record<string, 1> = {};
+  for (const g of Object.keys(lane.partial)) put(partialAfter, g, 1);
+  const lost = new Map<string, number>();
+  for (let p = keptPos; p < lane.blocks.length; p++) {
+    const g = lane.group[p];
+    if (g !== null && g !== undefined) lost.set(g, (lost.get(g) ?? 0) + 1);
+  }
+  for (const [g, n] of lost) {
+    const left = (get(lane.groupCount, g) ?? 0) - n;
+    if (left > 0) put(partialAfter, g, 1);
+    else delete partialAfter[g];
+  }
+  return { keptExact: Object.keys(partialAfter).length === 0 && (lane.lone[keptPos] ?? 0) === 0, partialAfter };
+}
+
+/** The position of a cache breakpoint path in this Call's input. */
+function positionOf(
+  path: readonly (string | number)[],
+  lane: Lane,
+  shape: ShapeRefs,
+  shared: number,
+  keptPos: number,
+  fresh: readonly FreshEntry[],
+): number[] {
+  const [section, i, , j] = path;
+  if (section === "system" && typeof i === "number") return [shape.toolCount + i];
+  if (section === "tools" && typeof i === "number") {
+    const p = shape.refs.findIndex((r, k) => shape.sections[k] === "tools" && r.contentIndex === i);
+    return p < 0 ? [] : [p];
+  }
+  if (section !== "messages" || typeof i !== "number" || typeof j !== "number") return [];
+  if (keptPos > 0 && i < shared) {
+    const start = i === 0 ? lane.shapeCount : (lane.messageEnds[i - 1] ?? 0);
+    for (let p = start; p < (lane.messageEnds[i] ?? 0); p++) if (lane.contentOf[p] === j) return [p];
+    return [];
+  }
+  const k = fresh.findIndex((f) => f.message === i && f.deferredTool === undefined && f.ref.contentIndex === j);
+  return k < 0 ? [] : [keptPos + k];
+}
+
+function truncate(lane: Lane, keptPos: number, changes: Changes): void {
+  for (let p = lane.blocks.length - 1; p >= keptPos; p--) {
+    closeRun(lane, p, changes);
+    const g = lane.group[p];
+    if (g !== null && g !== undefined) {
+      const left = (get(lane.groupCount, g) ?? 1) - 1;
+      if (left > 0) put(lane.groupCount, g, left);
+      else delete lane.groupCount[g];
+    }
+  }
+  const lists = [lane.blocks, lane.sections, lane.messageOf, lane.contentOf, lane.tokens, lane.basis, lane.group];
+  for (const list of [...lists, lane.estimates, lane.runs, lane.reasoning])
+    list.length = Math.min(list.length, keptPos);
+  lane.prefix.length = keptPos + 1;
+  lane.lone.length = keptPos + 1;
+  lane.deferred = lane.deferred.filter((d) => d.position < keptPos);
+  lane.gaps = lane.gaps.filter((g) => g.position < keptPos);
+}
+
+function replaceKept(lane: Lane, shares: readonly Share[]): void {
+  lane.groupCount = {};
+  lane.partial = {};
+  for (const [p, share] of shares.entries()) setShare(lane, p, share);
+}
+
+function setShare(lane: Lane, p: number, share: Share): void {
+  lane.tokens[p] = share.tokens;
+  lane.basis[p] = share.basis;
+  lane.group[p] = share.group ?? null;
+  if (share.group !== undefined) put(lane.groupCount, share.group, (get(lane.groupCount, share.group) ?? 0) + 1);
+  lane.prefix[p + 1] = (lane.prefix[p] ?? 0) + share.tokens;
+  lane.lone[p + 1] = (lane.lone[p] ?? 0) + (share.basis === "estimate" && share.group === undefined ? 1 : 0);
+}
+
+function appendFresh(
+  lane: Lane,
+  fresh: readonly FreshEntry[],
+  shares: readonly Share[],
+  messages: readonly string[],
+  call: Call,
+  changes: Changes,
+): void {
+  fresh.forEach((entry, k) => {
+    const p = lane.blocks.length;
+    lane.blocks.push(entry.ref.hash);
+    lane.sections.push(entry.section);
+    lane.messageOf.push(entry.message);
+    lane.contentOf.push(entry.deferredTool === undefined ? entry.ref.contentIndex : -1);
+    lane.estimates.push(entry.ref.estimate);
+    lane.reasoning.push(entry.ref.kind === "reasoning");
+    setShare(lane, p, shares[k] ?? { tokens: 0, basis: "estimate" });
+    if (entry.deferredTool !== undefined)
+      lane.deferred.push({ position: p, tool: entry.deferredTool, hash: entry.ref.hash });
+    if (entry.ref.kind === "gap")
+      lane.gaps.push({ position: p, message: messages[entry.message] ?? "", callId: call.id });
+    openRun(lane, p, call, changes);
+    if (entry.section === "messages") lane.messageEnds[entry.message] = p + 1;
+  });
+  for (let m = lane.messages.length; m < messages.length; m++) {
+    lane.messages.push(messages[m] ?? "");
+    lane.messageEnds[m] ??= m === 0 ? lane.shapeCount : (lane.messageEnds[m - 1] ?? lane.shapeCount);
+  }
+}
+
+function openRun(lane: Lane, p: number, call: Call, changes: Changes): void {
+  const run: CallBlock = {
+    id: `${lane.sessionId}:${lane.key}:${call.index}:${p}`,
+    sessionId: lane.sessionId,
+    lane: lane.key,
+    blockHash: lane.blocks[p] ?? "",
+    position: p,
+    section: lane.sections[p] ?? "messages",
+    tokens: lane.tokens[p] ?? 0,
+    basis: lane.basis[p] ?? ("estimate" as TokenBasis),
+    firstCall: call.index,
+  };
+  const message = lane.messageOf[p] ?? -1;
+  if (message >= 0) run.message = message;
+  const group = lane.group[p];
+  if (group !== null && group !== undefined) run.group = group;
+  lane.runs[p] = run;
+  changes.run(run);
+}
+
+function closeRun(lane: Lane, p: number, changes: Changes): void {
+  const run = lane.runs[p];
+  if (run === undefined || run.lastCall !== undefined || lane.lastIndex === undefined) return;
+  run.lastCall = lane.lastIndex;
+  changes.run(run);
+}
+
+/** A tool result sent for the first time is the result Block of its ToolCall. */
+function linkResults(store: Content, fresh: readonly FreshEntry[], changes: Changes): void {
+  for (const { ref } of fresh) {
+    if (ref.toolUseId === undefined) continue;
+    const toolCall = store.toolCall(ref.toolUseId);
+    if (toolCall === undefined || toolCall.resultBlockHash !== undefined) continue;
+    toolCall.resultBlockHash = ref.hash;
+    changes.toolCalls.add(toolCall.id);
+  }
+}

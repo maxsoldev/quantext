@@ -1,0 +1,139 @@
+/* A Session's views as tabs, its subagents, and the tool-call list with its panel. */
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--rule-strong);
+}
+.tabs a {
+  padding: var(--space-2) var(--space-4);
+  font-weight: 700;
+  text-decoration: none;
+  color: var(--ink-2);
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+}
+.tabs a:hover {
+  color: var(--ink);
+}
+.tabs a[aria-current="page"] {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+.subagents {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.tools-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.tools-head h2 {
+  margin: 0;
+}
+.tools-lede {
+  font-size: var(--t-lead);
+  max-width: 76ch;
+  margin: 0;
+}
+.tools-lede .tip-anchor {
+  font-weight: 700;
+}
+.sort-by button {
+  font-size: var(--t-small);
+}
+.tools-table {
+  --cols: 56px minmax(0, 1fr) 96px 96px 200px;
+  --row: 56px;
+  max-height: calc(100vh - 340px);
+  min-height: 0;
+}
+.tools-table .tbody .tr.selected {
+  background: var(--surface-2);
+  box-shadow: inset 4px 0 0 var(--ink);
+}
+.tool-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: var(--space-1) 0;
+  text-align: left;
+  border-radius: 2px;
+}
+.tool-name {
+  font-weight: 700;
+  white-space: nowrap;
+}
+.tool-input {
+  color: var(--ink-2);
+  font-size: var(--t-small);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.tag.error-tag {
+  color: var(--critical);
+}
+.tools-table .share {
+  width: 100%;
+}
+.tools-table .share-track {
+  flex: 1;
+}
+.panel-links {
+  margin: 0;
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.edit-diff {
+  margin: 0;
+}
+.edit-diff figcaption {
+  font-weight: 700;
+  margin-bottom: var(--space-2);
+}
+.edit-diff pre {
+  margin: 0;
+  padding: var(--space-2) 0;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-s);
+  overflow-x: auto;
+  white-space: pre;
+}
+.diff-line {
+  display: block;
+  padding: 0 var(--space-3) 0 0;
+}
+.diff-sign {
+  display: inline-block;
+  width: 2ch;
+  text-align: center;
+  font-weight: 700;
+}
+.diff-add {
+  background: var(--diff-add-bg);
+  color: var(--diff-add-ink);
+}
+.diff-del {
+  background: var(--diff-del-bg);
+  color: var(--diff-del-ink);
+}
+.diff-gap {
+  display: block;
+  height: var(--space-3);
+  border-top: 1px dashed var(--rule-strong);
+}
+.tool-what {
+  margin: var(--space-1) 0 0;
+  font-size: var(--t-small);
+  overflow-wrap: anywhere;
+}

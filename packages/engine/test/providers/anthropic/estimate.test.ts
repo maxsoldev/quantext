@@ -1,0 +1,137 @@
+import type { Block } from "@quantext/shared";
+import { describe, expect, test } from "vitest";
+import { replaysThinking } from "../../../src/providers/anthropic/content.ts";
+import {
+  BLOCK_OVERHEAD_TOKENS,
+  CHARS_PER_TOKEN,
+  estimateBlock,
+  imageSize,
+} from "../../../src/providers/anthropic/estimate.ts";
+
+const block = (kind: Block["kind"], content: Block["content"]): Block => ({
+  hash: kind,
+  kind,
+  source: {},
+  text: "",
+  content,
+});
+
+// A 96 x 64 PNG: the 8-byte signature, then the IHDR chunk with width and height (big-endian).
+const PNG_96x64 = "iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABq";
+// A 1-pixel GIF89a header with width 640 and height 480 (little-endian).
+const GIF_640x480 = btoa("GIF89a\x80\x02\xe0\x01");
+
+describe("imageSize", () => {
+  test("reads width and height from a PNG header", () => {
+    expect(imageSize(PNG_96x64)).toEqual({ width: 96, height: 64 });
+  });
+
+  test("reads width and height from a GIF header", () => {
+    expect(imageSize(GIF_640x480)).toEqual({ width: 640, height: 480 });
+  });
+
+  test("reads width and height from a JPEG start-of-frame segment", () => {
+    // SOI, an APP0 segment of 16 bytes, then SOF0 with height 300 and width 400.
+    const jpeg = [
+      0xff,
+      0xd8,
+      0xff,
+      0xe0,
+      0x00,
+      0x10,
+      ...Array(14).fill(0),
+      0xff,
+      0xc0,
+      0x00,
+      0x11,
+      0x08,
+      0x01,
+      0x2c,
+      0x01,
+      0x90,
+    ];
+    expect(imageSize(btoa(String.fromCharCode(...jpeg)))).toEqual({ width: 400, height: 300 });
+  });
+
+  test("reads only the header bytes: a huge image decodes no more than its first 64 KB", () => {
+    const huge = PNG_96x64 + "A".repeat(20_000_000);
+    const start = performance.now();
+    expect(imageSize(huge)).toEqual({ width: 96, height: 64 });
+    expect(performance.now() - start).toBeLessThan(50);
+  });
+
+  test("returns undefined for data that is not a known image format", () => {
+    expect(imageSize(btoa("not an image at all"))).toBeUndefined();
+  });
+});
+
+describe("estimateBlock", () => {
+  test("estimates text by characters, plus the overhead of a block", () => {
+    const text = "x".repeat(330);
+    expect(estimateBlock(block("user", { type: "text", text }))).toEqual({
+      tokens: Math.ceil(330 / CHARS_PER_TOKEN) + BLOCK_OVERHEAD_TOKENS,
+      method: "chars",
+    });
+  });
+
+  test("counts the tool use id of a tool call and of a tool result", () => {
+    const use = { type: "tool_use", id: "x".repeat(33), name: "", input: "" };
+    const result = { type: "tool_result", tool_use_id: "x".repeat(33), content: "" };
+    const expected = Math.ceil(35 / CHARS_PER_TOKEN) + BLOCK_OVERHEAD_TOKENS; // id + the JSON '""' of the input
+    expect(estimateBlock(block("tool-call", use)).tokens).toBe(expected);
+    expect(estimateBlock(block("tool-result", result)).tokens).toBe(
+      Math.ceil(33 / CHARS_PER_TOKEN) + BLOCK_OVERHEAD_TOKENS,
+    );
+  });
+
+  test("estimates an image by width x height / 750 from its header, not by its base64 length", () => {
+    const image = { type: "image", source: { type: "base64", media_type: "image/png", data: PNG_96x64 } };
+    expect(estimateBlock(block("image", image))).toEqual({
+      tokens: Math.ceil((96 * 64) / 750) + BLOCK_OVERHEAD_TOKENS,
+      method: "image",
+    });
+  });
+
+  test("scales a large image down to 1568 pixels on the long edge first", () => {
+    const big = btoa("GIF89a\x40\x1f\xa0\x0f"); // 8000 x 4000
+    const image = { type: "image", source: { type: "base64", media_type: "image/gif", data: big } };
+    expect(estimateBlock(block("image", image)).tokens).toBe(Math.ceil((1568 * 784) / 750) + BLOCK_OVERHEAD_TOKENS);
+  });
+
+  test("estimates an image inside a tool result by its header too", () => {
+    const image = { type: "image", source: { type: "base64", media_type: "image/png", data: PNG_96x64 } };
+    const result = { type: "tool_result", tool_use_id: "", content: [image] };
+    expect(estimateBlock(block("tool-result", result))).toEqual({
+      tokens: Math.ceil((96 * 64) / 750) + BLOCK_OVERHEAD_TOKENS,
+      min: BLOCK_OVERHEAD_TOKENS,
+      method: "image",
+    });
+  });
+
+  test("gives a tool result a lower bound: its tool use id and the block's structure", () => {
+    const result = { type: "tool_result", tool_use_id: "x".repeat(33), content: "" };
+    expect(estimateBlock(block("tool-result", result)).min).toBe(
+      Math.ceil(33 / CHARS_PER_TOKEN) + BLOCK_OVERHEAD_TOKENS,
+    );
+  });
+
+  test("marks a document as unknown", () => {
+    const doc = { type: "document", source: { type: "base64", media_type: "application/pdf", data: "JVBERi0x" } };
+    expect(estimateBlock(block("document", doc))).toEqual({ tokens: 0, method: "unknown" });
+  });
+});
+
+describe("replaysThinking", () => {
+  test.each([
+    ["claude-opus-5-5", true],
+    ["claude-opus-4-5", true],
+    ["claude-opus-4-1", false],
+    ["claude-sonnet-4-5", false],
+    ["claude-sonnet-5-5", true],
+    ["claude-haiku-4-5", false],
+    ["claude-haiku-5-5", true],
+    ["claude-fable-5-2", true],
+  ])("%s keeps earlier thinking: %s", (model, keeps) => {
+    expect(replaysThinking(model)).toBe(keeps);
+  });
+});
