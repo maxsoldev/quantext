@@ -105,6 +105,17 @@ describe("the watcher", () => {
     expect(fake.asked).toEqual([["/r/projects/p/a.jsonl", "/r/projects/p/a/subagents/agent-1.jsonl"]]);
   });
 
+  test("ignores changes to files that are not transcripts or meta files", async () => {
+    const fake = recordingIngest();
+    const changes = manualChanges();
+    const watcher = watchTranscripts({ ingest: fake.ingest, root: "/r", changes, debounceMs: 60_000 });
+    onCleanup(() => watcher.stop());
+    changes.fire("/r/projects/p/a/tool-results/out.txt");
+    changes.fire("/r/projects/p/a/image.png");
+    await watcher.flush();
+    expect(fake.asked).toEqual([]);
+  });
+
   test("reads everything again for a change it cannot place (a folder, or no file name)", async () => {
     const fake = recordingIngest();
     const changes = manualChanges();

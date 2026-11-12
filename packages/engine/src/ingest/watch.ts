@@ -4,7 +4,7 @@
  */
 import type { FSWatcher } from "node:fs";
 import { watch } from "node:fs";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import type { Ingest } from "./ingest.ts";
 
 /** Reports changes under the transcript folder: a path, or undefined when it cannot say which. */
@@ -65,7 +65,8 @@ export function watchTranscripts(options: WatchOptions): Watcher {
   const onChange = (path?: string) => {
     if (stopped) return;
     if (path !== undefined && isTranscriptFile(path)) paths.add(path);
-    else everything = true;
+    else if (path !== undefined && extname(path) !== "") return; // another file (a tool output, an image)
+    else everything = true; // a folder, or a change it cannot place
     timer ??= setTimeout(() => {
       timer = undefined;
       void read();
