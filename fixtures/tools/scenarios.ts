@@ -40,6 +40,7 @@ export const SCENARIOS: readonly Scenario[] = [
           "4. Read missing.txt (it does not exist; that is expected, go on).",
           "5. Bash: git log --oneline",
           '6. Edit src/greet.ts: change "Hello" to "Hi".',
+          "7. Read src/math.ts and README.md in parallel: both Read calls in one single message.",
           "Then reply with one word: done.",
         ].join("\n"),
       },
@@ -68,11 +69,21 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     name: "resume",
     sessionId: "00000000-0000-4000-8000-000000000004",
-    description: "Two turns: the second is a separate process, `claude -p --resume <id>`.",
-    exercises: ["resume at a turn boundary", "keep and tail across processes"],
+    description: "Three turns; each later one is a separate process, `claude -p --resume <id>`.",
+    exercises: [
+      "@file prompt attachment",
+      "resume at a turn boundary",
+      "keep and tail across processes",
+      "built-in skill loaded with the Skill tool",
+    ],
     steps: [
-      { prompt: "Read notes.txt and summarise it in one line." },
+      { prompt: "Summarise @notes.txt in one line." },
       { prompt: "How many list items does notes.txt have? Answer from what you read before, with one number." },
+      {
+        prompt:
+          "Use the Skill tool to load the built-in keybindings-help skill, then say in one line what it covers. " +
+          "Change no files.",
+      },
     ],
   },
   {
@@ -103,14 +114,15 @@ export const SCENARIOS: readonly Scenario[] = [
   {
     name: "effort",
     sessionId: "00000000-0000-4000-8000-000000000007",
-    description: "Two turns with different effort levels and models, so the call parameters vary in one session.",
-    exercises: ["effort high", "effort low", "model change on resume", "adaptive thinking"],
+    description: "Three turns with different thinking parameters, so the call parameters vary in one session.",
+    exercises: ["effort high (Opus)", "effort low (Opus)", "budget thinking on Sonnet (model change on resume)"],
     steps: [
       {
         prompt: "Without tools: a train leaves at 09:47 and the trip takes 2 h 38 min. When does it arrive? Time only.",
         args: ["--effort", "high"],
       },
-      { prompt: "And if the trip took 25 minutes longer? Time only.", args: ["--effort", "low", "--model", "sonnet"] },
+      { prompt: "And if the trip took 25 minutes longer? Time only.", args: ["--effort", "low"] },
+      { prompt: "And if it left 10 minutes later than that? Time only.", args: ["--model", "sonnet"] },
     ],
   },
 ];
