@@ -21,7 +21,7 @@ an engine nobody uses must not stay.
   apiVersion), **ignores `url` and builds the URL from the port alone**, and prints nothing from it or from the
   answering `/health` without replacing control characters. The mod must do the same. Written whole (a temporary file, mode 0600, renamed) after the server listens, removed at a clean exit
   only while it still names this process.
-- **A second start** reads `engine.json` and asks that port for `/health`. When the answer has the file's pid, the
+- **A second start** reads `engine.json` and asks that port for `/health` (3 s at most). When the answer has the file's pid, the
   same `version` and the same `apiVersion`, it prints the URL (opens it with `--open`) and exits 0. Another
   version: it says which, with the pid to stop, and exits 1. No answer, or another pid: the file is stale and the
   start goes on. When the writer lock is held, it waits up to 5 s for an engine to answer (two starts at once),

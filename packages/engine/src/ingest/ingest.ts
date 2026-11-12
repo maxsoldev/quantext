@@ -31,6 +31,7 @@ interface Warm {
 
 interface Limits {
   batchBytes: number;
+  batchMs: number;
   restoreBytes: number;
   maxLineBytes: number;
 }
@@ -44,8 +45,10 @@ export interface IngestOptions {
   root: string;
   /** How the adapter's data maps to the store; the Claude Code codec by default. */
   codec?: StoreCodec;
-  /** About this many bytes are read, parsed and written per transaction. */
+  /** At most about this many bytes are read, parsed and written per transaction. */
   batchBytes?: number;
+  /** Batches are sized so each takes about this long (default 40 ms); `batchBytes` caps them. */
+  batchMs?: number;
   /**
    * After this many bytes of one log, the parser is made again from its snapshot and the store, so that a long
    * file does not keep its whole content in memory. Each log's pass also starts from the snapshot.
@@ -101,6 +104,7 @@ export function createIngest(options: IngestOptions): Ingest {
   const codec = options.codec ?? claudeCodeCodec;
   const limits: Limits = {
     batchBytes: options.batchBytes ?? DEFAULT_BATCH_BYTES,
+    batchMs: options.batchMs ?? DEFAULT_BATCH_MS,
     restoreBytes: options.restoreBytes ?? DEFAULT_RESTORE_BYTES,
     maxLineBytes: options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES,
   };
@@ -267,6 +271,28 @@ interface Entry {
   error?: string;
 }
 
+/** The smallest batch, and the time one batch should take: the event loop is blocked for about that long. */
+const MIN_BATCH_BYTES = 64 * 1024;
+export const DEFAULT_BATCH_MS = 40;
+
+/**
+ * Batch sizes bounded by time as well as bytes: after each batch the next is sized so it takes about `batchMs`
+ * (parse and write), between `MIN_BATCH_BYTES` and `batchBytes`. It starts small.
+ */
+function batchBudget(limits: Limits): { bytes: number; took(bytes: number, ms: number): void } {
+  const max = limits.batchBytes;
+  const min = Math.min(MIN_BATCH_BYTES, max);
+  const budget = {
+    bytes: Math.min(256 * 1024, max),
+    took(bytes: number, ms: number) {
+      if (bytes <= 0) return;
+      const next = ms <= 0 ? max : (bytes * limits.batchMs) / ms;
+      budget.bytes = Math.round(Math.max(min, Math.min(max, next)));
+    },
+  };
+  return budget;
+}
+
 /** The bytes of these logs' files beyond what the store has read: what a pass will read (a file gone counts 0). */
 async function newBytes(logs: readonly LogFiles[], offsets: ReadonlyMap<string, number>): Promise<number> {
   let total = 0;
@@ -298,6 +324,7 @@ async function ingestLog(
     if (agent.meta !== undefined) entries.push({ path: agent.meta, transcript: agent.name, kind: "meta" });
     entries.push({ path: agent.path, transcript: agent.name, kind: "transcript" });
   }
+  const budget = batchBudget(limits);
   try {
     for (const entry of entries) await openEntry(entry);
     let marks = new Map(log.files().map((m) => [m.path, m]));
@@ -363,9 +390,10 @@ async function ingestLog(
       let offset = old?.offset ?? 0;
       let print = old?.fingerprint;
       let read = false;
-      const pieces = completeLines(entry.handle, offset, stat.size, limits.batchBytes, limits.maxLineBytes);
+      const pieces = completeLines(entry.handle, offset, stat.size, () => budget.bytes, limits.maxLineBytes);
       for await (const piece of pieces) {
         if (signal?.aborted) break;
+        const started = performance.now();
         // A skipped line is an empty line to the parser (so later lines keep their numbers), and is reported.
         const delta = parserNow().push("text" in piece ? piece.text : "\n", entry.transcript);
         if ("skipped" in piece) {
@@ -379,6 +407,9 @@ async function ingestLog(
         print = await fingerprint(entry.handle, offset);
         // Until the read reaches the end, the mark says the file ends here: a restart reads on from it.
         write(delta, { ...mark(offset, print), size: offset }, bytes);
+        budget.took(bytes, performance.now() - started);
+        // Let the server answer between batches: a long catch-up must not stall /health or the viewer.
+        await new Promise((resolve) => setImmediate(resolve));
       }
       if (read) summary.files++;
       if (signal?.aborted) {
