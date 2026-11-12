@@ -63,6 +63,17 @@ describe("block kinds and sources", () => {
     expect(calls).toEqual(["Bash", "Bash", "Read", "Read", "Bash", "Read", "Edit", "Read", "Read"]);
   });
 
+  test("every block has a plain text for display, without the provider's JSON", () => {
+    const texts = new Map([...last].reverse().map((b) => [b.kind, b.text]));
+    expect(texts.get("tool-schema")).toMatch(/^Agent: /);
+    expect(texts.get("tool-call")).toBe(
+      `Bash {"command":"find src -name '*.ts'","description":"Find TypeScript files in src"}`,
+    );
+    expect(last.find((b) => b.kind === "tool-result")?.text).toBe("src/greet.ts\nsrc/math.ts");
+    expect(texts.get("reasoning")).toBe("[reasoning]");
+    expect(last.every((b) => typeof b.text === "string")).toBe(true);
+  });
+
   test("reasoning blocks are their own kind", () => {
     expect(last.filter((b) => b.kind === "reasoning")).toHaveLength(1);
   });

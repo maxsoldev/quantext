@@ -67,7 +67,7 @@ function summaryCall(
     index: 0,
     ts,
     model: derived.model,
-    params: { betas: [] },
+    params: {},
     usage: derived.usage,
     framingTokens: 0,
     issues: [{ kind: "unresolved-request", detail }],

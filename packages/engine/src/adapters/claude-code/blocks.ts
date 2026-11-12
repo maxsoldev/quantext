@@ -1,5 +1,6 @@
 /** Split a rebuilt request into Blocks with kind and source, in the order the provider reads them. */
 import type { Block, BlockKind, BlockSource, RequestSection } from "@quantext/shared";
+import { blockText } from "../../providers/anthropic/content.ts";
 import { sha256Sorted } from "./hash.ts";
 import type { Json, JsonObject } from "./json.ts";
 import { obj, str } from "./json.ts";
@@ -34,7 +35,7 @@ export function splitRequest(request: WireRequest, notes: ContentNotes): Request
   const out: RequestBlock[] = [];
   const push = (role: string, content: Json, section: RequestSection, path: string, message?: number) => {
     const { kind, source, unknownType } = classify(role, obj(content) ?? {}, context);
-    const block: Block = { hash: blockHash(role, content), kind, source, content };
+    const block: Block = { hash: blockHash(role, content), kind, source, text: blockText(content), content };
     const entry: RequestBlock = { block, section, cacheBreakpoint: breakpoints.has(path) };
     if (message !== undefined) entry.message = message;
     if (unknownType !== undefined) entry.unknownType = unknownType;

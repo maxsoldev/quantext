@@ -1,7 +1,7 @@
 /** Map `api-request` rows and the `assistant` rows of their responses to Calls with exact Usage and cost. */
 import type { Call, CallIssue, CallParams, Usage } from "@quantext/shared";
 import { canonicalModel, priceCall } from "../../providers/anthropic/pricing.ts";
-import type { JsonObject } from "./json.ts";
+import type { Json, JsonObject } from "./json.ts";
 import { arr, num, obj, str } from "./json.ts";
 import type { WireRequest } from "./rebuild.ts";
 import type { Row } from "./rows.ts";
@@ -71,6 +71,8 @@ function usageOf(raw: JsonObject): Usage {
     cacheWriteTokens: num(raw.cache_creation_input_tokens) ?? 0,
     outputTokens: num(raw.output_tokens) ?? 0,
   };
+  const reasoning = num(obj(raw.output_tokens_details)?.thinking_tokens);
+  if (reasoning !== undefined) usage.reasoningOutputTokens = reasoning;
   const ttl = obj(raw.cache_creation);
   const write5m = num(ttl?.ephemeral_5m_input_tokens);
   const write1h = num(ttl?.ephemeral_1h_input_tokens);
@@ -85,17 +87,21 @@ function paramsOf(params: JsonObject): CallParams {
   const betas = [...(arr(params.betas) ?? []), ...(arr(params.anthropic_beta) ?? [])].filter(
     (beta): beta is string => typeof beta === "string",
   );
-  const result: CallParams = { betas: [...new Set(betas)] };
+  const result: CallParams = {};
+  const provider: { [key: string]: Json } = {};
   const maxTokens = num(params.max_tokens);
   if (maxTokens !== undefined) result.maxTokens = maxTokens;
   const thinking = obj(params.thinking);
-  const thinkingType = str(thinking?.type);
-  if (thinkingType !== undefined) {
-    const budget = num(thinking?.budget_tokens);
-    result.thinking = budget === undefined ? { type: thinkingType } : { type: thinkingType, budgetTokens: budget };
+  const mode = str(thinking?.type);
+  if (thinking !== undefined && mode !== undefined) {
+    const budget = num(thinking.budget_tokens);
+    result.reasoning = budget === undefined ? { mode } : { mode, budgetTokens: budget };
+    provider.thinking = thinking;
   }
   const effort = str(obj(params.output_config)?.effort);
   if (effort !== undefined) result.effort = effort;
+  if (betas.length > 0) provider.betas = [...new Set(betas)];
+  if (Object.keys(provider).length > 0) result.provider = provider;
   return result;
 }
 

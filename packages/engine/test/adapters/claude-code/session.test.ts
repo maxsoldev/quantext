@@ -28,7 +28,7 @@ describe("parseClaudeCodeSession on basic-tools", () => {
       model: "eu.anthropic.claude-opus-5-5",
       canonicalModel: "claude-opus-5-5",
       shapeHash: "8ce3e4cf9761e97b443f72a9368b9f57abbea4d178f9ffb247ebe351b6a9de20",
-      params: { maxTokens: 128000, thinking: { type: "adaptive" }, effort: "medium" },
+      params: { maxTokens: 128000, reasoning: { mode: "adaptive" }, effort: "medium" },
     });
   });
 
@@ -41,6 +41,7 @@ describe("parseClaudeCodeSession on basic-tools", () => {
       cacheWrite5mTokens: 16557,
       cacheWrite1hTokens: 0,
       outputTokens: 86,
+      reasoningOutputTokens: 0,
     });
   });
 
@@ -96,12 +97,26 @@ describe("parseClaudeCodeSession on input it does not know", () => {
 describe("parameters per Call", () => {
   const graph = parseClaudeCodeSession(transcriptsOf("effort"));
 
-  test("keep the effort and the thinking mode of each Call, also when the model changes", () => {
-    expect(graph.calls.map((c) => [c.canonicalModel, c.params.effort, c.params.thinking, c.params.maxTokens])).toEqual([
-      ["claude-opus-5-5", "high", { type: "adaptive" }, 128000],
-      ["claude-opus-5-5", "low", { type: "adaptive" }, 128000],
-      ["claude-sonnet-4-5", undefined, { type: "enabled", budgetTokens: 31999 }, 32000],
-    ]);
+  test("keep the effort and the reasoning mode of each Call, also when the model changes", () => {
+    expect(graph.calls.map((c) => [c.canonicalModel, c.params.effort, c.params.reasoning, c.params.maxTokens])).toEqual(
+      [
+        ["claude-opus-5-5", "high", { mode: "adaptive" }, 128000],
+        ["claude-opus-5-5", "low", { mode: "adaptive" }, 128000],
+        ["claude-sonnet-4-5", undefined, { mode: "enabled", budgetTokens: 31999 }, 32000],
+      ],
+    );
+  });
+
+  test("keep the provider's own parameters apart from the common ones", () => {
+    expect(graph.calls[2]?.params.provider).toEqual({
+      thinking: { type: "enabled", budget_tokens: 31999 },
+      betas: expect.arrayContaining(["claude-code-20250219"]),
+    });
+  });
+
+  test("count the reasoning part of the output tokens", () => {
+    // The Sonnet call's response: 323 output tokens, 315 of them thinking (cost-state thinkingTokens).
+    expect(graph.calls[2]?.usage).toMatchObject({ outputTokens: 323, reasoningOutputTokens: 315 });
   });
 
   test("price a Bedrock Sonnet id at the Sonnet list price, plus 10% for the regional endpoint", () => {

@@ -25,12 +25,14 @@ export interface Session {
   ended?: string;
 }
 
-/** The parameters of a Call that are not part of its Shape. */
+/** The parameters of a Call that are not part of its Shape. The model is `Call.model`. */
 export interface CallParams {
   maxTokens?: number;
-  thinking?: { type: string; budgetTokens?: number };
   effort?: string;
-  betas: string[];
+  /** How the model may reason before it answers: the provider's mode, and a token budget when it has one. */
+  reasoning?: { mode: string; budgetTokens?: number };
+  /** Parameters only one model provider has (for Anthropic: `thinking`, `betas`), as the provider names them. */
+  provider?: { [key: string]: JsonValue };
 }
 
 /** The token counts of one Call. The four input-side parts add up to the Call's input total. */
@@ -44,6 +46,8 @@ export interface Usage {
   cacheWrite5mTokens?: number;
   cacheWrite1hTokens?: number;
   outputTokens: number;
+  /** The part of the output tokens spent on reasoning, when the provider reports it. */
+  reasoningOutputTokens?: number;
 }
 
 /** The price of one Call, by part, in US dollars. */
@@ -140,6 +144,8 @@ export interface Block {
   hash: string;
   kind: BlockKind;
   source: BlockSource;
+  /** Plain text for display: the text, or a short form of a tool call, tool schema, image or document. */
+  text: string;
   /** The content as sent to the model provider (one content block, tool schema or system block). */
   content: JsonValue;
 }

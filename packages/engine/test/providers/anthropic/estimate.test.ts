@@ -8,7 +8,13 @@ import {
   imageSize,
 } from "../../../src/providers/anthropic/estimate.ts";
 
-const block = (kind: Block["kind"], content: Block["content"]): Block => ({ hash: kind, kind, source: {}, content });
+const block = (kind: Block["kind"], content: Block["content"]): Block => ({
+  hash: kind,
+  kind,
+  source: {},
+  text: "",
+  content,
+});
 
 // A 96 x 64 PNG: the 8-byte signature, then the IHDR chunk with width and height (big-endian).
 const PNG_96x64 = "iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABq";
