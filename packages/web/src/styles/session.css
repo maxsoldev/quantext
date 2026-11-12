@@ -168,6 +168,9 @@
   stroke-width: 2;
   opacity: 1;
 }
+.cursor.selected .selection-empty {
+  stroke-dasharray: 4 3;
+}
 .cursor.selected .cursor-label rect {
   fill: var(--ink);
   stroke: none;
@@ -177,7 +180,7 @@
   font-size: 14px;
   font-weight: 800;
 }
-/* A panel's head: its name and its legend in one row, above the panel (measured; the plot moves down if it wraps). */
+/* A panel's head: its name (and the top legend) in one row, above the panel (measured; the plot moves down if it wraps). */
 .panel-head {
   position: absolute;
   right: 16px;
@@ -198,8 +201,17 @@
   min-width: 0;
   gap: 2px 10px;
 }
-.panel-head .legend-item {
+.panel-head .legend-item,
+.panel-foot .legend-item {
   gap: 5px;
+}
+/* The billing legend: one row under the x axis, clear of the selected Call's frame. */
+.panel-foot {
+  padding-top: 4px;
+  font-size: var(--t-small);
+}
+.panel-foot .legend {
+  gap: 2px 10px;
 }
 /* The billing texture over the billing marks (and their swatches): see tokens.css. */
 .bill-hatch {

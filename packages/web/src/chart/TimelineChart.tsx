@@ -2,7 +2,7 @@
  * The Session's timeline: per Call of one lane, what the context holds (tokens stacked by category, top panel) and
  * how its input was billed (shares of cache read, cache write and uncached input, bottom panel), on one x axis. Markers:
  * compactions (a rule through both panels) and cache breaks (a triangle on the rail between them). Hover shows a
- * Call; a click or the arrow keys select one.
+ * Call; a click or the arrow keys select one. The selected Call is outlined on its bars only, never on empty space.
  */
 import type { ContextCategory, TimelineCall } from "@quantext/shared";
 import type { MouseEvent, ReactNode, RefObject } from "react";
@@ -19,17 +19,17 @@ import { bandOf, niceTicks, stack, stepArea } from "./shape.ts";
 const M = { left: 64, right: 16 };
 /** The cache-break triangles sit in this band between the panels, above the billing panel's head. */
 const MARK_H = 16;
-const AXIS_H = 30;
+const AXIS_H = 28;
 /** A window this high or lower is "short" (a 720px projector): smaller panels, so the call cards fit too. */
 export const SHORT_WINDOW = 800;
 
-/** Panel heights: on a short window 150px and 60px, so chart, context bar and strips share one screen. */
+/** Panel heights: on a short window 132px and 60px, so chart, context bar and strips share one screen. */
 function panelHeights(): { topH: number; bottomH: number } {
-  if (innerHeight <= SHORT_WINDOW) return { topH: 150, bottomH: 60 };
+  if (innerHeight <= SHORT_WINDOW) return { topH: 132, bottomH: 60 };
   return { topH: Math.round(Math.min(260, Math.max(180, innerHeight * 0.27))), bottomH: 96 };
 }
 
-/** The plot's vertical layout, from the panel heights and the measured heights of the two legend rows. */
+/** The plot's vertical layout, from the panel heights and the measured heights of the two head rows. */
 export interface Geometry {
   top: number;
   topH: number;
@@ -48,6 +48,17 @@ function geometry(topH: number, bottomH: number, topRow: number, billRow: number
 }
 
 /** The height of an element, kept up to date. */
+/** Both panels' y scales: the top in tokens up to the nice tick above `max`, the bottom in shares 0..1. */
+function scales(g: Geometry, max: number) {
+  const topTicks = niceTicks(max, g.topH < 160 ? 3 : 4);
+  const topMax = topTicks.at(-1) ?? 1;
+  return {
+    topTicks,
+    yTop: (v: number) => g.top + g.topH - (v / topMax) * g.topH,
+    yBottom: (v: number) => g.bottomY0 + g.bottomH - v * g.bottomH,
+  };
+}
+
 function useHeight(ref: RefObject<HTMLElement | null>, initial: number): number {
   const [h, setH] = useState(initial);
   useLayoutEffect(() => {
@@ -102,7 +113,7 @@ export function TimelineChart({
   legends,
 }: {
   view: LaneView;
-  /** Each panel's legend, shown in one row with the panel's name, above the panel. */
+  /** The top legend sits in one row with its panel's name; the billing legend sits below the x axis. */
   legends: { top: ReactNode; bottom: ReactNode };
   selected: number;
   onSelect: (place: number) => void;
@@ -130,7 +141,6 @@ export function TimelineChart({
   const topRow = useRef<HTMLDivElement>(null);
   const billRow = useRef<HTMLDivElement>(null);
   const g = geometry(heights.topH, heights.bottomH, useHeight(topRow, 24), useHeight(billRow, 24));
-  const plotH = g.bottomY0 + g.bottomH - g.top;
   const band = bandOf(plotW, view.calls.length);
   const top = useMemo(() => stack(view.calls, TOP_KEYS, topValue), [view.calls]);
   const bottom = useMemo(() => stack(view.calls, CACHE_KEYS, cacheShare), [view.calls]);
@@ -149,7 +159,6 @@ export function TimelineChart({
       </div>
       <div className="panel-head" ref={billRow} style={{ top: g.billHead, left: M.left }}>
         <span className="panel-label">How the input was billed</span>
-        {legends.bottom}
       </div>
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: the keyboard picks a Call with the arrow keys and the scrubber. */}
       <svg
@@ -168,20 +177,23 @@ export function TimelineChart({
         data-testid="timeline"
       >
         <Layers view={view} top={top} bottom={bottom} band={band} plotW={plotW} g={g} />
-        <Cursor
+        {hover !== null && hover !== selected && <HoverBand x={xOf(hover)} w={Math.max(1, band.step)} g={g} />}
+        <Selection
           x={xOf(selected) + (band.mode === "columns" ? (band.step - band.width) / 2 : 0)}
           w={Math.max(2, band.width)}
           g={g}
-          h={plotH}
+          y={scales(g, top.max)}
+          topTotal={top.totals[selected] ?? 0}
+          bottomTotal={bottom.totals[selected] ?? 0}
+          round={band.mode === "columns" ? Math.min(4, band.width / 4) : 0}
           label={`Call ${callNumber(view.calls[selected]?.index ?? 0)}`}
           minX={M.left + 40}
           maxX={M.left + plotW - 40}
-          selected
         />
-        {hover !== null && hover !== selected && (
-          <Cursor x={xOf(hover)} w={Math.max(1, band.step)} g={g} h={plotH} label="" />
-        )}
       </svg>
+      <div className="panel-foot" style={{ marginLeft: M.left, marginRight: M.right }}>
+        {legends.bottom}
+      </div>
       {hovered && hover !== null && <CallTip call={hovered} x={xOf(hover) + band.step / 2} width={width} />}
     </div>
   );
@@ -203,20 +215,14 @@ const Layers = memo(function Layers({
   plotW: number;
   g: Geometry;
 }) {
-  const topTicks = niceTicks(top.max, g.topH < 160 ? 3 : 4);
+  const { topTicks, yTop, yBottom } = scales(g, top.max);
   const bottomTicks = [0, 0.5, 1];
-  const yTop = (v: number) => g.top + g.topH - (v / (topTicks.at(-1) ?? 1)) * g.topH;
   const { bottomY0, bottomH } = g;
-  const yBottom = (v: number) => bottomY0 + bottomH - (v / (bottomTicks.at(-1) ?? 1)) * bottomH;
   const xOf = (p: number) => M.left + p * band.step;
   const xTicks = callTicks(view.calls.length, plotW);
   return (
     <g>
-      <defs>
-        <pattern id="bill-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="6" />
-        </pattern>
-      </defs>
+      <BillPatterns />
       <Grid ticks={topTicks} y={yTop} plotW={plotW} />
       <Grid ticks={bottomTicks} y={yBottom} plotW={plotW} format={percent} />
       <Marks
@@ -351,29 +357,69 @@ function Marks<K extends string>({
   );
 }
 
-function Cursor({
+/** The billing texture: one hatch over every billing mark. */
+function BillPatterns() {
+  return (
+    <defs>
+      <pattern id="bill-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <line x1="0" y1="0" x2="0" y2="6" />
+      </pattern>
+    </defs>
+  );
+}
+
+/** The hovered Call: a light tint over each panel, not over the gap between them. */
+function HoverBand({ x, w, g }: { x: number; w: number; g: Geometry }) {
+  return (
+    <g className="cursor" pointerEvents="none">
+      <rect x={x} y={g.top} width={w} height={g.topH} />
+      <rect x={x} y={g.bottomY0} width={w} height={g.bottomH} />
+    </g>
+  );
+}
+
+/**
+ * The selected Call: an outline around each of its bars (top: 0 to its total, bottom: 0 to 100%), so the frame
+ * never covers empty space. A Call with no usage has no bars: its placeholder gets a dashed outline.
+ */
+function Selection({
   x,
   w,
   g,
-  h,
+  y,
+  topTotal,
+  bottomTotal,
+  round,
   label,
-  selected = false,
-  minX = 0,
-  maxX = Number.POSITIVE_INFINITY,
+  minX,
+  maxX,
 }: {
   x: number;
   w: number;
   g: Geometry;
-  h: number;
+  y: { yTop: (v: number) => number; yBottom: (v: number) => number };
+  topTotal: number;
+  bottomTotal: number;
+  round: number;
   label: string;
-  selected?: boolean;
-  minX?: number;
-  maxX?: number;
+  minX: number;
+  maxX: number;
 }) {
+  const box = (y0: number, y1: number, key: string) => (
+    <rect key={key} x={x - 2} y={y1 - 2} width={w + 4} height={y0 - y1 + 4} rx={round + 2} />
+  );
+  const empty = topTotal <= 0 && bottomTotal <= 0;
   return (
-    <g className={selected ? "cursor selected" : "cursor"} pointerEvents="none">
-      <rect x={x} y={g.top} width={w} height={h} />
-      {label && <AxisLabel x={x + w / 2} y={g.bottomY0 + g.bottomH} label={label} minX={minX} maxX={maxX} />}
+    <g className="cursor selected" pointerEvents="none" data-testid="selection">
+      {empty ? (
+        <rect className="selection-empty" x={x - 2} y={g.top} width={w + 4} height={g.bottomY0 + g.bottomH - g.top} />
+      ) : (
+        [
+          topTotal > 0 && box(y.yTop(0), y.yTop(topTotal), "top"),
+          bottomTotal > 0 && box(y.yBottom(0), y.yBottom(bottomTotal), "bottom"),
+        ]
+      )}
+      <AxisLabel x={x + w / 2} y={g.bottomY0 + g.bottomH} label={label} minX={minX} maxX={maxX} />
     </g>
   );
 }
