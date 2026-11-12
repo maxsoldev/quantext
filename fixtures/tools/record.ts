@@ -1,8 +1,9 @@
 /**
  * Record the fixture scenarios with the installed `claude`, in an isolated config, then normalise, check for
- * personal data and canaries, and write fixtures/claude-code/<version>/<scenario>/.
+ * personal data, secrets and canaries, and write fixtures/claude-code/<version>/<scenario>/.
  * Usage: node fixtures/tools/record.ts [--keep] [scenario ...]   (no names: all scenarios)
- * --keep leaves the temp recording root in place for inspection. Costs real API money: see fixtures/README.md.
+ *        node fixtures/tools/record.ts --check                   (canary scan of the committed fixtures only)
+ * --keep leaves the temp recording root in place for debugging. Costs real API money: see fixtures/README.md.
  */
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -19,32 +20,22 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, hostname } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { localDenylist, scanText } from "../../scripts/lib/personal-data.ts";
+import { localDenylist } from "../../scripts/lib/personal-data.ts";
+import type { Named, RealConfig } from "./canary.ts";
 import { canaryTerms } from "./canary.ts";
 import { FIXTURE_IDENTITY, writeDummyRepo } from "./dummy-repo.ts";
-import type { Manifest, TranscriptSummary } from "./manifest.ts";
-import { summariseTranscript } from "./manifest.ts";
-import type { Replacement } from "./normalise.ts";
-import { normaliseSession } from "./normalise.ts";
+import { checkClean, childEnv, secretValues } from "./isolation.ts";
+import type { CompactionSummary, Manifest, TranscriptSummary } from "./manifest.ts";
+import { compactionsOf, summariseTranscript } from "./manifest.ts";
+import { normaliseSession, replacementsFor } from "./normalise.ts";
 import type { Scenario } from "./scenarios.ts";
 import { SCENARIOS } from "./scenarios.ts";
 
 const TOOLS = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(TOOLS, "..", "..");
-const PLACEHOLDER_ROOT = "/fixture";
-
-/** Passed through from the caller's environment (or the `env` of the real settings), nothing else. */
-const AUTH_VARS = [
-  "CLAUDE_CODE_USE_BEDROCK",
-  "AWS_REGION",
-  "AWS_BEARER_TOKEN_BEDROCK",
-  "ANTHROPIC_API_KEY",
-  "ANTHROPIC_DEFAULT_OPUS_MODEL",
-  "ANTHROPIC_DEFAULT_SONNET_MODEL",
-  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-] as const;
+const FIXTURES = join(REPO_ROOT, "fixtures", "claude-code");
 
 const SETTINGS = {
   skipDangerousModePermissionPrompt: true,
@@ -57,6 +48,18 @@ const BASE_ARGS = ["-p", "--output-format", "json", "--permission-mode", "bypass
 
 function main(): void {
   const args = process.argv.slice(2);
+  const realConfigDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+  const settingsEnv = (readJson(join(realConfigDir, "settings.json")) as { env?: Record<string, string> })?.env ?? {};
+  const deny = [
+    ...localDenylist({ email: gitEmail(), hostname: hostname() }),
+    ...canaryTerms(readRealConfig(realConfigDir)),
+    ...secretValues({ ...settingsEnv, ...process.env }),
+  ];
+  if (args.includes("--check")) {
+    checkCommitted(deny);
+    return;
+  }
+
   const keep = args.includes("--keep");
   const names = args.filter((a) => a !== "--keep");
   const unknown = names.filter((n) => !SCENARIOS.some((s) => s.name === n));
@@ -66,14 +69,19 @@ function main(): void {
   const claude = realpathSync(execFileSync("which", ["claude"], { encoding: "utf8" }).trim());
   const version = execFileSync(claude, ["--version"], { encoding: "utf8" }).trim().split(" ")[0] ?? "";
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`Unexpected claude --version output: ${version}`);
-  const deny = [...localDenylist({ email: gitEmail(), hostname: hostname() }), ...canaryTerms(readRealConfig())];
-  console.log(`Claude Code ${version}; ${deny.length} canary terms.`);
+  console.log(`Claude Code ${version}; ${deny.length} canary and secret terms.`);
 
   let total = 0;
   for (const scenario of chosen) {
-    const cost = recordScenario(scenario, { claude, version, deny, keep });
-    total += cost;
-    console.log(`  ${scenario.name}: $${cost.toFixed(4)}`);
+    const root = realpathSync(mkdtempSync("/tmp/qxrec."));
+    try {
+      const cost = recordScenario(scenario, root, { claude, version, deny, settingsEnv });
+      total += cost;
+      console.log(`  ${scenario.name}: $${cost.toFixed(4)}`);
+    } finally {
+      if (keep) console.log(`  kept recording root for ${scenario.name}: ${root}`);
+      else rmSync(root, { recursive: true, force: true });
+    }
   }
   console.log(`Total recording cost: $${total.toFixed(4)}`);
 }
@@ -82,11 +90,10 @@ interface Context {
   claude: string;
   version: string;
   deny: string[];
-  keep: boolean;
+  settingsEnv: Record<string, string>;
 }
 
-function recordScenario(scenario: Scenario, context: Context): number {
-  const root = realpathSync(mkdtempSync("/tmp/qxrec."));
+function recordScenario(scenario: Scenario, root: string, context: Context): number {
   const dirs = { home: "home", config: "config", tmp: "tmp", repo: "repo", bin: "bin", mcp: "mcp" };
   const at = Object.fromEntries(Object.entries(dirs).map(([k, v]) => [k, join(root, v)])) as typeof dirs;
   for (const dir of Object.values(at)) mkdirSync(dir);
@@ -97,12 +104,14 @@ function recordScenario(scenario: Scenario, context: Context): number {
     join(at.home, ".gitconfig"),
     `[user]\n\tname = ${FIXTURE_IDENTITY.name}\n\temail = ${FIXTURE_IDENTITY.email}\n[init]\n\tdefaultBranch = main\n`,
   );
-  const env = childEnv(at);
+  const env = childEnv(at, process.env, context.settingsEnv);
   writeDummyRepo(at.repo, env);
   copyFileSync(join(TOOLS, "mcp-server.ts"), join(at.mcp, "server.ts"));
   const mcpConfig = join(at.mcp, "config.json");
   const server = { type: "stdio", command: "node", args: [join(at.mcp, "server.ts")] };
   writeFileSync(mcpConfig, `${JSON.stringify({ mcpServers: { dictionary: server } }, null, 2)}\n`);
+  const replacements = replacementsFor(root);
+  const placeholder = (text: string) => replacements.reduce((acc, [from, to]) => acc.replaceAll(from, to), text);
 
   const commands: string[] = [];
   let cost = 0;
@@ -118,26 +127,31 @@ function recordScenario(scenario: Scenario, context: Context): number {
       throw new Error(`${scenario.name} step ${index + 1} failed (exit ${run.status}): ${run.stderr}\n${run.stdout}`);
     }
     cost += typeof result.total_cost_usd === "number" ? result.total_cost_usd : 0;
-    commands.push(
-      ["claude", ...argv.slice(0, -1), JSON.stringify(step.prompt)].join(" ").replaceAll(root, PLACEHOLDER_ROOT),
-    );
+    commands.push(placeholder(["claude", ...argv.slice(0, -1), JSON.stringify(step.prompt)].join(" ")));
   }
 
-  const files = collectTranscripts(at.config);
-  const { files: normalised, unresolvedTailHashes } = normaliseSession(files, replacementsFor(root));
-  checkClean(scenario.name, normalised, root, context.deny);
+  const { files, unresolvedTailHashes } = normaliseSession(collectTranscripts(at.config), replacements);
+  const problems = checkClean(files, root, context.deny);
+  if (problems.length > 0) {
+    throw new Error(`${scenario.name}: isolation or normalisation failed, nothing written:\n${problems.join("\n")}`);
+  }
   if (unresolvedTailHashes > 0) {
     console.warn(`  ${scenario.name}: ${unresolvedTailHashes} tail hash(es) match no message; a new wire form?`);
   }
 
-  const out = join(REPO_ROOT, "fixtures", "claude-code", context.version, scenario.name);
+  const out = join(FIXTURES, context.version, scenario.name);
   rmSync(out, { recursive: true, force: true });
   const transcripts: Record<string, TranscriptSummary> = {};
-  const ordered = Object.keys(normalised).sort((a, b) => a.split("/").length - b.split("/").length || cmp(a, b));
+  const compactions: Record<string, CompactionSummary[]> = {};
+  const ordered = Object.keys(files).sort((a, b) => a.split("/").length - b.split("/").length || cmp(a, b));
   for (const path of ordered) {
+    const text = files[path] ?? "";
     mkdirSync(dirname(join(out, path)), { recursive: true });
-    writeFileSync(join(out, path), normalised[path] ?? "");
-    if (path.endsWith(".jsonl")) transcripts[path] = summariseTranscript(path, normalised[path] ?? "");
+    writeFileSync(join(out, path), text);
+    if (!path.endsWith(".jsonl")) continue;
+    transcripts[path] = summariseTranscript(path, text);
+    const found = compactionsOf(text);
+    if (found.length > 0) compactions[path] = found;
   }
   const manifest: Manifest = {
     scenario: scenario.name,
@@ -149,35 +163,27 @@ function recordScenario(scenario: Scenario, context: Context): number {
     costUsd: Math.round(cost * 10_000) / 10_000,
     unresolvedTailHashes,
     transcripts,
+    compactions,
   };
   writeFileSync(join(out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-
-  if (context.keep) console.log(`  kept recording root for ${scenario.name}: ${root}`);
-  else rmSync(root, { recursive: true, force: true });
   return cost;
 }
 
-/** An empty environment plus an allowlist: no session-coupling or other variables of the caller leak in. */
-function childEnv(at: { home: string; config: string; tmp: string; bin: string }): NodeJS.ProcessEnv {
-  const realEnv = readJson(join(homedir(), ".claude", "settings.json")) as { env?: Record<string, string> } | undefined;
-  const env: NodeJS.ProcessEnv = {
-    PATH: `${at.bin}:/usr/bin:/bin:/usr/sbin:/sbin`,
-    HOME: at.home,
-    TMPDIR: at.tmp,
-    CLAUDE_CONFIG_DIR: at.config,
-    LANG: "en_US.UTF-8",
-    GIT_CONFIG_NOSYSTEM: "1",
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-    DISABLE_AUTOUPDATER: "1",
+/** Scan the committed fixtures for canaries and secrets, as a recording is scanned before it is written. */
+function checkCommitted(deny: string[]): void {
+  const files: Record<string, string> = {};
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else files[relative(FIXTURES, path)] = readFileSync(path, "utf8");
+    }
   };
-  for (const name of AUTH_VARS) {
-    const value = process.env[name] ?? realEnv?.env?.[name];
-    if (value !== undefined && value !== "") env[name] = value;
-  }
-  if (env.CLAUDE_CODE_USE_BEDROCK === undefined && env.ANTHROPIC_API_KEY === undefined) {
-    throw new Error("No auth: set CLAUDE_CODE_USE_BEDROCK (+ AWS vars) or ANTHROPIC_API_KEY.");
-  }
-  return env;
+  if (existsSync(FIXTURES)) walk(FIXTURES);
+  const problems = checkClean(files, "/tmp/qxrec.", deny);
+  for (const problem of problems) console.error(problem);
+  console.log(`Canary check: ${Object.keys(files).length} files, ${deny.length} terms, ${problems.length} hit(s).`);
+  if (problems.length > 0) process.exitCode = 1;
 }
 
 /** All files under the one project folder of the isolated config, by path relative to it. */
@@ -198,40 +204,28 @@ function collectTranscripts(config: string): Record<string, string> {
   return files;
 }
 
-/** The recording root as Claude Code may write it: resolved, through the `/tmp` link, and dash-encoded. */
-export function replacementsFor(root: string): Replacement[] {
-  const encode = (path: string) => path.replace(/[^A-Za-z0-9]/g, "-");
-  const forms = [root, root.replace(/^\/private\//, "/")];
-  return [
-    ...forms.map((form) => [form, PLACEHOLDER_ROOT] as const),
-    ...forms.map((form) => [encode(form), encode(PLACEHOLDER_ROOT)] as const),
-  ];
-}
-
-/** Fail, and write nothing, when a file still names the recording root, or holds personal data or a canary. */
-function checkClean(scenario: string, files: Record<string, string>, root: string, deny: string[]): void {
-  const leftover = root.split("/").at(-1) ?? root;
-  const problems: string[] = [];
-  for (const [path, text] of Object.entries(files)) {
-    for (const f of scanText(`${path}\n${text}`, { deny })) problems.push(`${path}:${f.line - 1}  ${f.kind}`);
-    if (text.includes(leftover) || path.includes(leftover)) problems.push(`${path}  recording root left over`);
-  }
-  if (problems.length > 0) {
-    throw new Error(`${scenario}: isolation or normalisation failed, nothing written:\n${problems.join("\n")}`);
-  }
-}
-
-function readRealConfig() {
-  const home = homedir();
-  const claudeMd = existsSync(join(home, ".claude", "CLAUDE.md"))
-    ? readFileSync(join(home, ".claude", "CLAUDE.md"), "utf8")
-    : undefined;
-  const extra = (process.env.QX_CANARY_TERMS ?? "").split(",");
+/** The parts of the real config that canary terms come from. Read only, at run time. */
+function readRealConfig(dir: string): RealConfig {
+  const text = (path: string) => (existsSync(path) && statSync(path).isFile() ? readFileSync(path, "utf8") : undefined);
+  const description = (markdown: string | undefined) => /^description:\s*(.+)$/m.exec(markdown ?? "")?.[1]?.trim();
+  const named = (sub: string, file: (name: string) => string): Named[] => {
+    const folder = join(dir, sub);
+    if (!existsSync(folder)) return [];
+    return readdirSync(folder).map((entry) => {
+      const name = basename(entry, ".md");
+      const found = description(text(join(folder, file(entry))));
+      return found === undefined ? { name } : { name, description: found };
+    });
+  };
+  const claudeMd = text(join(dir, "CLAUDE.md"));
   return {
     ...(claudeMd === undefined ? {} : { claudeMd }),
-    settings: readJson(join(home, ".claude", "settings.json")),
-    claudeJson: readJson(join(home, ".claude.json")),
-    extra: [...extra, home],
+    settings: readJson(join(dir, "settings.json")),
+    claudeJson: readJson(join(homedir(), ".claude.json")) ?? readJson(join(dir, ".claude.json")),
+    skills: named("skills", (entry) => join(entry, "SKILL.md")),
+    agents: named("agents", (entry) => entry),
+    commands: named("commands", (entry) => entry),
+    extra: [...(process.env.QX_CANARY_TERMS ?? "").split(","), homedir()],
   };
 }
 

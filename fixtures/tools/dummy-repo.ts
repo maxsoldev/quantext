@@ -11,6 +11,7 @@ export function writeDummyRepo(dir: string, env: NodeJS.ProcessEnv): void {
   const files: Record<string, string | Buffer> = {
     "README.md": "# Fixture repo\n\nA small generated project for recording Claude Code sessions.\n",
     "src/math.ts": "export function add(a: number, b: number): number {\n  return a + b;\n}\n\n// TODO: add subtract\n",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the content of a TypeScript file, not a template here
     "src/greet.ts": "export function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n",
     "src/big.txt": bigText(),
     "notes.txt": "Meeting notes\n- ship the parser\n- write the docs\n- plan the demo\n",
