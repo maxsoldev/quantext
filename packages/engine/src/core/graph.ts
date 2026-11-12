@@ -48,7 +48,10 @@ function upsert<T>(current: readonly T[], next: readonly T[], key: (item: T) => 
   return out;
 }
 
-/** The runs that make up one Call's input, in position order. A Call that was not split has none. */
+/**
+ * The runs that make up one Call's input, in position order. A Call that was not split has none. This scans every
+ * run; the store answers the same question with an interval index on (session, lane, firstCall, lastCall).
+ */
 export function blocksAtCall(
   runs: readonly CallBlock[],
   call: Pick<Call, "sessionId" | "lane" | "index" | "blockCount">,

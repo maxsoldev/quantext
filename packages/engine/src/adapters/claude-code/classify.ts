@@ -4,7 +4,7 @@
  */
 import type { Block, BlockKind, BlockSource, RequestSection } from "@quantext/shared";
 import type { Estimate, Estimator } from "../../core/estimate.ts";
-import { blockText, isDeferredSchema, toolReferences } from "../../providers/anthropic/content.ts";
+import { blockText, isDeferredSchema, KNOWN_CONTENT_TYPES, toolReferences } from "../../providers/anthropic/content.ts";
 import { sha256Sorted } from "./hash.ts";
 import type { Json, JsonObject } from "./json.ts";
 import { obj, str } from "./json.ts";
@@ -42,15 +42,6 @@ export interface Classifier {
 /** A Block seen for the first time, and the content block type the adapter does not know, if so. */
 export type BlockSink = (block: Block, unknownType: string | undefined) => void;
 
-const KNOWN_CONTENT = new Set([
-  "text",
-  "thinking",
-  "redacted_thinking",
-  "tool_use",
-  "tool_result",
-  "image",
-  "document",
-]);
 const AT_FILE_CALL =
   /^<system-reminder>\nCalled the (\S+) tool with the following input: (\{.*\})\n<\/system-reminder>/s;
 const AT_FILE_RESULT = /^<system-reminder>\nResult of calling the (\S+) tool:/;
@@ -126,7 +117,7 @@ interface Classified {
 function classify(role: string, block: JsonObject, state: ParserState, fresh: boolean): Classified {
   if (role === "tools") return { kind: "tool-schema", source: toolSource(str(block.name)) };
   const type = str(block.type) ?? "";
-  if (!KNOWN_CONTENT.has(type)) return { kind: roleKind(role), source: {}, unknownType: type };
+  if (!KNOWN_CONTENT_TYPES.has(type)) return { kind: roleKind(role), source: {}, unknownType: type };
   if (role === "system") return { kind: "system", source: {} };
   switch (type) {
     case "thinking":

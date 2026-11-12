@@ -139,10 +139,10 @@ function sheetFor(model: string, price: ModelPrice, context: PriceContext, promp
   };
 }
 
-/** A Bedrock id with a geographic prefix (`eu.`, `us.`, `apac.`, …) or none is regional; `global.` is not. */
+/** A Bedrock id with a geographic prefix (`eu.`, `us.`, `apac.`, `us-gov.`, …) is regional; `global.` and a bare id are not. */
 function isBedrockRegional(id: string): boolean {
-  const match = /^(?:([a-z-]+)\.)?anthropic\./.exec(id);
-  return match !== null && match[1] !== "global";
+  const prefix = /^([a-z-]+)\.anthropic\./.exec(id)?.[1];
+  return prefix !== undefined && prefix !== "global";
 }
 
 function assumptions(

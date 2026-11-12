@@ -94,7 +94,7 @@ kept running after the session ended, and `$.http.fetch` reached it. Interactive
 | **providers** | What one model provider defines: its content blocks (tool use, tool reference, deferred tools, thinking), the token estimate of each (Anthropic's image formula), its price list and price modifiers. Pure: no I/O, no built-ins, no packages | core |
 | **core** | Logic over the domain types defined in shared, the same for every harness and provider: split each call's input into blocks with tokens (exact deltas, then reconciled estimates); the estimator and pricing interfaces; cost by cache part. Pure: no I/O, no built-ins, no packages | shared (types only) |
 | **ingest** | Find files, read new bytes, call the adapter, write events in one transaction; watch files for live updates | providers, adapters, core, store |
-| **store** | Schema, migrations, writes, behind a driver interface (`node:sqlite`, `bun:sqlite`). WAL mode, so readers never block the writer | core |
+| **store** | Schema, migrations, writes, behind a driver interface (`node:sqlite`, `bun:sqlite`). WAL mode, so readers never block the writer. CallBlock runs need an interval index on (session, lane, first call, last call) so that "the blocks of call N" is a range lookup, not a scan | core |
 | **query** | Read API: sessions, calls, context at call N, change from N-1, block lifetime cost. SQL views for agents | core, store |
 | **api** | HTTP JSON + SSE events ("call added"), plus the viewer's static files. Request and response types live in a shared package | core, query |
 | **cli** | The `qx` command and the composition root: wires store, ingest and api together (`qx serve`). No business logic | every layer below |

@@ -68,3 +68,14 @@ export function replaysThinking(canonicalModel: string | undefined): boolean {
   if (match[1] === "sonnet") return version >= 5;
   return version >= 5.5;
 }
+
+/** The content block types of Anthropic messages that this code knows. */
+export const KNOWN_CONTENT_TYPES: ReadonlySet<string> = new Set([
+  "text",
+  "thinking",
+  "redacted_thinking",
+  "tool_use",
+  "tool_result",
+  "image",
+  "document",
+]);

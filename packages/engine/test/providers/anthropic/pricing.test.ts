@@ -100,8 +100,15 @@ describe("priceCall: price modifiers", () => {
     expect(regional.cost?.price.modifiers).toEqual(["Bedrock regional endpoint +10%"]);
   });
 
-  test("adds nothing on a Bedrock global endpoint, or for a model before Claude 4.5", () => {
+  test.each(["us.", "apac.", "us-gov.", "jp.", "au."])("treats a %s id as a regional endpoint", (prefix) => {
+    expect(parts(`${prefix}anthropic.claude-opus-5-5`).cost?.price.modifiers).toEqual([
+      "Bedrock regional endpoint +10%",
+    ]);
+  });
+
+  test("adds nothing on a Bedrock global endpoint, a bare id, or for a model before Claude 4.5", () => {
     expect(parts("global.anthropic.claude-opus-5-5").cost?.price.modifiers).toEqual([]);
+    expect(parts("anthropic.claude-opus-5-5").cost?.price.modifiers).toEqual([]);
     expect(parts("eu.anthropic.claude-opus-4-1-20250805-v1:0").cost?.price.modifiers).toEqual([]);
   });
 
