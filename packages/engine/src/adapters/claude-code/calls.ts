@@ -3,10 +3,11 @@ import type { Call, CallParams, Usage } from "@quantext/shared";
 import { canonicalModel, priceUsage } from "../../core/pricing.ts";
 import type { JsonObject } from "./json.ts";
 import { arr, num, obj, str } from "./json.ts";
+import type { WireRequest } from "./rebuild.ts";
 import type { Row } from "./rows.ts";
 
-/** The Calls of one transcript, in log order. */
-export function callsOf(rows: readonly Row[], sessionId: string): Call[] {
+/** The Calls of one transcript, in log order, flagged where their rebuilt request is incomplete. */
+export function callsOf(rows: readonly Row[], sessionId: string, requests: ReadonlyMap<string, WireRequest>): Call[] {
   const usageByRequest = responseUsage(rows);
   return rows
     .filter((row) => row.type === "api-request")
@@ -14,7 +15,10 @@ export function callsOf(rows: readonly Row[], sessionId: string): Call[] {
       const id = str(row.data.id) ?? row.at;
       const params = obj(row.data.params) ?? {};
       const model = str(params.model) ?? "";
-      const call: Call = { id, sessionId, index, ts: str(row.data.timestamp) ?? "", model, params: paramsOf(params) };
+      const ts = str(row.data.timestamp) ?? "";
+      const missing = requests.get(id)?.missing ?? ["request was not rebuilt"];
+      const issues = missing.map((detail) => ({ kind: "unresolved-request" as const, detail }));
+      const call: Call = { id, sessionId, index, ts, model, params: paramsOf(params), issues };
       const canonical = canonicalModel(model);
       if (canonical !== undefined) call.canonicalModel = canonical;
       const shapeHash = str(row.data.shapeHash);

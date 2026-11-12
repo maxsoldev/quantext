@@ -1,6 +1,7 @@
 /** The Claude Code adapter: turn the JSONL transcripts of one session into the domain model. */
 import type { IngestReport, SessionGraph } from "@quantext/shared";
 import { callsOf } from "./calls.ts";
+import { rebuildRequests } from "./rebuild.ts";
 import { readRows } from "./rows.ts";
 import { sessionIdOf, sessionOf } from "./session.ts";
 
@@ -17,6 +18,8 @@ export interface ClaudeCodeTranscripts {
 export function parseClaudeCodeSession(input: ClaudeCodeTranscripts): SessionGraph {
   const report: IngestReport = { unknownRecords: {}, unreadable: [] };
   const rows = readRows("main", input.main, report);
+  const agentRows = input.subagents.map((agent, i) => readRows(`subagent-${i}`, agent.text, report));
+  const requests = rebuildRequests([...rows, ...agentRows.flat()]);
   const id = sessionIdOf(rows) ?? "unknown";
-  return { sessions: [sessionOf(rows, id)], calls: callsOf(rows, id), report };
+  return { sessions: [sessionOf(rows, id)], calls: callsOf(rows, id, requests), report };
 }

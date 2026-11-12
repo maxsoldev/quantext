@@ -79,6 +79,17 @@ export interface Call {
   /** Absent when the log holds no response for the request; then the Call has no exact total. */
   usage?: Usage;
   cost?: Cost;
+  /** What is wrong with this Call's data. Empty when its request is complete and its numbers reconcile. */
+  issues: CallIssue[];
+}
+
+/**
+ * A flag on a Call. `unresolved-request`: part of the request is not in the log, so the rebuilt input is
+ * incomplete.
+ */
+export interface CallIssue {
+  kind: "unresolved-request";
+  detail: string;
 }
 
 /** Input that the adapter could not map, counted so that nothing is dropped in silence. */
