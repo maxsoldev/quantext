@@ -66,13 +66,16 @@ export function attributeCall(input: CallAttributionInput): CallAttribution {
     anchors.unshift({ end: lastBp + 1, sum: cached });
   }
   const split = splitFresh(input, anchors);
-  if (typeof split !== "string") return { ...split, framingTokens, issues: [] };
+  if (typeof split !== "string") {
+    const { clamped, ...rest } = split;
+    return { ...rest, framingTokens, issues: clampIssues(clamped) };
+  }
   // The kept tokens do not fit: split the whole total again, over every Block, by estimate.
   const all = [...kept.estimates(), ...fresh.map((f) => f.estimate)].map((estimate) => ({ estimate }));
   const again = splitFresh({ ...input, kept: { ...kept, count: 0, tokens: 0, exact: true }, fresh: all }, [
     { end: count, sum: total - framingTokens },
   ]);
-  const shares = typeof again === "string" ? all.map(() => ({ tokens: 0, basis: "estimate" as const })) : again.fresh;
+  const shares: Share[] = typeof again === "string" ? all.map(() => ({ tokens: 0, basis: "estimate" })) : again.fresh;
   return {
     kept: shares.slice(0, kept.count),
     fresh: shares.slice(kept.count),
@@ -80,6 +83,16 @@ export function attributeCall(input: CallAttributionInput): CallAttribution {
     issues: [{ kind: "unreconciled-tokens", detail: split }],
     groups: typeof again === "string" ? [] : again.groups,
   };
+}
+
+function clampIssues(raised: readonly Raised[]): CallIssue[] {
+  if (raised.length === 0) return [];
+  const first = raised[0] as Raised;
+  const detail =
+    raised.length === 1
+      ? `1 block raised to its lower bound (${first.min} tokens instead of ${first.share})`
+      : `${raised.length} blocks raised to their lower bounds`;
+  return [{ kind: "estimate-clamped", detail }];
 }
 
 /** Blocks [0, end) hold `sum` tokens, exactly. */
@@ -92,10 +105,11 @@ interface Anchor {
 function splitFresh(
   input: CallAttributionInput,
   anchors: readonly Anchor[],
-): Omit<CallAttribution, "framingTokens" | "issues"> | string {
+): (Omit<CallAttribution, "framingTokens" | "issues"> & { clamped: Raised[] }) | string {
   const { kept, fresh, usage, id } = input;
   const out: Share[] = [];
   const groups: { id: string; size: number }[] = [];
+  const clamped: Raised[] = [];
   let start = kept.count;
   let sumBefore = kept.tokens;
   let exactBefore = kept.exact;
@@ -116,11 +130,12 @@ function splitFresh(
     if (rest < 0)
       return `blocks kept from the previous call have ${sumBefore + carriedSum} tokens, more than ${anchor.sum}`;
     if (fresher.length === 0 && rest !== 0) return `${rest} tokens more than the previous call, but no new block`;
-    const shares = reconcile(
-      fresher.map((f) => f.estimate),
-      rest,
-    );
+    const estimates = fresher.map((f) => f.estimate);
+    const { shares, raised } = withBounds(reconcile(estimates, rest), estimates);
+    clamped.push(...raised);
     const group = exact && fresher.length > 1 ? `${id}#${rangeIndex}` : undefined;
+    const outputs = estimates.filter((e) => e.method === "output").length;
+    const anchored = exact && outputs > 0 && outputs === fresher.length - 1;
     if (group !== undefined) groups.push({ id: group, size: fresher.length });
     let next = 0;
     for (const f of range) {
@@ -128,15 +143,55 @@ function splitFresh(
         out.push(f.carried);
         continue;
       }
+      const method = estimates[next]?.method;
       const tokens = shares[next++] ?? 0;
+      const basis: TokenBasis = anchored && method !== "output" ? "anchored" : "estimate";
       if (fresher.length === 1 && exact) out.push({ tokens, basis: usage.basis });
-      else out.push(group === undefined ? { tokens, basis: "estimate" } : { tokens, basis: "estimate", group });
+      else out.push(group === undefined ? { tokens, basis } : { tokens, basis, group });
     }
     start = anchor.end;
     sumBefore = anchor.sum;
     exactBefore = true; // an anchor is an exact edge
   }
-  return { fresh: out, groups };
+  return { fresh: out, groups, clamped };
+}
+
+interface Raised {
+  min: number;
+  share: number;
+}
+
+/**
+ * Raise shares below their Block's lower bound to it, and take the difference from the others: first from Blocks
+ * weighted by output tokens, then from the largest, never below their own bound. The sum stays the same.
+ */
+function withBounds(shares: number[], estimates: readonly Estimate[]): { shares: number[]; raised: Raised[] } {
+  const out = [...shares];
+  const raised: Raised[] = [];
+  const raisedAt = new Set<number>();
+  let deficit = 0;
+  estimates.forEach((e, i) => {
+    const share = out[i] ?? 0;
+    if (e.min === undefined || share >= e.min) return;
+    raised.push({ min: e.min, share });
+    raisedAt.add(i);
+    deficit += e.min - share;
+    out[i] = e.min;
+  });
+  const donors = estimates
+    .map((e, i) => ({ i, e }))
+    .filter(({ i }) => !raisedAt.has(i))
+    .sort(
+      (a, b) => Number(b.e.method === "output") - Number(a.e.method === "output") || (out[b.i] ?? 0) - (out[a.i] ?? 0),
+    );
+  for (const { i, e } of donors) {
+    const give = Math.min(deficit, (out[i] ?? 0) - (e.min ?? 0));
+    if (give <= 0) continue;
+    out[i] = (out[i] ?? 0) - give;
+    deficit -= give;
+  }
+  if (deficit > 0) return { shares, raised: [] }; // no room to raise: keep the plain split
+  return { shares: out, raised };
 }
 
 /**

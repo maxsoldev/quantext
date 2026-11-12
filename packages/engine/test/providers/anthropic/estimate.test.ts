@@ -103,8 +103,16 @@ describe("estimateBlock", () => {
     const result = { type: "tool_result", tool_use_id: "", content: [image] };
     expect(estimateBlock(block("tool-result", result))).toEqual({
       tokens: Math.ceil((96 * 64) / 750) + BLOCK_OVERHEAD_TOKENS,
+      min: BLOCK_OVERHEAD_TOKENS,
       method: "image",
     });
+  });
+
+  test("gives a tool result a lower bound: its tool use id and the block's structure", () => {
+    const result = { type: "tool_result", tool_use_id: "x".repeat(33), content: "" };
+    expect(estimateBlock(block("tool-result", result)).min).toBe(
+      Math.ceil(33 / CHARS_PER_TOKEN) + BLOCK_OVERHEAD_TOKENS,
+    );
   });
 
   test("marks a document as unknown", () => {

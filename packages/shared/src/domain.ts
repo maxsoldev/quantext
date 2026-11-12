@@ -5,10 +5,11 @@
 
 /**
  * How a token number was found. `exact`: reported by the model provider for this Call. `derived`: computed from
- * exact counters (for example the change of a cumulative total). `estimate`: from an estimator, used only to split
- * an exact or derived total.
+ * exact counters (for example the change of a cumulative total). `anchored`: an exact change less the previous
+ * reply's output tokens, so near-exact (off by tens of tokens, with a known bias). `estimate`: from an estimator,
+ * used only to split an exact or derived total.
  */
-export type TokenBasis = "exact" | "derived" | "estimate";
+export type TokenBasis = "exact" | "derived" | "anchored" | "estimate";
 
 /** One conversation in a harness. A subagent run is its own Session, with a parent. */
 export interface Session {
@@ -114,10 +115,17 @@ export interface Call {
  * incomplete. `no-usage`: the log holds no Usage, so the Call has no exact total. `unreconciled-tokens`: the exact
  * change from the previous Call does not fit the new Blocks, so the whole total is split by estimate. `no-price`:
  * there is no list price for the model, so the Call has no cost. `price-assumption`: the cost rests on an
- * assumption that the log cannot confirm (a cache write's time to live, a long-context price).
+ * assumption that the log cannot confirm (a cache write's time to live, a long-context price). `estimate-clamped`: a
+ * Block's share fell below its lower bound (its tool use id and structure) and was raised to it.
  */
 export interface CallIssue {
-  kind: "unresolved-request" | "no-usage" | "unreconciled-tokens" | "no-price" | "price-assumption";
+  kind:
+    | "unresolved-request"
+    | "no-usage"
+    | "unreconciled-tokens"
+    | "no-price"
+    | "price-assumption"
+    | "estimate-clamped";
   detail: string;
 }
 

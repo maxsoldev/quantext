@@ -228,14 +228,13 @@ function applyOutputAnchor(
       total,
     ).forEach((tokens, i) => {
       const entry = entries[i];
-      if (entry !== undefined) entry.ref = { ...entry.ref, estimate: { tokens, method: "chars" } };
+      if (entry !== undefined) entry.ref = { ...entry.ref, estimate: { tokens, method: "output" } };
     });
   weigh(thinking, reasoning);
   weigh(others, rest);
   // The other new Blocks of the Call (tool results) take what the response leaves.
   for (const f of fresh) {
-    if (f.message !== m && f.message >= 0)
-      f.ref = { ...f.ref, estimate: { tokens: f.ref.estimate.tokens, method: "rest" } };
+    if (f.message !== m && f.message >= 0) f.ref = { ...f.ref, estimate: { ...f.ref.estimate, method: "rest" } };
   }
 }
 

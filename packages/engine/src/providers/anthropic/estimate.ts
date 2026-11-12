@@ -20,7 +20,18 @@ const IMAGE_PIXELS_PER_TOKEN = 750;
 const IMAGE_MAX_EDGE = 1568;
 
 /** The default estimator for Anthropic content. Pass another to `estimateRequest` to change it. */
-export const estimateBlock: Estimator = (block) => estimateContent(block.content);
+export const estimateBlock: Estimator = (block) => {
+  const estimate = estimateContent(block.content);
+  const min = minimumTokens(block.content);
+  return min === undefined ? estimate : { ...estimate, min };
+};
+
+/** The fewest tokens a tool result can have: its tool use id and the structure of a block. */
+function minimumTokens(content: JsonValue): number | undefined {
+  const block = asObject(content);
+  if (block?.type !== "tool_result") return undefined;
+  return Math.ceil(String(block.tool_use_id ?? "").length / CHARS_PER_TOKEN) + BLOCK_OVERHEAD_TOKENS;
+}
 
 function estimateContent(content: JsonValue): Estimate {
   const parts = partsOf(content);
