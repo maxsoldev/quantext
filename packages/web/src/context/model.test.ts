@@ -22,8 +22,9 @@ const ctx = (blocks: ContextBlock[]): CallContext =>
   ({
     blocks,
     sections: { tools: 30, system: 20, messages: 45, framing: 5 },
+    turns: [],
     totalTokens: 100,
-  }) as CallContext;
+  }) as unknown as CallContext;
 
 describe("the rows of a Call's block list", () => {
   test("a header before each section that has blocks, in request order, then its blocks", () => {

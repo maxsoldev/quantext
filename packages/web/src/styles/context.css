@@ -672,3 +672,64 @@ button.link:focus-visible {
     display: none;
   }
 }
+
+/* Turns in the messages: the earlier turns fold into one row, then a row per turn. A turn's row is marked in the
+   user's colour, since a prompt starts it. */
+.block-row.group-row {
+  background: var(--surface);
+}
+.block-row.earlier-row {
+  background: var(--surface-2);
+  border-bottom-color: var(--rule);
+}
+.group-toggle {
+  gap: var(--space-2);
+}
+.group-title {
+  flex: none;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.turn-row .group-toggle {
+  padding-left: var(--space-4);
+}
+.turn-row.current .group-toggle {
+  padding-left: 0;
+  cursor: default;
+}
+.turn-row .group-title {
+  padding-left: var(--space-2);
+  border-left: 3px solid var(--cat-user);
+}
+.turn-row .preview {
+  flex: 1 1 auto;
+  color: var(--ink-2);
+}
+.turn-row .section-count {
+  flex: none;
+}
+.tag.current-turn {
+  flex: none;
+  color: var(--ink-2);
+  border-color: var(--rule-strong);
+  font-weight: 600;
+}
+.only-new {
+  flex: none;
+  font-size: var(--t-small);
+  padding: 4px var(--space-2);
+}
+.only-new[aria-pressed="true"] {
+  background: var(--select);
+  color: var(--select-ink);
+  border-color: var(--select);
+}
+.only-new[aria-pressed="true"] .muted {
+  color: inherit;
+}
+@container (max-width: 760px) {
+  .turn-row .section-count,
+  .tag.current-turn {
+    display: none;
+  }
+}

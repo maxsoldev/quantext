@@ -224,6 +224,7 @@ export function SessionPage({ route }: { route: SessionRoute }) {
                 call={callIndex}
                 ctx={call.ctx}
                 resp={call.resp}
+                diff={call.diff}
                 cwd={s.cwd}
                 next={view?.calls[place + 1]?.index}
                 openHash={route.block}
