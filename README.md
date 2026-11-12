@@ -16,9 +16,20 @@ makes **no outbound connections**.
 - **Network**: one HTTP server on `127.0.0.1`, for the viewer. The mod talks only to it.
 
 CI enforces this on the files we ship: a static no-egress guard reads the built plugin, and the engine's smoke
-test runs with a network tripwire. Dependencies are pinned and checked for vulnerabilities, licences and
-signatures, and none may run an install script. Details, and how to report a vulnerability:
-[SECURITY.md](SECURITY.md).
+test runs with a network tripwire.
+
+**Small supply-chain surface.**
+
+- The engine and the mod have **no third-party runtime dependencies**: only Node and Bun built-ins.
+- The viewer bundles **five well-known packages**: React, react-dom and scheduler (MIT), and the Atkinson
+  Hyperlegible fonts (OFL-1.1). The plugin's `THIRD_PARTY_NOTICES.md` lists them with their licence texts.
+- Build tools (TypeScript, Vite, Rolldown, Vitest, Biome) are not shipped. A compromised build tool could still
+  change the bundle, so every package is pinned in the lockfile, comes from the npm registry with an integrity
+  hash and a verified registry signature, waits a day after release before we take it, and may not run an
+  install script. CI also checks for known vulnerabilities and licences, and the no-egress guard checks what the
+  build produced.
+
+Details, and how to report a vulnerability: [SECURITY.md](SECURITY.md).
 
 ## Requirements and setup (contributors)
 
