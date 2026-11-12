@@ -1,8 +1,8 @@
 /**
  * Build the Claude Code plugin into `dist/plugin/` (ADR 27): the mod as written (Claude Code loads its
  * TypeScript itself), the bundled engine from `pnpm build` in `engine/` with the viewer in `engine/web/`, and a
- * manifest and engine versioned from the root package.json (ADR 30). The repo-root
- * `.claude-plugin/marketplace.json` points here.
+ * manifest and engine versioned from the root package.json, and `dist/.claude-plugin/marketplace.json`, a folder
+ * marketplace for development. Releases publish this folder to the `plugin` branch (ADR 30).
  * Fails when a file the plugin needs is missing. Usage: `pnpm build:plugin`, which runs `pnpm build` first
  * (the viewer, then the engine); this script only assembles what is built.
  */
@@ -56,4 +56,14 @@ for (const name of readdirSync(engineDist).filter((n) => n.endsWith(".js"))) {
   if (!existsSync(join(out, "engine", name))) throw new Error(`dist/plugin/engine lacks ${name}`);
 }
 if (!readdirSync(join(out, "engine")).some((n) => n.endsWith("-node-driver.js"))) throw new Error("no driver chunks");
-console.log(`dist/plugin/  quantext ${version}`);
+
+// A folder marketplace for development, read in place: `claude plugin marketplace add ./dist` (ADR 30).
+const devMarketplace = {
+  name: "quantext-dev",
+  owner: { name: "maxsoldev" },
+  description: "Quantext built from this clone (dist/plugin), for development.",
+  plugins: [{ name: "quantext", source: "./plugin", description: manifest.description }],
+};
+mkdirSync(join(out, "..", ".claude-plugin"), { recursive: true });
+writeFileSync(join(out, "..", ".claude-plugin", "marketplace.json"), `${JSON.stringify(devMarketplace, null, 2)}\n`);
+console.log(`dist/plugin/  quantext ${version}; dist/.claude-plugin/marketplace.json (quantext-dev)`);

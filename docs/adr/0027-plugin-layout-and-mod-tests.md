@@ -1,6 +1,6 @@
 # 27. One plugin folder: the mod, the bundled engine and the viewer; mod tests under claude plugin test
 
-Status: accepted
+Status: accepted; the marketplace, the publishing and the versions are replaced by ADR 30
 
 ## Context
 
