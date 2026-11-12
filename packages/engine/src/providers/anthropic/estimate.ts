@@ -130,9 +130,14 @@ function webpSize(
   return undefined;
 }
 
+/** Image headers are read from the first 64 KB at most (a JPEG frame header may follow large metadata). */
+const HEADER_BASE64_CHARS = 87_380; // 4/3 of 64 KB, a multiple of 4
+
 function decodeBase64(base64: string): Uint8Array | undefined {
-  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) return undefined;
-  const binary = atob(base64.slice(0, base64.length - (base64.length % 4)));
+  const head = base64.slice(0, HEADER_BASE64_CHARS);
+  const whole = head.slice(0, head.length - (head.length % 4));
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(whole)) return undefined;
+  const binary = atob(whole);
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 
