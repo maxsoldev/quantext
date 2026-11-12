@@ -6,6 +6,7 @@
 import type { CallContext, ContextBlock, SessionKey } from "@quantext/shared";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { percent, shortModel, tokens, usd, when } from "../format/format.ts";
+import { Term } from "../teach/Term.tsx";
 import { Tokens } from "../ui/Num.tsx";
 import type { Load } from "../ui/useLoad.ts";
 import { useWindow } from "../ui/useWindow.ts";
@@ -90,7 +91,9 @@ function ContextHead({ ctx }: { ctx: CallContext }) {
     <div className="context-head">
       <div className="context-title">
         <h2 id="context-title">
-          Context at call <span className="num">{ctx.call.index}</span>
+          <Term id="context-window">
+            Context at call <span className="num">{ctx.call.index}</span>
+          </Term>
         </h2>
         <p className="muted">
           {when(ctx.call.ts)}, {shortModel(ctx.call.model)}
@@ -101,15 +104,21 @@ function ContextHead({ ctx }: { ctx: CallContext }) {
         <p className="context-lede" data-testid="hidden-part">
           The model received <Tokens n={ctx.totalTokens} basis={u?.basis ?? "exact"} note="The call's input total." />{" "}
           tokens. <Tokens n={hidden.tokens} note="Tool schemas plus the system prompt." /> of them (
-          {percent(hidden.share)}) are the hidden part: tool schemas and the system prompt, sent before the first
-          message and never shown in the chat.
+          {percent(hidden.share)}) are the <Term id="hidden-part">hidden part</Term>: tool schemas and the system
+          prompt, sent before the first message and never shown in the chat.
           {u && boundary && (
             <>
               {" "}
               The first <Tokens n={u.cacheReadTokens} note="From the call's usage: cache read tokens." /> were read from
-              the cache.
+              the <Term id="cached-prefix">cache</Term>.
             </>
           )}
+        </p>
+      )}
+      {ctx.rebuilt && (
+        <p className="muted basis-note">
+          Before a token number: no mark exact, <b>≈</b> anchored, <b>~</b> estimate, <b>Δ</b> derived.{" "}
+          <Term id="token-basis" />
         </p>
       )}
     </div>

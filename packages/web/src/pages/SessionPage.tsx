@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client.ts";
 import { laneView, mainLane } from "../chart/lane.ts";
 import { TimelineChart } from "../chart/TimelineChart.tsx";
+import { Compactions } from "../compaction/Compactions.tsx";
 import { ContextAt } from "../context/ContextAt.tsx";
 import { CACHE_PARTS, CATEGORIES } from "../context/categories.ts";
 import { DiffCard } from "../diff/DiffCard.tsx";
@@ -14,6 +15,7 @@ import { duration, percent, projectName, shortModel, usd, when } from "../format
 import { useLiveVersion } from "../live/hooks.ts";
 import { Link, navigate } from "../nav.tsx";
 import type { Route } from "../route.ts";
+import { Term } from "../teach/Term.tsx";
 import { ToolCalls } from "../tools/ToolCalls.tsx";
 import { Tokens } from "../ui/Num.tsx";
 import { useLoad } from "../ui/useLoad.ts";
@@ -87,6 +89,11 @@ export function SessionPage({ route }: { route: SessionRoute }) {
           <h1 id="session-title">{s.title ?? `Untitled session ${s.id.slice(0, 8)}`}</h1>
           <p className="muted">
             {s.project && <Link to={{ page: "sessions", project: s.project }}>{projectName(s.project)}</Link>}
+            {s.project && (
+              <Link to={{ page: "memory", project: s.project }} className="memory-link">
+                Project memory
+              </Link>
+            )}
             {s.started && when(s.started)}
             {span !== undefined && `, ${duration(span)}`}
             {s.harnessVersion && `, Claude Code ${s.harnessVersion}`}
@@ -140,8 +147,11 @@ export function SessionPage({ route }: { route: SessionRoute }) {
         </dl>
       </header>
       {detail.subagents.length > 0 && <Subagents parent={key} items={detail.subagents} />}
-      <SessionTabs route={route} />
+      <SessionTabs route={route} compactions={detail.compactions.length} />
       {route.view === "tools" && <ToolCalls route={route} session={s} subagents={detail.subagents} version={version} />}
+      {route.view === "compactions" && (
+        <Compactions sessionKey={key} timeline={data.value.timeline} version={version} />
+      )}
       {!route.view && (
         <>
           {view && view.calls.length > 0 ? (
@@ -151,7 +161,9 @@ export function SessionPage({ route }: { route: SessionRoute }) {
                   <h2 id="timeline-title">Context per call</h2>
                   {detail.lanes.length > 1 && (
                     <fieldset className="lanes">
-                      <legend>Lane</legend>
+                      <legend>
+                        <Term id="lane">Lane</Term>
+                      </legend>
                       {[...detail.lanes]
                         .sort((a, b) => b.calls - a.calls)
                         .map((l) => (
@@ -203,10 +215,11 @@ export function SessionPage({ route }: { route: SessionRoute }) {
 const TABS: { view: SessionRoute["view"]; label: string }[] = [
   { view: undefined, label: "Context" },
   { view: "tools", label: "Tool calls" },
+  { view: "compactions", label: "Compactions" },
 ];
 
 /** The views of a Session, as links: each is its own URL. */
-function SessionTabs({ route }: { route: SessionRoute }) {
+function SessionTabs({ route, compactions }: { route: SessionRoute; compactions: number }) {
   return (
     <nav className="tabs" aria-label="Views of this session">
       {TABS.map((t) => (
@@ -216,6 +229,7 @@ function SessionTabs({ route }: { route: SessionRoute }) {
           aria-current={route.view === t.view ? "page" : undefined}
         >
           {t.label}
+          {t.view === "compactions" && <span className="num tab-count"> {compactions}</span>}
         </Link>
       ))}
     </nav>
@@ -226,12 +240,7 @@ function SessionTabs({ route }: { route: SessionRoute }) {
 function Subagents({ parent, items }: { parent: SessionKey; items: readonly SessionSummary[] }) {
   return (
     <p className="subagents" data-testid="subagents">
-      <span
-        className="tip-anchor-label"
-        data-tip="A subagent runs in its own context: its own system prompt, tools and task. Only its final answer comes back into this session."
-      >
-        {items.length === 1 ? "Subagent" : `${items.length} subagents`}:
-      </span>{" "}
+      <Term id="subagents">{items.length === 1 ? "Subagent" : `${items.length} subagents`}</Term>:{" "}
       {items.map((a, i) => (
         <span key={a.id}>
           {i > 0 && ", "}
@@ -315,6 +324,9 @@ function BillingLegend() {
           <span className="swatch break-swatch" aria-hidden="true" />
           Cache break
         </button>
+      </li>
+      <li>
+        <Term id="prompt-cache">Prompt cache</Term>
       </li>
       <li>
         <button

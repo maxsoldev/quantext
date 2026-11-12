@@ -11,6 +11,7 @@ import { KIND_LABEL } from "../context/kinds.ts";
 import { sourceLabel } from "../context/model.ts";
 import { duration, shortModel, tokens } from "../format/format.ts";
 import { BREAK_REASONS } from "../teach/cacheBreaks.ts";
+import { Term } from "../teach/Term.tsx";
 import { Tokens } from "../ui/Num.tsx";
 import type { Load } from "../ui/useLoad.ts";
 import type { ChangeStatus, DiffView, Strip } from "./model.ts";
@@ -79,7 +80,7 @@ export function DiffCard({
       {d && view && <Changes d={d} onOpen={setOpen} />}
       {breaks.length > 0 && (
         <p className="diff-breaks">
-          Cache breaks in this lane:{" "}
+          <Term id="cache-break">Cache breaks</Term> in this lane:{" "}
           {breaks.map((b, i) => (
             <span key={b.index}>
               {i > 0 && ", "}
