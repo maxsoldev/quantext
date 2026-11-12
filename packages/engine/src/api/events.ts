@@ -3,6 +3,7 @@
  * `visibleEvent` (demo mode), is kept in a ring of recent events, and is written to every client. A client that
  * comes back with a cursor gets what it missed from the ring, or `resync` when the ring no longer holds it. A
  * client that does not read is dropped once its unsent bytes pass a limit: memory never grows with a slow client.
+ * The replay is written in parts, each after the last one drained, so a long replay never trips that limit.
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { IngestEvent, SseReady, SseResync, VisibleEvent } from "@quantext/shared";
@@ -22,6 +23,8 @@ export interface EventStreamOptions {
   maxBufferedBytes?: number;
   /** Clients at once; more get 503 (default 16). */
   maxClients?: number;
+  /** A client whose replay does not drain in this time is dropped (default 30 s). */
+  drainTimeoutMs?: number;
   /** Gets a failure to pass an event on; its clients are closed so that they reconnect and resync. */
   onError?: (error: unknown) => void;
 }
@@ -62,27 +65,81 @@ export function createEventStream(options: EventStreamOptions): EventStream {
   const maxBuffered = options.maxBufferedBytes ?? 1024 * 1024;
   const maxClients = options.maxClients ?? 16;
   const onError = options.onError ?? ((error: unknown) => console.error("quantext: an event was not sent:", error));
-  const clients = new Set<ServerResponse>();
+  const drainTimeoutMs = options.drainTimeoutMs ?? 30_000;
+  /** Each stream, and whether it is live (else its replay is still being written). */
+  const clients = new Map<ServerResponse, { live: boolean }>();
   const ring: Kept[] = [];
   /** Clients at or after this place can be replayed from the ring. */
   let floor: Position = { c: query.changeCursor(), o: Number.POSITIVE_INFINITY };
   let latest = floor.c;
 
-  /** Write to one client; drop it when it does not read. */
+  const drop = (res: ServerResponse) => {
+    clients.delete(res);
+    res.destroy();
+  };
+  /** A live write: a client with more unsent bytes than the limit does not read, and is dropped. */
   const write = (res: ServerResponse, text: string) => {
     if (res.destroyed) return;
     res.write(text);
-    if (res.writableLength > maxBuffered) {
-      clients.delete(res);
-      res.destroy();
+    if (res.writableLength > maxBuffered) drop(res);
+  };
+  /** Resolves when `res` drained (true), or closed or timed out (false). */
+  const drained = (res: ServerResponse) =>
+    new Promise<boolean>((resolve) => {
+      const done = (ok: boolean) => {
+        clearTimeout(timer);
+        res.off("drain", onDrain);
+        res.off("close", onClose);
+        resolve(ok);
+      };
+      const onDrain = () => done(true);
+      const onClose = () => done(false);
+      const timer = setTimeout(() => done(false), drainTimeoutMs);
+      res.on("drain", onDrain);
+      res.on("close", onClose);
+    });
+  /**
+   * Write the ring after `from`, a part at a time, then `ready`, and make the client live. Events that come
+   * meanwhile go to the ring and are written by this loop, so the order holds.
+   */
+  const replay = async (res: ServerResponse, from: Position | undefined, head: string) => {
+    let text = head;
+    let at = from;
+    let replayed = 0;
+    for (;;) {
+      if (at !== undefined && after(floor, at)) {
+        drop(res); // the ring moved past it while it read slowly: it reconnects and resyncs
+        return;
+      }
+      const next = at === undefined ? [] : ring.filter((k) => after(k, at as Position));
+      if (next.length === 0) break;
+      for (const k of next) {
+        text += eventFrame(k);
+        at = k;
+        replayed++;
+        if (text.length >= 16 * 1024 || k === next.at(-1)) {
+          if (res.destroyed) return;
+          const ok = res.write(text);
+          text = "";
+          if ((!ok || res.writableLength > maxBuffered / 2) && !(await drained(res))) {
+            if (!res.destroyed) drop(res);
+            return;
+          }
+        }
+      }
     }
+    if (res.destroyed) return;
+    const ready: SseReady = { apiVersion: API_VERSION, cursor: latest, replayed };
+    res.write(text + frame("ready", String(latest), ready));
+    const state = clients.get(res);
+    if (state !== undefined) state.live = true;
   };
   const frame = (name: string, id: string, data: unknown) =>
     `id: ${id}\nevent: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
   const eventFrame = (k: Kept) => frame(k.event.kind, `${k.c}.${k.o}`, k.event);
 
   const heartbeat = setInterval(() => {
-    for (const res of clients) write(res, ": ping\n\n");
+    for (const [res, state] of clients) if (state.live) write(res, ": ping\n\n");
   }, heartbeatMs);
   heartbeat.unref();
 
@@ -95,7 +152,7 @@ export function createEventStream(options: EventStreamOptions): EventStream {
         // Clients that come back must not think they missed nothing.
         floor = { c: Math.max(floor.c, event.cursor), o: Number.POSITIVE_INFINITY };
         latest = Math.max(latest, event.cursor);
-        for (const res of clients) res.end();
+        for (const res of clients.keys()) res.end();
         clients.clear();
         onError(error);
         return;
@@ -110,7 +167,7 @@ export function createEventStream(options: EventStreamOptions): EventStream {
         floor = { c: dropped.c, o: dropped.o };
       }
       const text = eventFrame(kept);
-      for (const res of clients) write(res, text);
+      for (const [res, state] of clients) if (state.live) write(res, text);
     },
     connect(req, res, cursorText) {
       const from = cursorText === undefined ? undefined : parseCursor(cursorText);
@@ -136,31 +193,26 @@ export function createEventStream(options: EventStreamOptions): EventStream {
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
       });
-      clients.add(res);
-      const drop = () => clients.delete(res);
-      req.on("close", drop);
-      res.on("close", drop);
-      let text = "retry: 2000\n\n";
-      let replayed = 0;
-      if (from !== undefined) {
-        if (from.c > latest || after(floor, from)) {
-          const resync: SseResync = { apiVersion: API_VERSION, cursor: latest, since: from.c > latest ? 0 : from.c };
-          text += frame("resync", String(latest), resync);
-        } else {
-          for (const k of ring) {
-            if (!after(k, from)) continue;
-            text += eventFrame(k);
-            replayed++;
-          }
-        }
+      clients.set(res, { live: false });
+      const gone = () => clients.delete(res);
+      req.on("close", gone);
+      res.on("close", gone);
+      let head = "retry: 2000\n\n";
+      let start = from;
+      if (from !== undefined && (from.c > latest || after(floor, from))) {
+        const resync: SseResync = { apiVersion: API_VERSION, cursor: latest, since: from.c > latest ? 0 : from.c };
+        head += frame("resync", String(latest), resync);
+        start = undefined;
       }
-      const ready: SseReady = { apiVersion: API_VERSION, cursor: latest, replayed };
-      write(res, text + frame("ready", String(latest), ready));
+      replay(res, start, head).catch((error: unknown) => {
+        drop(res);
+        onError(error);
+      });
     },
     clients: () => clients.size,
     close() {
       clearInterval(heartbeat);
-      for (const res of clients) res.end();
+      for (const res of clients.keys()) res.end();
       clients.clear();
     },
   };

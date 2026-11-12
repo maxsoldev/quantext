@@ -195,6 +195,35 @@ describe("the event stream", () => {
     stream.close();
   });
 
+  test("replays more than its buffer limit to a client that reads, in parts", async () => {
+    const { port, api, key, cursor } = await setup();
+    const added = Array.from({ length: 60 }, (_, i) => `call-with-a-long-id-${i}`);
+    for (let i = 1; i <= 1024; i++) api.publish({ ...callsEvent(key.log, key.id, cursor + i), added });
+    const stream = await open(port, `/api/v1/events?cursor=${cursor}`);
+    expect(data<SseReady>(await stream.until(ready))).toEqual({ apiVersion: 1, cursor: cursor + 1024, replayed: 1024 });
+    const ids = stream.frames.filter((f) => f.event === "calls").map((f) => f.id);
+    expect(ids).toEqual(Array.from({ length: 1024 }, (_, i) => `${cursor + i + 1}.0`));
+    api.publish(callsEvent(key.log, key.id, cursor + 1025));
+    await stream.until((f) => f.id === `${cursor + 1025}.0`);
+    expect(api.activity().streams).toBe(1);
+    stream.close();
+  });
+
+  test("drops a client that does not read its replay", async () => {
+    const { port, api, key, cursor } = await setup({ events: { maxBufferedBytes: 64 * 1024, drainTimeoutMs: 100 } });
+    const added = Array.from({ length: 60 }, (_, i) => `call-with-a-long-id-${i}`);
+    for (let i = 1; i <= 1024; i++) api.publish({ ...callsEvent(key.log, key.id, cursor + i), added });
+    const socket = connect({ host: "127.0.0.1", port }, () => {
+      socket.write(`GET /api/v1/events?cursor=${cursor} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n\r\n`);
+      socket.pause();
+    });
+    socket.on("error", () => socket.destroy());
+    while (api.activity().streams === 0) await new Promise((r) => setTimeout(r, 5));
+    while (api.activity().streams === 1) await new Promise((r) => setTimeout(r, 10));
+    expect(api.activity().streams).toBe(0);
+    socket.destroy();
+  });
+
   test("drops a client that does not read, without holding its bytes", async () => {
     const { port, api, key, cursor } = await setup({ events: { maxBufferedBytes: 64 * 1024 } });
     const socket = connect({ host: "127.0.0.1", port }, () => {
