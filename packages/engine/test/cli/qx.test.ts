@@ -178,6 +178,18 @@ describe("qx", () => {
     },
   );
 
+  test("lists one Session's tool outputs and Blocks by lifetime cost", async () => {
+    const data = await ingested();
+    const outputs = await qx("outputs", ...data, "00000000-0000-4000-8000-000000000001", "--limit", "1");
+    expect(outputs.code).toBe(EXIT.ok);
+    expect(outputs.out).toMatch(
+      /^TOOL +CALL +TOKENS +CALLS +LIFETIME +COST +INPUT\nRead +2 +9,907 +5 +49,535 +\$0\.0632/,
+    );
+    const blocks = JSON.parse((await qx("blocks", ...data, "00000000-0000-4000-8000-000000000001", "--json")).out);
+    expect(blocks.items.length).toBeGreaterThan(10);
+    expect(blocks.items[0].costUsd.total).toBeGreaterThanOrEqual(blocks.items[1].costUsd.total);
+  });
+
   test("reads while an engine holds the writer lock", async () => {
     const data = await ingested();
     const store = await openStore({ dataDir: data[1] ?? "" });

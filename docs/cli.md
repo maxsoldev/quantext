@@ -10,6 +10,8 @@ API and the viewer. It makes no network calls. In the repo: `pnpm qx <command>` 
 | `qx sessions [--project <p>] [--search <s>] [--sort ended\|started\|cost\|calls] [--limit <n>] [--offset <n>]` | Main Sessions, newest first, with their subagents |
 | `qx session <id>` | One Session: totals, lanes, compactions (before, after, removed, kept), events, subagents |
 | `qx call <session> <n> [--lane <lane>] [--diff]` | The context of Call `n` (its index in the Session; with `--lane`, the `n`-th Call of that lane): every Block in order with section, kind, source, tokens, basis, cached or not, cost share and a preview; totals by section and by context-bar group. `--diff`: what changed from the lane's previous Call |
+| `qx outputs <session> [--sort cost\|tokens\|calls] [--limit <n>]` | The Session's tool outputs by lifetime cost (the query layer's `toolOutputs`; fast for one Session, unlike a filter on `v_tool_outputs`) |
+| `qx blocks <session> [--sort cost\|tokens\|calls] [--limit <n>]` | The Session's Blocks by lifetime cost (`blockLifetimes`) |
 | `qx sql "<select>" [--limit <n>] [--timeout <s>]` | One read-only statement over the tables and views (`docs/schema.md`, "Views"), in its own process, killed after `--timeout` seconds (default 30); at most 1000 rows by default |
 | `qx report` | What ingest could not read or map, the Calls' issues by kind, bytes waiting for a newline |
 | `qx --version`, `qx --help` | |
@@ -45,6 +47,8 @@ renamed or removed only with a new `apiVersion`. An optional field is left out, 
 | `call` | `CallContext`; with `--diff`, also `diff: ContextDiff` |
 | `sql` | `SqlResult`: `columns`, `rows` (objects by column name; a BLOB as `"<blob N bytes>"`), `truncated` |
 | `report` | `QueryReport` |
+| `outputs` | `Items<ToolOutput>` |
+| `blocks` | `Items<BlockLifetime>` |
 
 ## Demo mode
 

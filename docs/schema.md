@@ -226,14 +226,15 @@ with no price adds tokens and no cost.
 
 **Speed** (real corpus, 26,900 Calls, 6.5 million Block-Call pairs, Apple silicon): `v_block_lifetime_cost` and
 `v_tool_outputs` about 1.7 s over the whole corpus (they price every Block in every Call), the other views under
-0.15 s. A filter on a view is applied after the whole view is computed: for one Session, use the query layer's
-`blockLifetimes(session)` and `toolOutputs(session)` (the viewer and the API do), which read only that Session's
-runs (under 10 ms for most Sessions, about 130 ms for the largest).
+0.2 s. A filter on these two views is applied after the whole view is computed: for one Session, use
+`qx outputs <session>` and `qx blocks <session>` (the query layer's `toolOutputs` and `blockLifetimes`, which the
+viewer and the API use), which read only that Session's runs (under 10 ms for most Sessions, about 130 ms for
+the largest).
 
 **Examples.**
 
 ```sql
--- Top tool outputs by lifetime cost
+-- Top tool outputs by lifetime cost, over every Session (for one Session: qx outputs <session>)
 SELECT tool, file_path, input_summary, tokens, calls, lifetime_tokens, round(lifetime_cost_usd, 4) AS usd
 FROM v_tool_outputs ORDER BY lifetime_cost_usd DESC LIMIT 10;
 

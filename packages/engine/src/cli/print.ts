@@ -1,5 +1,6 @@
 /** The human output of each `qx` command, from the query layer's results. */
 import type {
+  BlockLifetime,
   CallContext,
   ContextDiff,
   Page,
@@ -7,6 +8,7 @@ import type {
   SessionDetail,
   SessionSummary,
   SqlResult,
+  ToolOutput,
 } from "@quantext/shared";
 import { CATEGORIES } from "../query/index.ts";
 import type { Column } from "./format.ts";
@@ -206,4 +208,34 @@ export function printReport(r: QueryReport): string {
   );
   lines.push(`pending: ${bytes(r.pendingBytes)} in ${r.pending.length} files`);
   return `${lines.join("\n")}\n`;
+}
+
+export function printToolOutputs(items: readonly ToolOutput[]): string {
+  return `${table(items, [
+    { title: "TOOL", value: (o) => o.tool },
+    { title: "CALL", value: (o) => (o.callIndex === undefined ? "-" : String(o.callIndex)), right: true },
+    { title: "TOKENS", value: (o) => count(o.tokens), right: true },
+    { title: "CALLS", value: (o) => String(o.calls), right: true },
+    { title: "LIFETIME", value: (o) => count(o.lifetimeTokens), right: true },
+    { title: "COST", value: (o) => usd(o.costUsd.total), right: true },
+    { title: "INPUT", value: (o) => o.inputSummary ?? "", max: 60 },
+  ])}\n`;
+}
+
+export function printBlockLifetimes(items: readonly BlockLifetime[]): string {
+  return `${table(items, [
+    { title: "KIND", value: (b) => b.kind },
+    {
+      title: "SOURCE",
+      value: (b) => b.source.mcpServer ?? b.source.skill ?? b.source.filePath ?? b.source.tool ?? "",
+      max: 40,
+    },
+    { title: "TOKENS", value: (b) => count(b.tokens), right: true },
+    { title: "CALLS", value: (b) => String(b.calls), right: true },
+    { title: "LIFETIME", value: (b) => count(b.lifetimeTokens), right: true },
+    { title: "READ", value: (b) => count(b.tokensByPart.cacheRead), right: true },
+    { title: "WRITE", value: (b) => count(b.tokensByPart.cacheWrite), right: true },
+    { title: "COST", value: (b) => usd(b.costUsd.total), right: true },
+    { title: "BLOCK", value: (b) => b.hash.slice(0, 12) },
+  ])}\n`;
 }

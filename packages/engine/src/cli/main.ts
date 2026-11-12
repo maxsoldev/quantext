@@ -5,7 +5,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import type { DemoOptions, SessionKey, SqlResult } from "@quantext/shared";
+import type { DemoOptions, LifetimeOptions, SessionKey, SqlResult } from "@quantext/shared";
 import packageJson from "../../package.json" with { type: "json" };
 import { claudeCodeCodec } from "../adapters/claude-code/index.ts";
 import { claudeConfigDir, createIngest } from "../ingest/index.ts";
@@ -13,7 +13,15 @@ import type { Query } from "../query/index.ts";
 import { createQuery, createRedactor, installViews, SqlRejectedError } from "../query/index.ts";
 import type { SqlDriver } from "../store/index.ts";
 import { defaultDataDir, openReader, openStore, SCHEMA_VERSION, StoreLockedError } from "../store/index.ts";
-import { printCall, printReport, printSession, printSessions, printSql } from "./print.ts";
+import {
+  printBlockLifetimes,
+  printCall,
+  printReport,
+  printSession,
+  printSessions,
+  printSql,
+  printToolOutputs,
+} from "./print.ts";
 
 /** 0: done. 1: failed (no store, a store or SQL error). 2: wrong use (arguments, a rejected statement). 3: not found. */
 export const EXIT = { ok: 0, failed: 1, usage: 2, notFound: 3 } as const;
@@ -37,6 +45,10 @@ Usage:
   qx call <session> <n> [--lane <lane>] [--diff]
                                                 The context of Call n (its index in the Session; with --lane, the
                                                 n-th Call of that lane), and with --diff its change from the last
+  qx outputs <session> [--sort cost|tokens|calls] [--limit <n>]
+                                                The Session's tool outputs by lifetime cost
+  qx blocks <session> [--sort cost|tokens|calls] [--limit <n>]
+                                                The Session's Blocks by lifetime cost
   qx sql "<select>" [--limit <n>] [--timeout <s>]
                                                 One read-only statement over the tables and views, in its own
                                                 process, stopped after --timeout seconds (default 30)
@@ -187,6 +199,18 @@ const COMMANDS: Record<string, (c: Context) => number> = {
     );
     return EXIT.ok;
   },
+  outputs({ values, args, query, io }) {
+    arity(args, 1, "outputs <session>");
+    const list = query.toolOutputs(resolve(query, args[0] ?? ""), lifetimeOptions(values));
+    io.stdout(values.json === true ? json(list) : printToolOutputs(list.items));
+    return EXIT.ok;
+  },
+  blocks({ values, args, query, io }) {
+    arity(args, 1, "blocks <session>");
+    const list = query.blockLifetimes(resolve(query, args[0] ?? ""), lifetimeOptions(values));
+    io.stdout(values.json === true ? json(list) : printBlockLifetimes(list.items));
+    return EXIT.ok;
+  },
   report({ values, args, query, io }) {
     arity(args, 0, "report");
     const report = query.ingestReport();
@@ -327,6 +351,17 @@ function demoOf(values: Values): { demo?: DemoOptions } {
   const projects = values["demo-project"];
   if (projects !== undefined) return { demo: { projects, redactPaths: true } };
   return values.demo === true ? { demo: { redactPaths: true } } : {};
+}
+
+function lifetimeOptions(values: Values): LifetimeOptions {
+  const sort = values.sort;
+  if (sort !== undefined && !["cost", "tokens", "calls"].includes(sort)) {
+    throw new UsageError(`--sort must be cost, tokens or calls, not ${sort}`);
+  }
+  return {
+    ...(sort === undefined ? {} : { sort: sort as "cost" }),
+    limit: integer(values.limit, "--limit") ?? 20,
+  };
 }
 
 function arity(args: readonly string[], n: number, usage: string): void {
