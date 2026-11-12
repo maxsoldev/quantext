@@ -23,7 +23,7 @@ import type { JsonObject } from "./json.ts";
 import { arr, num, obj, str } from "./json.ts";
 import { laneOf, splitCall } from "./lane.ts";
 import { Content, NO_LOOKUP } from "./lookup.ts";
-import { paramsOf, sameUsage, setUsage, usageOf } from "./mapping.ts";
+import { hasInput, mergeUsage, paramsOf, sameInput, setUsage, usageChange, usageOf } from "./mapping.ts";
 import { get, put } from "./records.ts";
 import type { Row } from "./rows.ts";
 import { countUnknown, readLine } from "./rows.ts";
@@ -371,7 +371,7 @@ class Rows {
     const known = get(this.state.responses, call.id);
     if (known?.messageId === messageId && messageHash !== undefined) known.hash = messageHash;
     if (call.usage !== undefined) {
-      if (!sameUsage(call.usage, usage)) this.usageChanged(call, usage, raw);
+      this.usageChanged(call, usage, raw);
       return;
     }
     setUsage(call, usage, raw);
@@ -390,11 +390,30 @@ class Rows {
     this.changes().calls.add(call.id);
   }
 
-  /** A later row of the same response with other usage: keep the newest counts, flag that the split used older ones. */
-  private usageChanged(call: Call, usage: Usage, raw: JsonObject): void {
-    setUsage(call, usage, raw);
-    if (call.blockCount !== undefined) {
-      call.issues.push({ kind: "unreconciled-tokens", detail: "usage changed after the call was split" });
+  /**
+   * A later row of the same response: keep the first input side and take the latest output side. A different
+   * input side after the split is flagged (the split used the first); a change of the output only is not.
+   */
+  private usageChanged(call: Call, next: Usage, raw: JsonObject): void {
+    const known = call.usage;
+    if (known === undefined) return;
+    const merged = mergeUsage(known, next);
+    const inputDiffers = hasInput(known) && hasInput(next) && !sameInput(known, next);
+    if (inputDiffers && call.blockCount !== undefined) {
+      const detail = "usage changed after the call was split";
+      if (!call.issues.some((i) => i.detail === detail)) call.issues.push({ kind: "unreconciled-tokens", detail });
+      this.changes().calls.add(call.id);
+    }
+    if (JSON.stringify(merged) === JSON.stringify(known)) return;
+    const change = usageChange(known, merged);
+    addUsage(this.t.usageSinceCost, call, change);
+    if (this.t.openCompaction !== undefined) addUsage(this.t.openCompaction.logged, call, change);
+    setUsage(call, merged, raw);
+    const response = get(this.state.responses, call.id);
+    if (response !== undefined) {
+      response.outputTokens = merged.outputTokens;
+      if (merged.reasoningOutputTokens === undefined) delete response.reasoningTokens;
+      else response.reasoningTokens = merged.reasoningOutputTokens;
     }
     this.changes().calls.add(call.id);
   }
