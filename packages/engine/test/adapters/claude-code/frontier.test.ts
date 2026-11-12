@@ -126,3 +126,60 @@ describe("a message missing from the log", () => {
     expect(restored.callBlocks.length).toBe(graph.callBlocks.length);
   });
 });
+
+describe("the snapshot stays small", () => {
+  const restoreEachLine = (rows: string) => {
+    const store = new MemoryStore();
+    let parser = createClaudeCodeParser(undefined, { lookup: store });
+    let largest = 0;
+    for (const row of rows.split("\n").filter((l) => l !== "")) {
+      store.apply(parser.push(`${row}\n`));
+      const snapshot = JSON.stringify(parser.snapshot());
+      largest = Math.max(largest, snapshot.length);
+      parser = createClaudeCodeParser(JSON.parse(snapshot), { lookup: store });
+    }
+    return { graph: store.graph(), largest };
+  };
+
+  test("with many tool calls that never get a result Block (a session that logs no requests)", () => {
+    const rows = Array.from({ length: 1000 }, (_, i) =>
+      line({
+        type: "assistant",
+        sessionId: S,
+        message: {
+          id: `msg_${i}`,
+          role: "assistant",
+          model: "claude-opus-5-5",
+          content: [{ type: "tool_use", id: `toolu_${i}`, name: "Read", input: { file_path: `/f/${i}.ts` } }],
+          usage: { input_tokens: 10, output_tokens: 1 },
+        },
+      }),
+    ).join("");
+    const parser = createClaudeCodeParser();
+    parser.push(rows);
+    expect(JSON.stringify(parser.snapshot()).length).toBeLessThan(30_000);
+    const { graph } = restoreEachLine(rows);
+    expect(graph.toolCalls).toHaveLength(1000);
+    expect(normalOrder(graph)).toEqual(normalOrder(parseClaudeCodeSession({ main: rows, subagents: [] })));
+  });
+
+  test("with large assistant messages still open", () => {
+    const big = "x".repeat(200_000);
+    const rows =
+      Array.from({ length: 8 }, (_, i) => assistant("side", `msg_${i}`, [{ type: "text", text: `${i}${big}` }])).join(
+        "",
+      ) +
+      Array.from({ length: 8 }, (_, i) => assistant("side", `msg_${i}`, [{ type: "text", text: `more ${i}` }])).join(
+        "",
+      );
+    const parser = createClaudeCodeParser();
+    parser.push(rows);
+    expect(JSON.stringify(parser.snapshot()).length).toBeLessThan(30_000);
+    const { graph } = restoreEachLine(rows);
+    expect(normalOrder(graph)).toEqual(normalOrder(parseClaudeCodeSession({ main: rows, subagents: [] })));
+  });
+});
+
+function normalOrder(graph: ReturnType<typeof parseClaudeCodeSession>) {
+  return { ...graph, toolCalls: [...graph.toolCalls].sort((a, b) => a.id.localeCompare(b.id)) };
+}

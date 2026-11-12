@@ -61,6 +61,8 @@ export const HARNESS = "claude-code";
 
 /** Rows that can bring a missing part of a waiting request. */
 const WIRE_ROWS = new Set(["api-request-blob", "api-request-shape", "api-request", "user", "assistant"]);
+/** Open ToolCalls kept in the snapshot, newest first. */
+const MAX_OPEN_TOOL_CALLS = 64;
 /** Calls kept waiting for a missing part; older ones stay unresolved. */
 const MAX_WAITING = 32;
 
@@ -771,8 +773,11 @@ function frontier(state: ParserState): ParserState {
     ...lanes.flatMap((l) => l.lastCallId ?? []),
     ...compactions,
   ]);
+  // The newest open ToolCalls only: an older one that gets its result later comes back through the lookup.
   const toolCalls = new Set(
-    Object.values(state.toolCalls).flatMap((t) => (t.resultBlockHash === undefined ? [t.id] : [])),
+    Object.values(state.toolCalls)
+      .flatMap((t) => (t.resultBlockHash === undefined ? [t.id] : []))
+      .slice(-MAX_OPEN_TOOL_CALLS),
   );
   const assistantIds = new Set(Object.values(state.transcripts).flatMap((t) => t.openAssistantIds));
   const pick = <T>(record: Record<string, T>, keys: Set<string>) => {
@@ -799,7 +804,8 @@ function frontier(state: ParserState): ParserState {
     toolCalls: pick(state.toolCalls, toolCalls),
     toolUseTimes: pick(state.toolUseTimes, toolCalls),
     messageToolUses: pick(state.messageToolUses, assistantIds),
-    assistant: pick(state.assistant, assistantIds),
+    assistant: {},
+    assistantHashes: pick(state.assistantHashes, assistantIds),
     lanes: Object.fromEntries(lanes.map((lane) => [`${lane.sessionId}|${lane.key}`, coldLane(lane)])),
   });
 }

@@ -23,6 +23,8 @@ export interface ParserState {
   messages: Record<string, WireMessage>;
   /** The content of each assistant message so far, by `message.id` (one row per content block). */
   assistant: Record<string, Json[]>;
+  /** The hash of each open assistant message so far: after a restore, its content comes back by this hash. */
+  assistantHashes: Record<string, string>;
   shapes: Record<string, WireShape>;
   /** The request of every logged call, as the log gives it. */
   specs: Record<string, CallSpec>;
@@ -150,6 +152,7 @@ export function emptyState(): ParserState {
     transcripts: {},
     messages: {},
     assistant: {},
+    assistantHashes: {},
     shapes: {},
     specs: {},
     sessions: {},

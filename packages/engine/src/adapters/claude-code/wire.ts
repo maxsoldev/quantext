@@ -41,14 +41,18 @@ export function addAssistantRow(store: Content, transcript: TranscriptState, mes
   transcript.userRun = [];
   const id = str(message.id);
   if (id === undefined) return undefined;
-  const content = [...(get(store.state.assistant, id) ?? []), ...(arr(message.content) ?? [])];
+  const known = get(store.state.assistantHashes, id);
+  const before = get(store.state.assistant, id) ?? (known === undefined ? undefined : store.message(known)?.content);
+  const content = [...(before ?? []), ...(arr(message.content) ?? [])];
   transcript.openAssistantIds = [...transcript.openAssistantIds.filter((open) => open !== id), id];
   while (transcript.openAssistantIds.length > MAX_OPEN_ASSISTANT) {
     const done = transcript.openAssistantIds.shift() ?? "";
     delete store.state.assistant[done]; // its rows are long done: only its hash is needed now
+    delete store.state.assistantHashes[done];
   }
   put(store.state.assistant, id, content);
   const hash = wireHash("assistant", content);
+  put(store.state.assistantHashes, id, hash);
   store.putMessage(hash, { role: "assistant", content });
   return hash;
 }
