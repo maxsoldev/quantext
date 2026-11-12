@@ -5,6 +5,7 @@
  */
 import type { FileHandle } from "node:fs/promises";
 import { open, readFile } from "node:fs/promises";
+import { sep } from "node:path";
 import type { JsonValue, StoreCodec } from "@quantext/shared";
 import type { ClaudeCodeParser, ParserState } from "../adapters/claude-code/index.ts";
 import { claudeCodeCodec, createClaudeCodeParser } from "../adapters/claude-code/index.ts";
@@ -13,6 +14,7 @@ import type { LogFiles, PathError } from "./discover.ts";
 import { describe, discoverLogs, logFiles, logOf } from "./discover.ts";
 import type { FileStat } from "./files.ts";
 import { completeLines, fingerprint, statOf } from "./files.ts";
+import { ingestMemory } from "./memory.ts";
 
 const HARNESS = "claude-code";
 export const DEFAULT_BATCH_BYTES = 4 * 1024 * 1024;
@@ -79,7 +81,7 @@ export interface RunOptions {
 }
 
 export interface Ingest {
-  /** Find every log under the root and read what is new in it. */
+  /** Find every log under the root and read what is new in it, and the projects' memory documents. */
   ingestAll(run?: RunOptions): Promise<IngestSummary>;
   /** Read what is new in the logs of these files (a transcript or meta file, main or subagent). */
   ingestPaths(paths: readonly string[], run?: RunOptions): Promise<IngestSummary>;
@@ -160,11 +162,15 @@ export function createIngest(options: IngestOptions): Ingest {
     ingestAll: (run = {}) =>
       serial(async () => {
         const found = await discoverLogs(root);
+        const memory = await ingestMemory(root, store);
+        // A folder the scan could not read is reported once, not again for its memory folder.
+        const within = (path: string) => found.errors.some((e) => path === e.path || path.startsWith(e.path + sep));
+        const errors = [...found.errors, ...memory.filter((m) => !within(m.path))];
         store.setScanIssues([
-          ...found.errors.map((e) => ({ path: e.path, issue: e.error })),
+          ...errors.map((e) => ({ path: e.path, issue: e.error })),
           ...found.links.map((path) => ({ path, issue: "a symbolic link; not followed" })),
         ]);
-        return pass(found.logs, found.errors, run.signal);
+        return pass(found.logs, errors, run.signal);
       }),
     ingestPaths: (paths, run = {}) =>
       serial(async () => {

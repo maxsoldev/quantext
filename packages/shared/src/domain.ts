@@ -363,3 +363,21 @@ export interface SessionGraph {
   events: SessionEvent[];
   report: IngestReport;
 }
+
+/**
+ * A note the harness keeps for a project across Sessions (in Claude Code: a Markdown file in the project's
+ * `memory/` folder). Read only; kept with what is needed to see that it changed.
+ */
+export interface MemoryDocument {
+  /** The harness's folder for the project, which holds its logs and its memory folder. */
+  projectDir: string;
+  /** The path in the memory folder, with `/` separators. */
+  path: string;
+  content: string;
+  mtimeMs: number;
+  /** In bytes. */
+  size: number;
+}
+
+/** What tells that a memory document changed, without its content. */
+export type MemoryMark = Omit<MemoryDocument, "content">;

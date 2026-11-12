@@ -34,6 +34,7 @@ describe("opening the store", () => {
       "logs",
       "media",
       "messages",
+      "project_memory",
       "records",
       "report_kinds",
       "report_unreadable",
@@ -103,6 +104,7 @@ test("tables with a natural key have no rowid", async () => {
     "ingest_files",
     "log_blocks",
     "messages",
+    "project_memory",
     "records",
     "report_kinds",
     "report_unreadable",
@@ -169,4 +171,19 @@ describe("the writer lock", () => {
     await exited;
     await open(dir);
   });
+});
+
+test("migrates a database of schema version 1 to the current version and keeps its rows", async () => {
+  const dataDir = tempDir();
+  const store = await openStore({ dataDir });
+  const db = store.db;
+  // Back to version 1: drop what version 2 added.
+  db.exec("DROP TABLE project_memory; DROP INDEX calls_lane; UPDATE schema_version SET version = 1");
+  db.exec("INSERT INTO logs (path, harness, adapter_version) VALUES ('/l.jsonl', 'claude-code', 1)");
+  store.close();
+  const again = await openStore({ dataDir });
+  onCleanup(() => again.close());
+  expect(again.schemaVersion).toBe(SCHEMA_VERSION);
+  expect(again.db.prepare("SELECT path FROM logs").all()).toEqual([{ path: "/l.jsonl" }]);
+  expect(again.memory.marks()).toEqual([]);
 });
