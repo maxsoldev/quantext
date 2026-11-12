@@ -11,7 +11,7 @@ import { Compactions } from "../compaction/Compactions.tsx";
 import { ContextAt } from "../context/ContextAt.tsx";
 import { CACHE_PARTS, CATEGORIES } from "../context/categories.ts";
 import { DiffCard } from "../diff/DiffCard.tsx";
-import { duration, percent, projectName, shortModel, usd, when } from "../format/format.ts";
+import { count, duration, percent, projectName, shortModel, usd, when } from "../format/format.ts";
 import { useLiveVersion } from "../live/hooks.ts";
 import { Link, navigate } from "../nav.tsx";
 import type { Route } from "../route.ts";
@@ -238,20 +238,30 @@ function SessionTabs({ route, compactions }: { route: SessionRoute; compactions:
 
 /** The subagent Sessions this Session started: each ran in its own context. */
 function Subagents({ parent, items }: { parent: SessionKey; items: readonly SessionSummary[] }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? items : items.slice(0, 3);
   return (
     <p className="subagents" data-testid="subagents">
       <Term id="subagents">{items.length === 1 ? "Subagent" : `${items.length} subagents`}</Term>:{" "}
-      {items.map((a, i) => (
+      {shown.map((a, i) => (
         <span key={a.id}>
           {i > 0 && ", "}
           <Link to={{ page: "session", key: { log: parent.log, id: a.id } }}>
             {a.agentName ?? a.title ?? a.id.split(":").at(-1)}
           </Link>{" "}
           <span className="muted num">
-            ({a.calls} calls, {usd(a.cost.totalUsd)})
+            ({count(a.calls, "call")}, {usd(a.cost.totalUsd)})
           </span>
         </span>
       ))}
+      {items.length > 3 && (
+        <>
+          {" "}
+          <button type="button" className="link" onClick={() => setAll(!all)} aria-expanded={all}>
+            {all ? "Show fewer" : `Show all ${items.length}`}
+          </button>
+        </>
+      )}
     </p>
   );
 }

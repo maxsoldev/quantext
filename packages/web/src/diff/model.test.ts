@@ -1,6 +1,6 @@
-import type { CallContext, ContextBlock, ContextDiff } from "@quantext/shared";
+import type { CacheBreak, CallContext, ContextBlock, ContextDiff } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
-import { diffView } from "./model.ts";
+import { breakSummary, diffView } from "./model.ts";
 
 const block = (position: number, tokens: number, hash: string, extra: Partial<ContextBlock> = {}) =>
   ({
@@ -85,5 +85,26 @@ describe("what changed at a Call, drawn as two strips", () => {
     const first = diffView(undefined, before, diff({ added: before.blocks }));
     expect(first.before.segments).toEqual([]);
     expect(first.now.segments.every((s) => s.status === "added")).toBe(true);
+  });
+});
+
+describe("the cache breaks of a lane, from one call", () => {
+  const b = (index: number, reason: CacheBreak["reason"]) => ({ index, reason }) as CacheBreak;
+  const breaks = [b(4, "ttl"), b(9, "compaction"), b(12, "ttl"), b(20, "prefix-change")];
+
+  test("counts by reason, most first, and the breaks before and after the call", () => {
+    expect(breakSummary(breaks, 12)).toEqual({
+      counts: [
+        ["ttl", 2],
+        ["compaction", 1],
+        ["prefix-change", 1],
+      ],
+      previous: breaks[1],
+      next: breaks[3],
+    });
+  });
+
+  test("before the first break there is no previous one", () => {
+    expect(breakSummary(breaks, 2)).toMatchObject({ previous: undefined, next: breaks[0] });
   });
 });

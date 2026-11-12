@@ -18,6 +18,7 @@ const PART_LABEL: Record<CompactionPart, string> = {
   removed: "Removed",
   summary: "Summary",
   added: "Added by the next call",
+  after: "In the next call",
 };
 
 export function Compactions({
@@ -77,7 +78,7 @@ function CompactionCard({
   sessionKey: SessionKey;
 }) {
   const after = c.afterCallIndex === undefined ? undefined : byIndex.get(c.afterCallIndex);
-  const view = compactionView(c, inputOf(after));
+  const view = compactionView(c, { total: inputOf(after), categories: after?.rebuilt ? after.categories : undefined });
   const summaryCall = c.summaryCallIndex === undefined ? undefined : byIndex.get(c.summaryCallIndex);
   const link = (call: number) => ({ page: "session" as const, key: sessionKey, call });
   return (
@@ -96,9 +97,15 @@ function CompactionCard({
           <p className="diff-lede">
             The harness removed{" "}
             <Tokens n={view.figures.removed} note="The blocks of the call before that the call after does not hold." />{" "}
-            tokens and kept <Tokens n={view.figures.kept} note="The blocks both calls hold, by content." />. A summary
-            of <Tokens n={view.figures.summary} note="The summary block's tokens in the call after." /> tokens took the
-            place of the conversation, so the next call started at{" "}
+            tokens and kept <Tokens n={view.figures.kept} note="The blocks both calls hold, by content." />.{" "}
+            {view.figures.summary > 0 ? (
+              <>
+                A summary of <Tokens n={view.figures.summary} note="The summary block's tokens in the call after." />{" "}
+                tokens took the place of the conversation, so the next call started at{" "}
+              </>
+            ) : (
+              "No summary block is in the next call's context. That call started at "
+            )}
             <Tokens n={view.figures.after} note="The input total of the call after, from its usage." /> tokens,{" "}
             {view.figures.freed > 0 ? `${percent(view.figures.freed)} less than before` : "no less than before"}.
           </p>
@@ -210,7 +217,7 @@ function Bar({
         <div className="part-brackets" aria-hidden="true">
           {groups.map((g) => (
             <span
-              key={g.part}
+              key={`${g.part}-${g.left}`}
               className={`part-bracket part-${g.part}`}
               style={{ left: `${g.left}%`, width: `${g.width}%` }}
             >

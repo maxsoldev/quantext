@@ -189,3 +189,10 @@
   align-items: center;
   gap: 6px;
 }
+.diff-first.flip span {
+  left: auto;
+  right: 4px;
+}
+.diff-breaks .link + .link {
+  margin-left: var(--space-3);
+}
