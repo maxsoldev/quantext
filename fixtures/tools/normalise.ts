@@ -1,5 +1,6 @@
 /**
- * Rewrite a recorded session's machine-specific strings (temp dir paths) to stable placeholders, and keep the
+ * Rewrite a recorded session's machine-specific strings (temp dir paths) to stable placeholders of the same
+ * length (so content sizes and token estimates stay as recorded), and keep the
  * content hashes that the context rebuild depends on valid: blob hashes, the hashes in `tail`, and `shapeHash`.
  * Claude Code hashes a message or a shape as sha256 of its JSON with sorted keys. `requestDigest` covers the full
  * wire request, which the log does not hold exactly, so it stays as recorded (an opaque id).
@@ -20,6 +21,9 @@ type Row = { [key: string]: Json };
 
 /** Normalise all files of one recorded session (main transcript, subagent transcripts, metadata). */
 export function normaliseSession(input: Record<string, string>, replacements: readonly Replacement[]): NormaliseResult {
+  for (const [from, to] of replacements) {
+    if (from.length !== to.length) throw new Error(`Replacement for ${to} must have the same length as the original`);
+  }
   const replace = (text: string) => replacements.reduce((acc, [from, to]) => acc.replaceAll(from, to), text);
   const parsed = Object.entries(input).map(([name, text]) => ({ name, text, rows: parseRows(name, text) }));
 
@@ -79,6 +83,21 @@ export function normaliseSession(input: Record<string, string>, replacements: re
       .join("\n");
   }
   return { files, unresolvedTailHashes };
+}
+
+/**
+ * The recording root as Claude Code writes it (resolved, and dash-encoded in project folder names), each mapped to
+ * `/fixture-000…` of the same length. Other spellings (such as `/tmp` for `/private/tmp`) are not mapped; the
+ * leftover check of the recorder catches them.
+ */
+export function replacementsFor(root: string): Replacement[] {
+  const placeholder = `/fixture-${"0".repeat(Math.max(0, root.length - "/fixture-".length))}`;
+  if (placeholder.length !== root.length) throw new Error("Recording root is too short for the placeholder");
+  const encode = (path: string) => path.replace(/[^A-Za-z0-9]/g, "-");
+  return [
+    [root, placeholder],
+    [encode(root), encode(placeholder)],
+  ];
 }
 
 /** Rows by line index for `.jsonl` files (blank lines stay undefined); undefined for other files. */

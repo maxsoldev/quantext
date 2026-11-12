@@ -1,8 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { normaliseSession } from "./normalise.ts";
+import { normaliseSession, replacementsFor } from "./normalise.ts";
 
 const ROOT = "/private/tmp/qxrec.Ab12";
-const REPLACE = [[`${ROOT}/repo`, "/fixture/repo"]] as const;
+const P = "/fixture-00000000000000"; // the placeholder: as long as ROOT
+const REPLACE = [[ROOT, P]] as const;
 const jsonl = (...rows: unknown[]) => `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`;
 const rowsOf = (text: string | undefined) =>
   (text ?? "")
@@ -12,9 +13,9 @@ const rowsOf = (text: string | undefined) =>
 
 // Hashes are literals from `printf '%s' '<key-sorted JSON>' | shasum -a 256`, not from the code under test.
 const HASH_X = "4df15c38b8085060d347df44ed3a3aadb3eb6bd77f36d54e614019cbb87cbcc9"; // {"content":"x","role":"user"}
-const HASH_SEE = "ea74a326c3e6cc97f0ef3460f54b098dfd9c0d50e0fdaf3d399e7e4f8ac9f75f"; // content "see /fixture/repo/a.txt"
+const HASH_SEE = "02c9f35bc93fe66408186eb6b7b151924832b6a22ae6d4a5aab7770dc6f6e56e"; // content "see P/repo/a.txt"
 const HASH_SEE_RECORDED = "dfac3364cb440e35bbcd648dfb18b158487531125468725a5f1b6a64fee627e3"; // before normalisation
-const HASH_SHAPE = "965e2766e1f7f43dd1da892ff399ad114239ae33d15edcf68e88a3b16cd11775"; // system "cwd /fixture/repo"
+const HASH_SHAPE = "99a1492628fede6bee2ec2133d17db1410569410e7df281c49d5f84e54d27c2c"; // system "cwd P/repo"
 
 describe("normaliseSession", () => {
   test("replaces paths in every string value and key, and keeps other lines byte for byte", () => {
@@ -22,16 +23,29 @@ describe("normaliseSession", () => {
     const changed = jsonl({ type: "attachment", cwd: `${ROOT}/repo`, files: { [`${ROOT}/repo/a.txt`]: 1 } });
     const { files } = normaliseSession({ "s.jsonl": `${untouched}\n${changed}` }, REPLACE);
     expect(files["s.jsonl"]).toBe(
-      `${untouched}\n${jsonl({ type: "attachment", cwd: "/fixture/repo", files: { "/fixture/repo/a.txt": 1 } })}`,
+      `${untouched}\n${jsonl({ type: "attachment", cwd: `${P}/repo`, files: { [`${P}/repo/a.txt`]: 1 } })}`,
     );
   });
 
   test("applies replacements in the given order", () => {
-    const { files } = normaliseSession({ "s.jsonl": jsonl({ a: `${ROOT}/repo/x ${ROOT}/home` }) }, [
-      [`${ROOT}/repo`, "/fixture/repo"],
-      [ROOT, "/fixture"],
+    const { files } = normaliseSession({ "s.jsonl": jsonl({ a: `${ROOT}/x -private-tmp-qxrec-Ab12` }) }, [
+      [ROOT, P],
+      ["-private-tmp-qxrec-Ab12", "-fixture-00000000000000"],
     ]);
-    expect(rowsOf(files["s.jsonl"])).toEqual([{ a: "/fixture/repo/x /fixture/home" }]);
+    expect(rowsOf(files["s.jsonl"])).toEqual([{ a: `${P}/x -fixture-00000000000000` }]);
+  });
+
+  test("keeps the length of every string, so content sizes and token estimates do not change", () => {
+    const text = `a ${ROOT} b`;
+    const row = { type: "user", cwd: `${ROOT}/repo`, message: { role: "user", content: [{ text }] } };
+    const [after] = rowsOf(normaliseSession({ "s.jsonl": jsonl(row) }, REPLACE).files["s.jsonl"]);
+    expect(after.cwd.length).toBe(row.cwd.length);
+    expect(after.message.content[0].text.length).toBe(text.length);
+    expect(JSON.stringify(after).length).toBe(JSON.stringify(row).length);
+  });
+
+  test("rejects a replacement that changes the length", () => {
+    expect(() => normaliseSession({ "s.jsonl": "{}\n" }, [[ROOT, "/fixture"]])).toThrow(/same length/);
   });
 
   test("rehashes a changed blob and points the tails that used it to the new hash", () => {
@@ -65,7 +79,7 @@ describe("normaliseSession", () => {
     );
     const result = normaliseSession({ "s.jsonl": input }, REPLACE);
     expect(rowsOf(result.files["s.jsonl"])[1].tail).toEqual([
-      "2e8716c39aec2701b9203b2186ad0ba0dab85ed1c720acec08040f7ed4271b05",
+      "e6f0d4fbb8033b71dddc49052bda5a1d98f5e53b1db2a05eeb1c8e78cdc6282d",
     ]);
     expect(result.unresolvedTailHashes).toBe(0);
   });
@@ -80,7 +94,7 @@ describe("normaliseSession", () => {
     );
     const result = normaliseSession({ "s.jsonl": input }, REPLACE);
     expect(rowsOf(result.files["s.jsonl"])[3].tail).toEqual([
-      "e9e58af5bfc9aacfd509ad696b58d1899973d220328c8aafb73c207aef49107c",
+      "4e431f07c3b32918736fa20cdfb61ebc9647c598da9f085c8c12aebe739f37dd",
     ]);
     expect(result.unresolvedTailHashes).toBe(0);
   });
@@ -118,10 +132,26 @@ describe("normaliseSession", () => {
 
   test("replaces paths in plain JSON files and leaves the rest of their text alone", () => {
     const { files } = normaliseSession({ "agent.meta.json": `{"cwd": "${ROOT}/repo"}\n` }, REPLACE);
-    expect(files["agent.meta.json"]).toBe('{"cwd": "/fixture/repo"}\n');
+    expect(files["agent.meta.json"]).toBe(`{"cwd": "${P}/repo"}\n`);
   });
 
   test("fails on a line that is not JSON", () => {
     expect(() => normaliseSession({ "s.jsonl": "{nope\n" }, REPLACE)).toThrow(/s\.jsonl:1/);
+  });
+});
+
+describe("replacementsFor", () => {
+  test("maps the recording root, plain and dash-encoded, to a placeholder of the same length", () => {
+    expect(replacementsFor("/private/tmp/qxrec.Ab12Cd")).toEqual([
+      ["/private/tmp/qxrec.Ab12Cd", "/fixture-0000000000000000"],
+      ["-private-tmp-qxrec-Ab12Cd", "-fixture-0000000000000000"],
+    ]);
+  });
+
+  test("works for a shorter root, as on Linux", () => {
+    expect(replacementsFor("/tmp/qxrec.Ab12Cd")).toEqual([
+      ["/tmp/qxrec.Ab12Cd", "/fixture-00000000"],
+      ["-tmp-qxrec-Ab12Cd", "-fixture-00000000"],
+    ]);
   });
 });
