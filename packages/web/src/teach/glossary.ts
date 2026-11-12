@@ -30,7 +30,7 @@ export const TERMS: readonly Term[] = [
     short: "Everything the model receives in one call, and the limit on its size.",
     body:
       "The model keeps no memory between calls. On every call the harness sends it all again: the tool schemas, " +
-      "the system prompt and the whole conversation so far. The context window is the most the model can take in " +
+      "the system prompt, the context it injects and the whole conversation so far. The context window is the most the model can take in " +
       "one call (200k or 1M tokens, by model). When the conversation gets close to it, the harness compacts it.",
     where: { label: "The context bar of the selected call", view: "context", selector: "[data-testid=context-bar]" },
   },
@@ -40,9 +40,10 @@ export const TERMS: readonly Term[] = [
     short: "The hidden part: sent before the first message on every call, never shown in the chat.",
     body:
       "Before your first message, the request holds the schema of every tool the model may use (its name, what it " +
-      "does, its parameters) and the system prompt (the harness's instructions, CLAUDE.md files, the environment). " +
-      "You never see them in the chat, but the model reads them on every call, and in a short session they are " +
-      "most of the input.",
+      "does, its parameters) and the system prompt (the harness's own instructions). You never see them in the " +
+      "chat, but the model reads them on every call. CLAUDE.md files, project memory, git status and the " +
+      "environment are not part of it: the harness adds them to the messages as injected context, after the " +
+      "hidden part.",
     where: {
       label: "The hidden part bracket over the context bar",
       view: "context",
@@ -105,7 +106,7 @@ export const TERMS: readonly Term[] = [
     short: "The harness replaces the conversation with a short summary, to free room in the context.",
     body:
       "One call sends the whole context with the request to summarise it. The calls after start from the tool " +
-      "schemas, the system prompt and the summary. The harness does not log the summarising call, so its numbers " +
+      "schemas, the system prompt, the context the harness injects again (CLAUDE.md, memory) and the summary. The harness does not log the summarising call, so its numbers " +
       "are derived (Δ) from running totals. The cache of the messages breaks once.",
     where: { label: "The Compactions tab", view: "compactions" },
   },
@@ -154,8 +155,9 @@ export const TERMS: readonly Term[] = [
     term: "Project memory",
     short: "Notes the harness keeps for a project across sessions.",
     body:
-      "The index, MEMORY.md, is added to the context of each new session in the project, so every line of it " +
-      "costs tokens in every call. The model opens the other memory files only when it needs one.",
+      "The index, MEMORY.md, is added to each new session in the project as injected context (a message, not the " +
+      "system prompt). Claude Code loads its first 200 lines or 25 KB, whichever comes first; those cost tokens " +
+      "in every call, and the rest is not loaded. The model opens the other memory files only when it needs one.",
     where: { label: "Project memory, in the session head", selector: ".memory-link" },
   },
 ];
