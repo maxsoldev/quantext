@@ -43,6 +43,8 @@ quality bar. Decisions that are hard to change are recorded in `docs/adr/`.
   (a trade-off, a rejected option, a link to an ADR or a known issue). Leave it out only for trivial commits.
 - **Size:** keep a commit reviewable, as a rule under ~400 changed lines (lockfiles and recorded fixtures do not
   count). A larger commit says in its body why it cannot be split.
+- Do not use `git stash` when several worktrees are in use: the stash is shared by all worktrees of the repo.
+  Commit work in progress on your branch instead.
 - Every commit passes `pnpm check` (lint, types, tests, layer check, secret scan, no-egress guard, supply-chain
   check) on its own. Do not amend or
   rebase commits that are already pushed.
