@@ -80,16 +80,20 @@ kept running after the session ended, and `$.http.fetch` reached it. Interactive
                                                                              │
                                                                              ▼
  adapters                                         claude-code (JSONL + api-request* rows) · codex (later) · …
+                                                                             │
+                                                                             ▼
+ providers                                        anthropic (content blocks, estimates, prices) · openai (later)
 
- core       shared kernel, used by every layer: context rebuild · token attribution · pricing (data)
+ core       shared kernel, used by every layer: token attribution · reconciliation · pricing interface
  shared     domain and API types, types only, used by every package
 ```
 
 | Layer | Responsibility | Depends on |
 |---|---|---|
-| **adapters** | Turn one harness's files into domain events: session, call (request + usage), block, tool call, compaction. Report unknown row types | core |
-| **core** | Logic over the domain types defined in shared: rebuild the request of each call (`keep` + `tail` + blobs); split each call's input into blocks with tokens (exact deltas, then estimates); prices as data. Pure: no I/O, no built-ins, no packages | shared (types only) |
-| **ingest** | Find files, read new bytes, call the adapter, write events in one transaction; watch files for live updates | adapters, core, store |
+| **adapters** | Turn one harness's files into domain events: session, call (request + usage), block, tool call, compaction; rebuild the request of each call (in Claude Code: `keep` + `tail` + blobs). Report unknown row types | core, providers |
+| **providers** | What one model provider defines: its content blocks (tool use, tool reference, deferred tools, thinking), the token estimate of each (Anthropic's image formula), its price list and price modifiers. Pure: no I/O, no built-ins, no packages | core |
+| **core** | Logic over the domain types defined in shared, the same for every harness and provider: split each call's input into blocks with tokens (exact deltas, then reconciled estimates); the estimator and pricing interfaces; cost by cache part. Pure: no I/O, no built-ins, no packages | shared (types only) |
+| **ingest** | Find files, read new bytes, call the adapter, write events in one transaction; watch files for live updates | providers, adapters, core, store |
 | **store** | Schema, migrations, writes, behind a driver interface (`node:sqlite`, `bun:sqlite`). WAL mode, so readers never block the writer | core |
 | **query** | Read API: sessions, calls, context at call N, change from N-1, block lifetime cost. SQL views for agents | core, store |
 | **api** | HTTP JSON + SSE events ("call added"), plus the viewer's static files. Request and response types live in a shared package | core, query |
@@ -99,7 +103,8 @@ kept running after the session ended, and `$.http.fetch` reached it. Interactive
 **core is a shared kernel.** Every engine layer may import core (pure functions). core imports nothing outside
 itself except types from `@quantext/shared`, where the domain types (`Session`, `Call`, `Block`, …) and the API
 types live; every layer may import those types. Besides core, a layer imports only the layers in its row: api must
-not import ingest or store, and query must not import adapters or ingest. `scripts/check-layers.ts` enforces this
+not import ingest or store, and query must not import adapters or ingest. A harness (adapter) and a model provider
+are separate axes: Claude Code may run on Anthropic models, Codex on OpenAI models (ADR 16). `scripts/check-layers.ts` enforces this
 table in CI.
 
 The mod imports only the shared **types** from `@quantext/shared` (erased at build time) and `claude-code`, because
@@ -136,7 +141,7 @@ pnpm workspace, one repo:
 ```
 packages/
   shared/    domain and API types (no runtime code)
-  engine/    adapters/, core/, ingest/, store/, query/, api/, cli/  → bundled to one file, dist/engine.js
+  engine/    adapters/, providers/, core/, ingest/, store/, query/, api/, cli/  → bundled to one file, dist/engine.js
   web/       live context viewer (React + Vite), built into the engine's static files
   mod/       Claude Code plugin; imports only types from shared
 fixtures/    session logs recorded on a dummy repo, one folder per harness version and scenario

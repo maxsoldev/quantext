@@ -19,12 +19,13 @@ TypeScript 5/6 compiler API to read `.ts` files, while we use TypeScript 7 (ADR 
 | Engine layer | May import |
 |---|---|
 | core | nothing outside core except types from `@quantext/shared`: no built-ins, no packages |
-| adapters | core |
+| providers | core; no built-ins, no packages (ADR 16) |
+| adapters | core, providers |
 | store | core |
-| ingest | core, adapters, store |
+| ingest | core, providers, adapters, store |
 | query | core, store |
 | api | core, query |
-| cli (composition root) | core, adapters, store, ingest, query, api |
+| cli (composition root) | core, providers, adapters, store, ingest, query, api |
 
 core is a shared kernel: every layer may import its pure functions. Every layer may import types from
 `@quantext/shared` (ADR 14).
