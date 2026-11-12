@@ -7,7 +7,7 @@ agents through SQL and a CLI. Nothing leaves the machine.
 **Status: early release (0.1).** Claude Code only, macOS and Linux. Expect rough edges; see
 [known issues](docs/known-issues.md).
 
-![The session timeline: what the context holds per call, and how its input was billed](docs/screens/session-1440x900.png)
+![A real 850-call Claude Code session: what the context holds per call, three compactions, and how each call's input was billed](docs/screens/readme-session.png)
 
 ## What you get
 
