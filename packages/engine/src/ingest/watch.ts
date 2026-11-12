@@ -65,7 +65,8 @@ export function watchTranscripts(options: WatchOptions): Watcher {
   const onChange = (path?: string) => {
     if (stopped) return;
     if (path !== undefined && isTranscriptFile(path)) paths.add(path);
-    else if (path !== undefined && extname(path) !== "") return; // another file (a tool output, an image)
+    else if (path !== undefined && extname(path) !== "")
+      return; // another file (a tool output, an image)
     else everything = true; // a folder, or a change it cannot place
     timer ??= setTimeout(() => {
       timer = undefined;
