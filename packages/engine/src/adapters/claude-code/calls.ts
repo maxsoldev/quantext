@@ -18,7 +18,7 @@ export function callsOf(rows: readonly Row[], sessionId: string, requests: Reado
       const ts = str(row.data.timestamp) ?? "";
       const missing = requests.get(id)?.missing ?? ["request was not rebuilt"];
       const issues = missing.map((detail) => ({ kind: "unresolved-request" as const, detail }));
-      const call: Call = { id, sessionId, index, ts, model, params: paramsOf(params), issues };
+      const call: Call = { id, sessionId, index, ts, model, params: paramsOf(params), framingTokens: 0, issues };
       const canonical = canonicalModel(model);
       if (canonical !== undefined) call.canonicalModel = canonical;
       const shapeHash = str(row.data.shapeHash);

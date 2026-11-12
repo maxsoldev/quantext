@@ -18,6 +18,8 @@ export interface WireShape {
 }
 
 export interface WireRequest {
+  /** The earlier call whose first messages this request keeps. */
+  baseId?: string;
   shape?: WireShape;
   messages: WireMessage[];
   /** Paths in the request that carry a cache_control marker, such as `["messages", 3, "content", 0]`. */
@@ -69,6 +71,7 @@ function requestOf(
   if (base !== undefined && base.missing.length > 0) missing.push(`base call ${baseId} is incomplete`);
   const request: WireRequest = { messages: [...kept, ...tail], cacheBreakpoints: breakpointsOf(data), missing };
   if (shape !== undefined) request.shape = shape;
+  if (baseId !== undefined) request.baseId = baseId;
   return request;
 }
 

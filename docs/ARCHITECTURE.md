@@ -110,9 +110,9 @@ the mod sandbox accepts no other imports besides relative paths.
 | Entity | One per | Key fields |
 |---|---|---|
 | `Session` | session or subagent | id, parent id, harness, harness version, project, cwd, started, ended |
-| `Call` | LLM request | session, index, ts, model, params, shape hash, input / cache read / cache write / output tokens, cost |
-| `Block` | unique content (by hash) | kind (system, tool schema, user, assistant, reasoning, tool call, tool result, reminder, image, summary), source (tool name, file path, MCP server, skill), tokens, token basis (exact / estimate) |
-| `CallBlock` | block × call | position, in cached prefix or not |
+| `Call` | LLM request | session, index, ts, model, params, shape hash, input / cache read / cache write / output tokens, framing tokens, cost, issues |
+| `Block` | unique content (by hash) | kind (tool schema, system, user, reminder, assistant, reasoning, tool call, tool result, image, document, summary), source (tool name, file path, MCP server, skill), content |
+| `CallBlock` | block × call | position, section, cache breakpoint, tokens, token basis (exact / derived / estimate), in cached prefix or not |
 | `ToolCall` | tool use | call, name, input, result block, error, duration |
 | `Compaction` | compaction | session, before / after tokens, trigger |
 
