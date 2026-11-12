@@ -140,6 +140,29 @@ export interface Call {
   issues: CallIssue[];
   /** On the last Call of a turn (a user prompt and the Calls that answer it): how long the turn took. */
   turnDurationMs?: number;
+  /** What the model answered, as far as the log holds it; it grows while the answer is written. */
+  response?: CallResponse;
+}
+
+/**
+ * The answer of one Call: the Blocks of its output message in order. They are the same Blocks (by hash) that the
+ * next Call sends back as input. Its tokens are `Usage.outputTokens`.
+ */
+export interface CallResponse {
+  blocks: ResponseBlock[];
+  /** Why the model stopped, in the provider's words (for example `end_turn`, `tool_use`, `max_tokens`). */
+  stopReason?: string;
+}
+
+/**
+ * One Block of a response. `reasoning`: for reasoning, whether the log holds its text (`full`), only a signature
+ * (`omitted`), or an encrypted form (`redacted`). `toolUseId`: for a tool call, its ToolCall's id.
+ */
+export interface ResponseBlock {
+  hash: string;
+  kind: BlockKind;
+  reasoning?: "full" | "omitted" | "redacted";
+  toolUseId?: string;
 }
 
 /**

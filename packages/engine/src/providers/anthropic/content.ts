@@ -40,6 +40,14 @@ function asObject(value: JsonValue | undefined): { [key: string]: JsonValue } | 
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : undefined;
 }
 
+/** For a reasoning block: whether its text is there (`full`), only its signature (`omitted`), or encrypted. */
+export function reasoningShown(content: JsonValue): "full" | "omitted" | "redacted" | undefined {
+  const block = asObject(content);
+  if (block?.type === "redacted_thinking") return "redacted";
+  if (block?.type !== "thinking") return undefined;
+  return typeof block.thinking === "string" && block.thinking !== "" ? "full" : "omitted";
+}
+
 /** The tool names a content block loads with `tool_reference` blocks (in a tool result). */
 export function toolReferences(content: JsonValue): string[] {
   const block = asObject(content);

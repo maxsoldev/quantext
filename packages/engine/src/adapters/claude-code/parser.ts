@@ -5,9 +5,11 @@
 import type {
   Call,
   CallIssue,
+  CallResponse,
   Compaction,
   ContentLookup,
   IngestReport,
+  ResponseBlock,
   Session,
   SessionDelta,
   SessionEvent,
@@ -16,6 +18,7 @@ import type {
 } from "@quantext/shared";
 import type { Estimator } from "../../core/estimate.ts";
 import { addCounts } from "../../core/graph.ts";
+import { reasoningShown } from "../../providers/anthropic/content.ts";
 import { estimateBlock } from "../../providers/anthropic/estimate.ts";
 import { canonicalModel, MAX_CONTEXT_WINDOW } from "../../providers/anthropic/pricing.ts";
 import { Changes } from "./changes.ts";
@@ -530,10 +533,13 @@ class Rows {
       const usageOnly =
         session === undefined || raw === undefined ? undefined : this.usageOnly(row, message, raw, session);
       if (session !== undefined) this.toolUses(row, message, messageId, usageOnly ?? "", session.id);
+      const answered = usageOnly === undefined ? undefined : this.store.call(usageOnly);
+      if (answered !== undefined) this.respond(answered, message, messageHash);
       return;
     }
     if (session !== undefined) this.toolUses(row, message, messageId, requestRef, session.id);
     const call = this.store.call(requestRef);
+    if (call !== undefined) this.respond(call, message, messageHash);
     if (call === undefined || raw === undefined) return;
     const usage = usageOf(raw);
     const known = get(this.state.responses, call.id);
@@ -555,6 +561,31 @@ class Rows {
       delete this.state.pending[call.id];
       this.split(call, spec, usage);
     }
+    this.changes().calls.add(call.id);
+  }
+
+  /**
+   * The Call's Response: the Blocks of its assistant message so far (each row adds one), reported as Blocks now, so
+   * the last answer of a Session has content too. The next request names the same Blocks by hash.
+   */
+  private respond(call: Call, row: JsonObject, messageHash: string | undefined): void {
+    const refs = messageHash === undefined ? undefined : this.classifier.message(messageHash);
+    const content = messageHash === undefined ? undefined : this.store.message(messageHash)?.content;
+    if (refs === undefined || content === undefined) return;
+    const blocks = refs.map((ref): ResponseBlock => {
+      const block: ResponseBlock = { hash: ref.hash, kind: ref.kind };
+      const part = content[ref.contentIndex] ?? null;
+      const reasoning = reasoningShown(part);
+      if (reasoning !== undefined) block.reasoning = reasoning;
+      const toolUseId = ref.kind === "tool-call" ? str(obj(part)?.id) : undefined;
+      if (toolUseId !== undefined) block.toolUseId = toolUseId;
+      return block;
+    });
+    const response: CallResponse = { blocks };
+    const stopReason = str(row.stop_reason) ?? call.response?.stopReason;
+    if (stopReason !== undefined) response.stopReason = stopReason;
+    if (JSON.stringify(response) === JSON.stringify(call.response)) return;
+    call.response = response;
     this.changes().calls.add(call.id);
   }
 

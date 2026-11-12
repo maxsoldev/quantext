@@ -8,6 +8,7 @@ import type {
   BlockSource,
   Call,
   CallBlock,
+  CallResponse,
   Compaction,
   JsonValue,
   RequestLog,
@@ -103,6 +104,7 @@ export const CALL_COLUMNS = [
   "framing_tokens",
   "issues",
   "turn_duration_ms",
+  "response",
 ];
 
 export function callRow(c: Call): SqlValue[] {
@@ -145,6 +147,7 @@ export function callRow(c: Call): SqlValue[] {
     c.framingTokens,
     JSON.stringify(c.issues),
     c.turnDurationMs,
+    c.response === undefined ? undefined : JSON.stringify(c.response),
   ].map(nul);
 }
 
@@ -199,6 +202,7 @@ export function call(r: SqlRow): Call {
     c.cacheBoundary = { tokens: Number(r.cache_boundary_tokens), position: Number(r.cache_boundary_position) };
   }
   putNumber(c, "turnDurationMs", r.turn_duration_ms);
+  if (r.response !== null && r.response !== undefined) c.response = json<CallResponse>(r.response);
   return c;
 }
 

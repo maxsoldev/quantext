@@ -1,4 +1,4 @@
-# Store schema (version 3)
+# Store schema (version 4)
 
 The engine keeps everything in one SQLite database, `~/.quantext/quantext.db` (WAL mode). Only the engine writes
 it, under the writer lock `~/.quantext/writer.lock` (an OS file lock, ADR 22). The decisions behind this schema
@@ -84,6 +84,7 @@ version logs only usage, so its Calls are usage-only and have no Blocks; `partia
 | `framing_tokens` | Input tokens after the last Block; the Call's runs plus these add up to its input total |
 | `issues` | JSON list of `{kind, detail}`, sorted by kind and detail: `no-request` (a usage-only Call), `missing-message` (a gap Block stands for a message, or the message came after the Call was split), `derived-usage-invalid` (a summarising Call whose derived input is 0 or less: it has no usage), `unresolved-request`, `no-usage`, `unreconciled-tokens`, `no-price`, `price-assumption`, `estimate-clamped` |
 | `turn_duration_ms` | On the last Call of a turn: how long the turn took |
+| `response` | JSON: the Response, `{blocks: [{hash, kind, reasoning?, toolUseId?}], stopReason?}`; each `hash` is a row of `blocks` (the same Block the next Call sends back); NULL when the log holds no answer yet |
 
 The index `calls_lane` holds the Calls of each lane in order, with the columns that price a Block per Call
 (usage, cache boundary, cost by part): `v_block_lifetime_cost` reads only it for each Call of a run.
@@ -283,6 +284,7 @@ Options that are not needed yet, with what they would bring:
 - **1**: the tables above, except `project_memory`.
 - **2**: `project_memory`; the index `calls_lane`.
 - **3**: `calls.cache_boundary_offset`, `unit_read_usd`, `unit_rest_usd` (in `calls_lane`), `sessions.changed_seq`, `change_cursor`.
+- **4**: `calls.response`.
 
 ## Changing the schema
 

@@ -267,8 +267,13 @@ CREATE TABLE change_cursor (seq INTEGER NOT NULL) STRICT;
 INSERT INTO change_cursor (seq) VALUES (0);
 `;
 
+/** Each Call's Response: its Blocks (by hash, stored once in `blocks`) and its stop reason, as JSON. */
+const V4 = `
+ALTER TABLE calls ADD COLUMN response TEXT;
+`;
+
 /** Migration i (0-based) takes the schema from version i to version i + 1. */
-const MIGRATIONS: readonly string[] = [V1, V2, V3];
+const MIGRATIONS: readonly string[] = [V1, V2, V3, V4];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
 

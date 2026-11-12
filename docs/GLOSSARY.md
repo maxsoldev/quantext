@@ -25,6 +25,11 @@ One request from the harness to the model, with the response and its usage. The 
 tokens, thinking, effort, betas) belong to the Call, not to its Shape.
 _Avoid_: turn, request, message, step
 
+**Response**:
+What the model answered on one Call: the Blocks of its output message (text, reasoning, tool calls) and why it
+stopped. Its tokens are the Call's output tokens. The next Call sends the same Blocks back as input.
+_Avoid_: reply, completion, output (the tokens)
+
 **Usage-only Call**:
 A Call whose request the log does not hold, only the response's Usage (harness versions that log no requests):
 it has exact Usage and cost, but no Blocks.
