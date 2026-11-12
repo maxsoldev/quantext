@@ -1,0 +1,112 @@
+/* The teaching layer: "?" after a key term, the glossary panel, the pointer it leaves, the keys dialog. */
+.term {
+  display: inline;
+}
+.term-q {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  min-height: 0;
+  margin-left: 0.3em;
+  padding: 0;
+  border: 1.5px solid var(--ink-3);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--ink-2);
+  font: 700 var(--t-small) / 1 var(--font-ui);
+  vertical-align: 0.15em;
+  cursor: help;
+}
+.term-q:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+h1 .term-q,
+h2 .term-q {
+  vertical-align: 0.3em;
+}
+.basis-note {
+  margin: 0;
+  font-size: var(--t-small);
+}
+
+.glossary {
+  width: min(560px, 92vw);
+  z-index: 25;
+}
+.glossary-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.glossary-term h3 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--t-lead);
+}
+.glossary-term p {
+  margin: 0 0 var(--space-2);
+  max-width: 64ch;
+}
+.glossary-short {
+  font-weight: 700;
+}
+.glossary-term.current {
+  border-left: 4px solid var(--ink);
+  padding-left: var(--space-3);
+  margin-left: calc(-1 * var(--space-3) - 4px);
+}
+
+.pointed {
+  outline: 4px solid var(--ink);
+  outline-offset: 4px;
+  border-radius: 4px;
+  animation: pointed 0.6s ease-out 2;
+}
+@keyframes pointed {
+  from {
+    outline-offset: 12px;
+  }
+  to {
+    outline-offset: 4px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pointed {
+    animation: none;
+  }
+}
+
+.keys-help {
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  color: var(--ink);
+  padding: var(--space-5);
+  min-width: min(480px, 90vw);
+}
+.keys-help::backdrop {
+  background: rgb(0 0 0 / 0.35);
+}
+.keys-help h2 {
+  margin: 0 0 var(--space-3);
+}
+.keys-help dl {
+  margin: 0 0 var(--space-4);
+  display: grid;
+  gap: var(--space-2);
+}
+.keys-help dl div {
+  display: grid;
+  grid-template-columns: 9rem 1fr;
+  gap: var(--space-3);
+  align-items: center;
+}
+.keys-help dt {
+  display: flex;
+  gap: var(--space-1);
+}
+.keys-help dd {
+  margin: 0;
+}
