@@ -18,6 +18,32 @@ async function clearNow($: EngineInterface, keep: number): Promise<void> {
   }
 }
 
+/** How long after a start or a compaction to count the context: the transcript has settled by then. */
+const REMEASURE_DELAY_MS = 500;
+
+/**
+ * Counts the context again (at start, and once a compaction has landed). The measured figure is the last
+ * response's input, so it stays at the old size until the next call; Claude Code's local estimate (as /context
+ * makes it) sees the new transcript at once.
+ */
+async function remeasure($: EngineInterface): Promise<void> {
+  const { context, cost } = await $.session.usage({ breakdown: "summary" });
+  const ctx = context.breakdown?.totalTokens;
+  if (ctx === undefined || ctx === 0) return;
+  await updateLive($, (l) => ({ ...l, ctx, lastCtx: ctx, ...(cost === undefined ? {} : { usd: cost.usd }) }));
+}
+
+/** Runs `remeasure` soon, from a timer: its failure goes to the debug log, never into the hook that asked. */
+function remeasureSoon($: EngineInterface): void {
+  $.clock.after(
+    REMEASURE_DELAY_MS,
+    () =>
+      void remeasure($).catch((error: unknown) =>
+        $.ui.log(`quantext: re-count failed: ${String(error)}`, { to: "debug" }),
+      ),
+  );
+}
+
 export const register: Register = (on) => {
   on("session.start", async ($, e, next) => {
     const started = await next(e);
@@ -26,6 +52,7 @@ export const register: Register = (on) => {
       description: "Clear old tool outputs from the context and keep all else (also: /compact tool-outputs)",
       argumentHint: "[keep N]",
     });
+    if (e.isInteractive) remeasureSoon($); // show the context before the first call
     return started;
   });
 
@@ -81,6 +108,7 @@ export const register: Register = (on) => {
     }
     if (e.agentId === undefined && e.trigger !== "precompute" && r.messages !== undefined) {
       await updateLive($, (l) => ({ ...l, bigCtxNudged: false }));
+      remeasureSoon($);
     }
     return r;
   });
@@ -88,7 +116,10 @@ export const register: Register = (on) => {
   // A /clear ends this conversation and goes on with a new one: start its figures over.
   on("session.end", async ($, e, next) => {
     const r = await next(e);
-    if (e.reason === "clear") await updateLive($, () => EMPTY);
+    if (e.reason === "clear") {
+      await updateLive($, () => EMPTY);
+      remeasureSoon($);
+    }
     return r;
   });
 
