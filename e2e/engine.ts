@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Page } from "@playwright/test";
 import { test as base } from "@playwright/test";
 
 const repo = join(import.meta.dirname, "..");
@@ -101,8 +102,27 @@ async function until<T>(fn: () => T | undefined, timeoutMs = 15_000): Promise<T>
   }
 }
 
-/** A test with an engine over all the fixtures, shared by the tests of one file. */
-export const test = base.extend<object, { engine: Engine }>({
+/**
+ * A test with an engine over all the fixtures, shared by the tests of one file. Every page of the test must log
+ * no error: a CSP violation (an inline style or script) shows up as one.
+ */
+export const test = base.extend<{ cleanConsole: undefined }, { engine: Engine }>({
+  cleanConsole: [
+    async ({ context }, use) => {
+      const errors: string[] = [];
+      const watch = (page: Page) => {
+        page.on("console", (m) => {
+          if (m.type() === "error") errors.push(m.text());
+        });
+        page.on("pageerror", (e) => errors.push(e.message));
+      };
+      for (const p of context.pages()) watch(p);
+      context.on("page", watch);
+      await use(undefined);
+      if (errors.length > 0) throw new Error(`the page logged errors:\n${errors.join("\n")}`);
+    },
+    { auto: true },
+  ],
   engine: [
     // biome-ignore lint/correctness/noEmptyPattern: Playwright reads the fixture's dependencies from this pattern.
     async ({}, use) => {
