@@ -15,6 +15,7 @@ export function openBun(path: string): RawDatabase {
         all: (...params: SqlValue[]) => statement.all(...params) as SqlRow[],
       };
     },
+    inTransaction: () => db.inTransaction,
     close: () => db.close(),
   };
 }

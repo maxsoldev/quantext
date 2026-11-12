@@ -13,7 +13,7 @@ import { describe, expect, test } from "vitest";
 import { claudeCodeRecords } from "../../src/adapters/claude-code/index.ts";
 import type { CallsEvent, Ingest } from "../../src/ingest/index.ts";
 import { createIngest } from "../../src/ingest/index.ts";
-import type { Store } from "../../src/store/index.ts";
+import type { LogStore, Store } from "../../src/store/index.ts";
 import { openStore } from "../../src/store/index.ts";
 import { scenarios } from "../fixtures.ts";
 import { normal, random } from "../store/graph.ts";
@@ -148,6 +148,126 @@ describe("reading again", () => {
   });
 });
 
+/** The store as seen by a process that dies after `writes` writes: every later write fails. */
+function dyingStore(store: Store, writes: number): Store {
+  let left = writes;
+  return {
+    ...store,
+    log(path, harness, codec): LogStore {
+      const log = store.log(path, harness, codec);
+      return {
+        ...log,
+        write(batch) {
+          if (left-- <= 0) throw new Error("the process died");
+          return log.write(batch);
+        },
+      };
+    },
+  };
+}
+
+describe("an ingest that stops inside a file", () => {
+  test.each([1, 3, 7])("after %i batches (the process died) goes on from there on the next start", async (k) => {
+    const root = tempDir("qx-root-");
+    const dataDir = tempDir("qx-data-");
+    const files = copyScenario(root, "compaction");
+    const first = await openStore({ dataDir });
+    await expect(createIngest({ store: dyingStore(first, k), root, batchBytes: 4096 }).ingestAll()).rejects.toThrow(
+      "the process died",
+    );
+    first.close();
+    const s = await setup({ root, dataDir });
+    await s.ingest.ingestAll();
+    expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
+  });
+
+  test("after a stop signal (shutdown, idle exit) goes on from there on the next start", async () => {
+    const root = tempDir("qx-root-");
+    const dataDir = tempDir("qx-data-");
+    const files = copyScenario(root, "compaction");
+    const first = await openStore({ dataDir });
+    const ingest = createIngest({ store: first, root, batchBytes: 4096 });
+    const stop = new AbortController();
+    ingest.onCalls(() => stop.abort());
+    const summary = await ingest.ingestAll({ signal: stop.signal });
+    expect(summary.stopped).toBe(true);
+    expect(summary.bytes).toBeLessThan(readFileSync(files.main).length);
+    first.close();
+    const s = await setup({ root, dataDir });
+    await s.ingest.ingestAll();
+    expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
+  });
+});
+
+/** The store, counting the lookups that a parser restored from its snapshot makes (its lanes' open runs). */
+function countingStore(store: Store): { store: Store; restores: () => number } {
+  let openRuns = 0;
+  return {
+    restores: () => openRuns,
+    store: {
+      ...store,
+      log(path, harness, codec): LogStore {
+        const log = store.log(path, harness, codec);
+        return {
+          ...log,
+          lookup: {
+            ...log.lookup,
+            openRuns(sessionId, lane) {
+              openRuns++;
+              return log.lookup.openRuns(sessionId, lane);
+            },
+          },
+        };
+      },
+    },
+  };
+}
+
+describe("live ingest", () => {
+  test("keeps the parser of a log warm between passes instead of restoring it each time", async () => {
+    const root = tempDir("qx-root-");
+    const files = layout(root, "basic-tools");
+    const text = readFileSync(files.source);
+    const half = text.indexOf("\n", text.length / 2) + 1;
+    writeText(files.main, text.subarray(0, half));
+    const real = await openStore({ dataDir: tempDir("qx-data-") });
+    onCleanup(() => real.close());
+    const counting = countingStore(real);
+    const ingest = createIngest({ store: counting.store, root });
+    await ingest.ingestAll();
+    const before = counting.restores();
+    writeText(files.main, text);
+    await ingest.ingestAll();
+    expect(counting.restores()).toBe(before);
+    expect(graphOf(real, files.main)).toEqual(expectedGraph(text));
+  });
+
+  test("drops a warm parser whose write failed, so the next pass reads that batch again", async () => {
+    const root = tempDir("qx-root-");
+    const files = copyScenario(root, "compaction");
+    const real = await openStore({ dataDir: tempDir("qx-data-") });
+    onCleanup(() => real.close());
+    let writes = 0;
+    const flaky: Store = {
+      ...real,
+      log(path, harness, codec) {
+        const log = real.log(path, harness, codec);
+        return {
+          ...log,
+          write(batch) {
+            if (++writes === 4) throw new Error("disk busy");
+            return log.write(batch);
+          },
+        };
+      },
+    };
+    const ingest = createIngest({ store: flaky, root, batchBytes: 4096 });
+    expect((await ingest.ingestAll()).errors).toEqual([{ path: files.main, error: "ingest failed: disk busy" }]);
+    await ingest.ingestAll();
+    expect(graphOf(real, files.main)).toEqual(expectedScenario(files));
+  });
+});
+
 describe("a file that changes under the reader", () => {
   test("truncated below the read position is read again from the start", async () => {
     const s = await setup();
@@ -237,6 +357,29 @@ describe("subagents", () => {
     expect(graph.sessions).toHaveLength(2);
   });
 
+  test("of a workflow (`subagents/workflows/<id>/`) are subagents of the session, not logs of their own", async () => {
+    const s = await setup();
+    const files = layout(s.root, "subagent");
+    writeText(files.main, readFileSync(files.source));
+    const agent = files.subagents[0];
+    if (agent === undefined || agent.sourceMeta === undefined) throw new Error("the subagent scenario has a subagent");
+    const dir = join(files.main.replace(/\.jsonl$/, ""), "subagents", "workflows", "wf-1");
+    const name = agent.path.split("/").pop() ?? "";
+    writeText(join(dir, name), readFileSync(agent.source));
+    writeText(join(dir, name.replace(/\.jsonl$/, ".meta.json")), readFileSync(agent.sourceMeta));
+    await s.ingest.ingestAll();
+    expect(s.store.logs()).toEqual([files.main]);
+    const expected = expectedGraph(readFileSync(files.source), [
+      {
+        name: `workflows/wf-1/${name.replace(/\.jsonl$/, "")}`,
+        text: readFileSync(agent.source, "utf8"),
+        meta: readFileSync(agent.sourceMeta, "utf8"),
+      },
+    ]);
+    expect(graphOf(s.store, files.main)).toEqual(expected);
+    expect(expected.sessions.find((x) => x.parentId !== undefined)).toBeDefined();
+  });
+
   test("and the main transcript growing together give the same graph as one read", async () => {
     const s = await setup();
     const files = layout(s.root, "subagent");
@@ -319,7 +462,45 @@ describe("the transcript folder", () => {
   );
 });
 
+test("the report counts sessions by whether their requests are in the log", async () => {
+  const s = await setup();
+  copyScenario(s.root, "subagent");
+  writeText(
+    join(s.root, "projects", "-old", "00000000-0000-4000-8000-0000000001d0.jsonl"),
+    `${JSON.stringify({
+      type: "assistant",
+      sessionId: "00000000-0000-4000-8000-0000000001d0",
+      message: {
+        id: "msg_1",
+        role: "assistant",
+        model: "claude-opus-5-5",
+        content: [],
+        usage: { input_tokens: 5, output_tokens: 1 },
+      },
+    })}\n`,
+  );
+  await s.ingest.ingestAll();
+  expect(s.store.report().requestLogs).toEqual([
+    { requestLog: "absent", sessions: 1 },
+    { requestLog: "present", sessions: 2 },
+  ]);
+});
+
 describe("Calls events", () => {
+  test("a listener that throws is reported, and neither ingest nor the other listeners stop", async () => {
+    const s = await setup();
+    const files = copyScenario(s.root, "basic-tools");
+    s.ingest.onCalls(() => {
+      throw new Error("listener broke");
+    });
+    const after: CallsEvent[] = [];
+    s.ingest.onCalls((e) => after.push(e));
+    const summary = await s.ingest.ingestAll();
+    expect(summary.errors[0]).toEqual({ path: files.main, error: "a Calls listener failed: listener broke" });
+    expect(after.length).toBe(s.events.length);
+    expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
+  });
+
   test("name the Calls each read added and updated, by Session", async () => {
     const s = await setup();
     const files = copyScenario(s.root, "subagent");

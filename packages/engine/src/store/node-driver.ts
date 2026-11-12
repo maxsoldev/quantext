@@ -15,6 +15,7 @@ export function openNode(path: string): RawDatabase {
         all: (...params: SqlValue[]) => statement.all(...params) as SqlRow[],
       };
     },
+    inTransaction: () => db.isTransaction,
     close: () => db.close(),
   };
 }

@@ -10,6 +10,7 @@ describe("parseClaudeCodeSession on basic-tools", () => {
       {
         id: "00000000-0000-4000-8000-000000000001",
         harness: "claude-code",
+        requestLog: "present",
         harnessVersion: "2.1.322",
         project: "/fixture-0000000000000000/repo",
         cwd: "/fixture-0000000000000000/repo",
@@ -60,8 +61,16 @@ describe("parseClaudeCodeSession on basic-tools", () => {
     expect(cost?.totalUsd).toBeCloseTo(0.084513 * 1.1, 12);
   });
 
-  test("reports no unknown records for a known transcript", () => {
-    expect(graph.report).toEqual({ unknownRecords: [], unreadable: [] });
+  test("reports no unknown records for a known transcript, and counts the rows it ignores", () => {
+    expect(graph.report.unknownRecords).toEqual([]);
+    expect(graph.report.unreadable).toEqual([]);
+    expect(graph.report.ignoredRecords).toEqual([
+      { kind: "queue-operation", count: 2 },
+      { kind: "attachment", count: 11 },
+      { kind: "atis-latch", count: 4 },
+      { kind: "last-prompt", count: 4 },
+      { kind: "tools-used", count: 3 },
+    ]);
   });
 });
 

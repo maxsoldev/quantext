@@ -36,6 +36,10 @@ CREATE TABLE sessions (
   cwd TEXT,
   started TEXT,
   ended TEXT,
+  request_log TEXT NOT NULL CHECK (request_log IN ('present', 'partial', 'absent')),
+  title TEXT,
+  title_source TEXT,
+  agent_name TEXT,
   PRIMARY KEY (log, id)
 ) STRICT;
 
@@ -76,6 +80,7 @@ CREATE TABLE calls (
   cache_boundary_position INTEGER,
   framing_tokens INTEGER NOT NULL,
   issues TEXT NOT NULL,
+  turn_duration_ms INTEGER,
   PRIMARY KEY (log, id),
   FOREIGN KEY (log, session_id) REFERENCES sessions (log, id)
 ) STRICT;
@@ -173,12 +178,25 @@ CREATE TABLE records (
   PRIMARY KEY (log, key)
 ) STRICT;
 
-CREATE TABLE report_unknown (
+CREATE TABLE session_events (
   log INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  ts TEXT,
+  kind TEXT NOT NULL,
+  value TEXT NOT NULL,
+  detail TEXT,
+  PRIMARY KEY (log, id)
+) STRICT;
+CREATE INDEX session_events_session ON session_events (log, session_id, ts);
+
+CREATE TABLE report_kinds (
+  log INTEGER NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK (status IN ('unknown', 'ignored')),
   kind TEXT NOT NULL,
   count INTEGER NOT NULL,
   seq INTEGER NOT NULL,
-  PRIMARY KEY (log, kind)
+  PRIMARY KEY (log, status, kind)
 ) STRICT;
 
 CREATE TABLE report_unreadable (

@@ -1,7 +1,7 @@
 /** The store: one SQLite database in the data folder, written by one engine at a time. */
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { RecordCodec } from "@quantext/shared";
+import type { RecordCodec, RequestLog } from "@quantext/shared";
 import type { SqlDriver } from "./driver.ts";
 import { openDriver } from "./driver.ts";
 import { acquireLock } from "./lock.ts";
@@ -16,19 +16,23 @@ export function defaultDataDir(home: string): string {
 }
 
 export interface OpenStoreOptions {
-  /** The folder of the database (`quantext.db`) and the writer lock (`writer.lock`); created when missing. */
+  /** The folder of the database (`quantext.db`) and the writer lock (`writer.lock`, `writer.pid`); created when missing. */
   dataDir: string;
 }
 
 export interface StoreReport {
   /** Unknown record kinds with their counts, summed over logs, most frequent first. */
   unknownRecords: { kind: string; count: number }[];
+  /** Known record kinds that hold nothing for the domain, with their counts, most frequent first. */
+  ignoredRecords: { kind: string; count: number }[];
   /** Records that could not be read, by log (the main transcript's path) and place. */
   unreadable: { log: string; at: string; reason: string }[];
   /** Files that could not be read, or whose log failed to ingest, and why. */
   errors: { path: string; error: string }[];
   /** Files whose last bytes are not a complete line yet: held back until the newline comes. */
   files: { path: string; pendingBytes: number }[];
+  /** Sessions by whether the log holds their requests (`absent`: usage only, the context cannot be rebuilt). */
+  requestLogs: { requestLog: RequestLog; sessions: number }[];
 }
 
 export interface Store {
@@ -48,7 +52,7 @@ export interface Store {
 /** Open the store for writing: take the writer lock, open the database, migrate it to the current schema. */
 export async function openStore(options: OpenStoreOptions): Promise<Store> {
   mkdirSync(options.dataDir, { recursive: true });
-  const lock = acquireLock(join(options.dataDir, "writer.lock"));
+  const lock = await acquireLock(join(options.dataDir, "writer.lock"), join(options.dataDir, "writer.pid"));
   const path = join(options.dataDir, "quantext.db");
   let db: SqlDriver | undefined;
   try {
@@ -56,16 +60,22 @@ export async function openStore(options: OpenStoreOptions): Promise<Store> {
     const schemaVersion = migrate(db);
     const opened = db;
     const sql = new Statements(opened);
+    const kinds = (status: string) =>
+      sql
+        .get(
+          `SELECT kind, sum(count) AS count FROM report_kinds WHERE status = ?
+           GROUP BY kind ORDER BY count DESC, kind`,
+        )
+        .all(status)
+        .map((r) => ({ kind: String(r.kind), count: Number(r.count) }));
     return {
       path,
       schemaVersion,
       db: opened,
       log: (logPath, harness, codec) => openLog(opened, sql, logPath, harness, codec),
       report: () => ({
-        unknownRecords: sql
-          .get("SELECT kind, sum(count) AS count FROM report_unknown GROUP BY kind ORDER BY count DESC, kind")
-          .all()
-          .map((r) => ({ kind: String(r.kind), count: Number(r.count) })),
+        unknownRecords: kinds("unknown"),
+        ignoredRecords: kinds("ignored"),
         unreadable: sql
           .get(
             `SELECT l.path, r.at, r.reason FROM report_unreadable r JOIN logs l ON l.id = r.log
@@ -84,6 +94,10 @@ export async function openStore(options: OpenStoreOptions): Promise<Store> {
           )
           .all()
           .map((r) => ({ path: String(r.path), pendingBytes: Number(r.pending) })),
+        requestLogs: sql
+          .get("SELECT request_log, count(*) AS n FROM sessions GROUP BY request_log ORDER BY request_log")
+          .all()
+          .map((r) => ({ requestLog: String(r.request_log) as RequestLog, sessions: Number(r.n) })),
       }),
       logs: () =>
         sql

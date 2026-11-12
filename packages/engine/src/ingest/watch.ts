@@ -27,7 +27,7 @@ export interface WatchOptions {
 export interface Watcher {
   /** Start a read of what changed so far now, and wait until it is written. */
   flush(): Promise<void>;
-  /** Stop watching: close the change source and wait for the read in progress. */
+  /** Stop watching: close the change source, stop the read in progress after its batch, and wait for it. */
   stop(): Promise<void>;
 }
 
@@ -42,6 +42,8 @@ export function watchTranscripts(options: WatchOptions): Watcher {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
   let running: Promise<void> = Promise.resolve();
+  const stopping = new AbortController();
+  const run = { signal: stopping.signal };
 
   /** Take the changes gathered so far, and read them after the read in progress. */
   const read = (): Promise<void> => {
@@ -52,8 +54,8 @@ export function watchTranscripts(options: WatchOptions): Watcher {
     everything = false;
     running = running.then(async () => {
       try {
-        if (all) await ingest.ingestAll();
-        else await ingest.ingestPaths(asked);
+        if (all) await ingest.ingestAll(run);
+        else await ingest.ingestPaths(asked, run);
       } catch (error) {
         onError(error);
       }
@@ -78,6 +80,7 @@ export function watchTranscripts(options: WatchOptions): Watcher {
     },
     async stop() {
       stopped = true;
+      stopping.abort();
       clearTimeout(timer);
       timer = undefined;
       source.close();

@@ -23,6 +23,8 @@ export interface ParserState {
   messages: Record<string, WireMessage>;
   /** The content of each assistant message so far, by `message.id` (one row per content block). */
   assistant: Record<string, Json[]>;
+  /** The hash of each open assistant message so far: after a restore, its content comes back by this hash. */
+  assistantHashes: Record<string, string>;
   shapes: Record<string, WireShape>;
   /** The request of every logged call, as the log gives it. */
   specs: Record<string, CallSpec>;
@@ -34,6 +36,8 @@ export interface ParserState {
   pending: Record<string, 1>;
   /** Calls whose request is not complete yet, with their transcript: a later row may bring the missing part. */
   waiting: Record<string, string>;
+  /** Waiting Calls that no longer wait for their missing messages: they are split with gap Blocks. */
+  gapped: Record<string, 1>;
   lanes: Record<string, Lane>;
   /** The size of each group of Blocks split from one exact total. */
   groupSizes: Record<string, number>;
@@ -57,6 +61,8 @@ export interface ParserState {
   metaToolUse: Record<string, string>;
   /** The response of each call: the hash of its message so far and its output tokens, for the next call's estimate. */
   responses: Record<string, { messageId: string; hash?: string; outputTokens: number; reasoningTokens?: number }>;
+  /** Per Session: whether it has Calls with a logged request (`r`), usage-only Calls (`u`), or both. */
+  requestLogs: Record<string, { r?: 1; u?: 1 }>;
   report: IngestReport;
 }
 
@@ -68,8 +74,9 @@ export interface TranscriptState {
   userRun: Json[][];
   /** The message ids of the latest assistant rows, newest last: their later rows add to them (bounded). */
   openAssistantIds: string[];
-  /** The last Call logged in the transcript. */
+  /** The last Call logged in the transcript, and the Session of its latest row. */
   lastCallId?: string;
+  sessionId?: string;
   /** The running totals of the last `cost-state` row, and the Usage of the Calls logged since, per model. */
   costTotals?: JsonObject;
   usageSinceCost: Record<string, UsageSum>;
@@ -145,6 +152,7 @@ export function emptyState(): ParserState {
     transcripts: {},
     messages: {},
     assistant: {},
+    assistantHashes: {},
     shapes: {},
     specs: {},
     sessions: {},
@@ -152,6 +160,7 @@ export function emptyState(): ParserState {
     nextIndex: {},
     pending: {},
     waiting: {},
+    gapped: {},
     lanes: {},
     groupSizes: {},
     toolCalls: {},
@@ -166,6 +175,7 @@ export function emptyState(): ParserState {
     transcriptAgent: {},
     metaToolUse: {},
     responses: {},
-    report: { unknownRecords: [], unreadable: [] },
+    requestLogs: {},
+    report: { unknownRecords: [], ignoredRecords: [], unreadable: [] },
   };
 }

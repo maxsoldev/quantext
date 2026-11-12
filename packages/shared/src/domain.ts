@@ -24,7 +24,37 @@ export interface Session {
   /** ISO 8601 timestamps of the first and the last logged event. */
   started?: string;
   ended?: string;
+  /**
+   * Whether the log holds the Session's requests, so its context can be rebuilt. `present`: every Call's request
+   * is logged. `absent`: the harness version logs only usage (usage-only Calls, no Blocks). `partial`: both.
+   */
+  requestLog: RequestLog;
+  /** The Session's title: the user's own (`user`) wins over one the harness made (`harness`). */
+  title?: string;
+  titleSource?: "user" | "harness";
+  /** The name of the agent the Session ran as, when the harness names it. */
+  agentName?: string;
 }
+
+/**
+ * Something that happened in a Session besides its Calls, for its timeline. `mode`: the permission mode changed
+ * (value: the mode). `cwd`: the Session moved to another folder. `note`: a summary the harness wrote (for
+ * example while the user was away). `pr`: a pull request was linked (value: its URL). `continued-in`: the
+ * Session went on in another Session (value: its id). `forked-from`: the Session started from another one's
+ * context (value: its id).
+ */
+export interface SessionEvent {
+  id: string;
+  sessionId: string;
+  /** ISO 8601; a row without a time gets the time of the latest row before it. */
+  ts?: string;
+  kind: "mode" | "cwd" | "note" | "pr" | "continued-in" | "forked-from";
+  value: string;
+  /** More of what the harness logged, for example a pull request's number and repository. */
+  detail?: { [key: string]: JsonValue };
+}
+
+export type RequestLog = "present" | "partial" | "absent";
 
 /** The parameters of a Call that are not part of its Shape. The model is `Call.model`. */
 export interface CallParams {
@@ -108,10 +138,14 @@ export interface Call {
   framingTokens: number;
   /** What is wrong with this Call's data. Empty when its request is complete and its numbers reconcile. */
   issues: CallIssue[];
+  /** On the last Call of a turn (a user prompt and the Calls that answer it): how long the turn took. */
+  turnDurationMs?: number;
 }
 
 /**
- * A flag on a Call. `unresolved-request`: part of the request is not in the log, so the rebuilt input is
+ * A flag on a Call. `no-request`: the harness version logs no request, only the response's usage, so the Call has
+ * exact usage and cost but no Blocks. `missing-message`: a message of the request is not in the log; a gap Block
+ * stands in its place and takes the tokens the other Blocks leave. `unresolved-request`: part of the request is not in the log, so the rebuilt input is
  * incomplete. `no-usage`: the log holds no Usage, so the Call has no exact total. `unreconciled-tokens`: the exact
  * change from the previous Call does not fit the new Blocks, so the whole total is split by estimate. `no-price`:
  * there is no list price for the model, so the Call has no cost. `price-assumption`: the cost rests on an
@@ -120,6 +154,8 @@ export interface Call {
  */
 export interface CallIssue {
   kind:
+    | "no-request"
+    | "missing-message"
     | "unresolved-request"
     | "no-usage"
     | "unreconciled-tokens"
@@ -144,7 +180,8 @@ export type BlockKind =
   | "tool-result"
   | "image"
   | "document"
-  | "summary";
+  | "summary"
+  | "gap";
 
 /** Where a Block's content came from, as far as the log tells. */
 export interface BlockSource {
@@ -237,6 +274,8 @@ export interface Compaction {
 export interface IngestReport {
   /** Unknown record kinds, by the harness's own name, with their counts, in the order first seen. */
   unknownRecords: { kind: string; count: number }[];
+  /** Known record kinds that hold nothing for the domain (UI and process state), with their counts. */
+  ignoredRecords: { kind: string; count: number }[];
   /** Records that could not be read (bad JSON, missing fields): where (transcript and line) and why. */
   unreadable: { at: string; reason: string }[];
 }
@@ -298,5 +337,6 @@ export interface SessionGraph {
   callBlocks: CallBlock[];
   toolCalls: ToolCall[];
   compactions: Compaction[];
+  events: SessionEvent[];
   report: IngestReport;
 }

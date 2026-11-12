@@ -90,7 +90,9 @@ describe("writing to a log", () => {
     log.write({ deltas });
     const before = normal(log.graph());
     const counts = rowCounts(store);
-    log.write({ deltas: deltas.map((d) => ({ ...d, report: { unknownRecords: [], unreadable: [] } })) });
+    log.write({
+      deltas: deltas.map((d) => ({ ...d, report: { unknownRecords: [], ignoredRecords: [], unreadable: [] } })),
+    });
     expect(normal(log.graph())).toEqual(before);
     expect(rowCounts(store)).toEqual(counts);
   });
@@ -112,13 +114,21 @@ describe("writing to a log", () => {
     const report = (kind: string, at: string) => ({
       ...emptyGraph(),
       records: [],
-      report: { unknownRecords: [{ kind, count: 2 }], unreadable: [{ at, reason: "not JSON" }] },
+      report: {
+        unknownRecords: [{ kind, count: 2 }],
+        ignoredRecords: [{ kind: `seen-${kind}`, count: 1 }],
+        unreadable: [{ at, reason: "not JSON" }],
+      },
     });
     log.write({ deltas: [report("x", "main:1"), report("y", "main:2"), report("x", "main:3")] });
     expect(log.graph().report).toEqual({
       unknownRecords: [
         { kind: "x", count: 4 },
         { kind: "y", count: 2 },
+      ],
+      ignoredRecords: [
+        { kind: "seen-x", count: 2 },
+        { kind: "seen-y", count: 1 },
       ],
       unreadable: ["main:1", "main:2", "main:3"].map((at) => ({ at, reason: "not JSON" })),
     });

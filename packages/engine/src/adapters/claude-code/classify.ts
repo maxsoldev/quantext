@@ -38,6 +38,13 @@ export interface ShapeRefs {
 export interface Classifier {
   message(hash: string): BlockRef[] | undefined;
   shape(hash: string): ShapeRefs | undefined;
+  /** The gap Block that stands for a message that is not in the log. */
+  gap(messageHash: string): BlockRef;
+}
+
+/** The display text of a gap Block. */
+export function gapText(messageHash: string): string {
+  return `Message ${messageHash} is not in the log`;
 }
 
 /** A Block seen for the first time, and the content block type the adapter does not know, if so. */
@@ -73,6 +80,16 @@ export function createClassifier(store: Content, sink: BlockSink, estimator: Est
       const refs = message.content.map((content, i) => ref(message.role, content, i));
       messages.set(hash, refs);
       return refs;
+    },
+    gap(messageHash) {
+      const content = { type: "gap", message: messageHash };
+      const hash = blockHash("gap", content);
+      if (!store.seen(hash)) {
+        store.markSeen(hash);
+        sink({ hash, kind: "gap", source: {}, text: gapText(messageHash), content }, undefined);
+      }
+      // No estimate: the gap takes what the other new Blocks leave of the exact change.
+      return { hash, kind: "gap", contentIndex: 0, estimate: { tokens: 0, method: "unknown" }, references: [] };
     },
     shape(hash) {
       const cached = shapes.get(hash);

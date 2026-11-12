@@ -25,6 +25,9 @@ import {
   callRow,
   compaction,
   compactionRow,
+  EVENT_COLUMNS,
+  event,
+  eventRow,
   json,
   RUN_COLUMNS,
   run,
@@ -89,6 +92,7 @@ const UPSERT_CALL = upsertSql("calls", CALL_COLUMNS);
 const UPSERT_RUN = upsertSql("call_blocks", RUN_COLUMNS);
 const UPSERT_TOOL_CALL = upsertSql("tool_calls", TOOL_CALL_COLUMNS);
 const UPSERT_COMPACTION = upsertSql("compactions", COMPACTION_COLUMNS);
+const UPSERT_EVENT = upsertSql("session_events", EVENT_COLUMNS);
 const UPSERT_MESSAGE = upsertSql("messages", ["key", "role", "blocks"], "key");
 const UPSERT_SHAPE = upsertSql("shapes", ["key", "tools", "system"], "key");
 const UPSERT_RECORD = upsertSql("records", ["key", "value"], "key");
@@ -192,14 +196,21 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
     for (const r of delta.callBlocks) sql.get(UPSERT_RUN).run(id, ...runRow(r));
     for (const t of delta.toolCalls) sql.get(UPSERT_TOOL_CALL).run(id, ...toolCallRow(t));
     for (const c of delta.compactions) sql.get(UPSERT_COMPACTION).run(id, ...compactionRow(c));
-    for (const { kind, count } of delta.report.unknownRecords) {
-      sql
-        .get(
-          `INSERT INTO report_unknown (log, kind, count, seq)
-           VALUES (?, ?, ?, (SELECT coalesce(max(seq), 0) + 1 FROM report_unknown WHERE log = ?))
-           ON CONFLICT (log, kind) DO UPDATE SET count = count + excluded.count`,
-        )
-        .run(id, kind, count, id);
+    for (const e of delta.events) sql.get(UPSERT_EVENT).run(id, ...eventRow(e));
+    const counts = [
+      ["unknown", delta.report.unknownRecords],
+      ["ignored", delta.report.ignoredRecords],
+    ] as const;
+    for (const [status, list] of counts) {
+      for (const { kind, count } of list) {
+        sql
+          .get(
+            `INSERT INTO report_kinds (log, status, kind, count, seq)
+             VALUES (?, ?, ?, ?, (SELECT coalesce(max(seq), 0) + 1 FROM report_kinds WHERE log = ?))
+             ON CONFLICT (log, status, kind) DO UPDATE SET count = count + excluded.count`,
+          )
+          .run(id, status, kind, count, id);
+      }
     }
     for (const { at, reason } of delta.report.unreadable) {
       sql
@@ -253,6 +264,11 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
     },
     graph(): SessionGraph {
       const rows = (table: string) => all(`SELECT * FROM ${table} WHERE log = ? ORDER BY rowid`);
+      const kinds = (status: string) =>
+        all("SELECT kind, count FROM report_kinds WHERE log = ? AND status = ? ORDER BY seq", status).map((r) => ({
+          kind: String(r.kind),
+          count: Number(r.count),
+        }));
       const blocks = all(
         "SELECT b.* FROM log_blocks l JOIN blocks b ON b.hash = l.hash WHERE l.log = ? ORDER BY b.rowid",
       );
@@ -263,11 +279,10 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
         callBlocks: rows("call_blocks").map(run),
         toolCalls: rows("tool_calls").map(toolCall),
         compactions: rows("compactions").map(compaction),
+        events: rows("session_events").map(event),
         report: {
-          unknownRecords: all("SELECT kind, count FROM report_unknown WHERE log = ? ORDER BY seq").map((r) => ({
-            kind: String(r.kind),
-            count: Number(r.count),
-          })),
+          unknownRecords: kinds("unknown"),
+          ignoredRecords: kinds("ignored"),
           unreadable: all("SELECT at, reason FROM report_unreadable WHERE log = ? ORDER BY seq").map((r) => ({
             at: String(r.at),
             reason: String(r.reason),

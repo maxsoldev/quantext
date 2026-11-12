@@ -27,8 +27,32 @@ const KNOWN_TYPES = new Set([
   "queue-operation",
   "tools-used",
   "mode",
+  "ai-title",
+  "custom-title",
+  "agent-name",
+  "pr-link",
+  "continued-in",
+  "fork-context-ref",
+  "relocated",
+  "permission-mode",
+  "dev-mods",
+  "started",
+  "result",
+  "launched",
+  "file-history-snapshot",
+  "file-history-delta",
+  "worktree-state",
 ]);
-const KNOWN_SYSTEM_SUBTYPES = new Set(["compact_boundary"]);
+const KNOWN_SYSTEM_SUBTYPES = new Set([
+  "compact_boundary",
+  "turn_duration",
+  "away_summary",
+  "local_command",
+  "stop_hook_summary",
+  "informational",
+  "scheduled_task_fire",
+  "agents_killed",
+]);
 
 /**
  * The row of one complete line, or undefined for a blank, unknown or unreadable line (counted in `report`, the
@@ -53,8 +77,17 @@ export function readLine(at: string, line: string, report: IngestReport): Row | 
 
 /** Add one to the count of an unknown record kind. Any string is a safe kind, also `__proto__`. */
 export function countUnknown(report: IngestReport, kind: string): void {
-  const entry = report.unknownRecords.find((e) => e.kind === kind);
-  if (entry === undefined) report.unknownRecords.push({ kind, count: 1 });
+  addOne(report.unknownRecords, kind);
+}
+
+/** Add one to the count of a known record kind that holds nothing for the domain. */
+export function countIgnored(report: IngestReport, kind: string): void {
+  addOne(report.ignoredRecords, kind);
+}
+
+function addOne(counts: { kind: string; count: number }[], kind: string): void {
+  const entry = counts.find((e) => e.kind === kind);
+  if (entry === undefined) counts.push({ kind, count: 1 });
   else entry.count++;
 }
 

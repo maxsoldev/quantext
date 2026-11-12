@@ -10,28 +10,59 @@ import type {
   CallBlock,
   Compaction,
   JsonValue,
+  RequestLog,
   RequestSection,
   Session,
+  SessionEvent,
   TokenBasis,
   ToolCall,
   Usage,
 } from "@quantext/shared";
 import type { SqlRow, SqlValue } from "./driver.ts";
 
-export const SESSION_COLUMNS = ["id", "parent_id", "harness", "harness_version", "project", "cwd", "started", "ended"];
+export const SESSION_COLUMNS = [
+  "id",
+  "parent_id",
+  "harness",
+  "harness_version",
+  "project",
+  "cwd",
+  "started",
+  "ended",
+  "request_log",
+  "title",
+  "title_source",
+  "agent_name",
+];
 
 export function sessionRow(s: Session): SqlValue[] {
-  return [s.id, s.parentId, s.harness, s.harnessVersion, s.project, s.cwd, s.started, s.ended].map(nul);
+  return [
+    s.id,
+    s.parentId,
+    s.harness,
+    s.harnessVersion,
+    s.project,
+    s.cwd,
+    s.started,
+    s.ended,
+    s.requestLog,
+    s.title,
+    s.titleSource,
+    s.agentName,
+  ].map(nul);
 }
 
 export function session(r: SqlRow): Session {
-  const s: Session = { id: text(r.id), harness: text(r.harness) };
+  const s: Session = { id: text(r.id), harness: text(r.harness), requestLog: text(r.request_log) as RequestLog };
   put(s, "parentId", r.parent_id);
   put(s, "harnessVersion", r.harness_version);
   put(s, "project", r.project);
   put(s, "cwd", r.cwd);
   put(s, "started", r.started);
   put(s, "ended", r.ended);
+  put(s, "title", r.title);
+  if (r.title_source !== null) s.titleSource = text(r.title_source) as "user" | "harness";
+  put(s, "agentName", r.agent_name);
   return s;
 }
 
@@ -71,6 +102,7 @@ export const CALL_COLUMNS = [
   "cache_boundary_position",
   "framing_tokens",
   "issues",
+  "turn_duration_ms",
 ];
 
 export function callRow(c: Call): SqlValue[] {
@@ -112,6 +144,7 @@ export function callRow(c: Call): SqlValue[] {
     c.cacheBoundary?.position,
     c.framingTokens,
     JSON.stringify(c.issues),
+    c.turnDurationMs,
   ].map(nul);
 }
 
@@ -165,6 +198,7 @@ export function call(r: SqlRow): Call {
   if (r.cache_boundary_tokens !== null) {
     c.cacheBoundary = { tokens: Number(r.cache_boundary_tokens), position: Number(r.cache_boundary_position) };
   }
+  putNumber(c, "turnDurationMs", r.turn_duration_ms);
   return c;
 }
 
@@ -306,6 +340,26 @@ export function compaction(r: SqlRow): Compaction {
   put(c, "beforeCallId", r.before_call_id);
   put(c, "summaryCallId", r.summary_call_id);
   return c;
+}
+
+export const EVENT_COLUMNS = ["id", "session_id", "ts", "kind", "value", "detail"];
+
+export function eventRow(e: SessionEvent): SqlValue[] {
+  return [e.id, e.sessionId, e.ts, e.kind, e.value, e.detail === undefined ? undefined : JSON.stringify(e.detail)].map(
+    nul,
+  );
+}
+
+export function event(r: SqlRow): SessionEvent {
+  const e: SessionEvent = {
+    id: text(r.id),
+    sessionId: text(r.session_id),
+    kind: text(r.kind) as SessionEvent["kind"],
+    value: text(r.value),
+  };
+  put(e, "ts", r.ts);
+  if (r.detail !== null) e.detail = json<{ [key: string]: JsonValue }>(r.detail);
+  return e;
 }
 
 function sourceRow(s: BlockSource): (string | undefined)[] {

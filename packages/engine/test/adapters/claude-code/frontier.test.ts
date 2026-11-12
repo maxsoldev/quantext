@@ -69,3 +69,117 @@ describe("the parser's frontier", () => {
     expect(parser.snapshot().transcripts.main?.userRun).toHaveLength(1);
   });
 });
+
+describe("a message missing from the log", () => {
+  const prompt: Json[] = [{ type: "text", text: "Go." }];
+  const shapeRow = line({ type: "api-request-shape", sessionId: S, shapeHash, shape });
+  const user = line({ type: "user", sessionId: S, message: { role: "user", content: prompt } });
+  const step = (i: number, keep: number, tail: string[]) =>
+    line({
+      type: "api-request",
+      sessionId: S,
+      id: `c${i}`,
+      shapeHash,
+      params: { model: "claude-opus-5-5" },
+      ...(i === 0 ? {} : { base: `c${i - 1}` }),
+      keep,
+      tail,
+      cacheControl: [],
+    }) +
+    line({
+      type: "assistant",
+      sessionId: S,
+      requestRef: `c${i}`,
+      message: {
+        id: `msg_${i}`,
+        role: "assistant",
+        content: [{ type: "text", text: `Reply ${i}.` }],
+        usage: {
+          input_tokens: 100 + 40 * i,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+          output_tokens: 3,
+        },
+      },
+    });
+
+  test("does not make the rest of the lane unresolved: one gap, one flagged Call", () => {
+    let rows = shapeRow + user + step(0, 0, [wire("user", prompt)]) + step(1, 1, ["not-in-the-log"]);
+    let keep = 2;
+    for (let i = 2; i < 40; i++) {
+      rows += step(i, keep, [wire("assistant", [{ type: "text", text: `Reply ${i - 1}.` }])]);
+      keep++;
+    }
+    const graph = parseClaudeCodeSession({ main: rows, subagents: [] });
+    expect(graph.calls).toHaveLength(40);
+    expect(graph.calls.flatMap((c) => c.issues.map((i) => `${c.id} ${i.kind}`))).toEqual(["c1 missing-message"]);
+    expect(graph.calls.every((c) => c.blockCount !== undefined)).toBe(true);
+    expect(graph.blocks.filter((b) => b.kind === "gap")).toHaveLength(1);
+    const store = new MemoryStore();
+    let parser = createClaudeCodeParser(undefined, { lookup: store });
+    for (const row of rows.split("\n").filter((l) => l !== "")) {
+      store.apply(parser.push(`${row}\n`));
+      parser = createClaudeCodeParser(JSON.parse(JSON.stringify(parser.snapshot())), { lookup: store });
+    }
+    const restored = store.graph();
+    expect(restored.calls.flatMap((c) => c.issues.map((i) => `${c.id} ${i.kind}`))).toEqual(["c1 missing-message"]);
+    expect(restored.callBlocks.length).toBe(graph.callBlocks.length);
+  });
+});
+
+describe("the snapshot stays small", () => {
+  const restoreEachLine = (rows: string) => {
+    const store = new MemoryStore();
+    let parser = createClaudeCodeParser(undefined, { lookup: store });
+    let largest = 0;
+    for (const row of rows.split("\n").filter((l) => l !== "")) {
+      store.apply(parser.push(`${row}\n`));
+      const snapshot = JSON.stringify(parser.snapshot());
+      largest = Math.max(largest, snapshot.length);
+      parser = createClaudeCodeParser(JSON.parse(snapshot), { lookup: store });
+    }
+    return { graph: store.graph(), largest };
+  };
+
+  test("with many tool calls that never get a result Block (a session that logs no requests)", () => {
+    const rows = Array.from({ length: 1000 }, (_, i) =>
+      line({
+        type: "assistant",
+        sessionId: S,
+        message: {
+          id: `msg_${i}`,
+          role: "assistant",
+          model: "claude-opus-5-5",
+          content: [{ type: "tool_use", id: `toolu_${i}`, name: "Read", input: { file_path: `/f/${i}.ts` } }],
+          usage: { input_tokens: 10, output_tokens: 1 },
+        },
+      }),
+    ).join("");
+    const parser = createClaudeCodeParser();
+    parser.push(rows);
+    expect(JSON.stringify(parser.snapshot()).length).toBeLessThan(30_000);
+    const { graph } = restoreEachLine(rows);
+    expect(graph.toolCalls).toHaveLength(1000);
+    expect(normalOrder(graph)).toEqual(normalOrder(parseClaudeCodeSession({ main: rows, subagents: [] })));
+  });
+
+  test("with large assistant messages still open", () => {
+    const big = "x".repeat(200_000);
+    const rows =
+      Array.from({ length: 8 }, (_, i) => assistant("side", `msg_${i}`, [{ type: "text", text: `${i}${big}` }])).join(
+        "",
+      ) +
+      Array.from({ length: 8 }, (_, i) => assistant("side", `msg_${i}`, [{ type: "text", text: `more ${i}` }])).join(
+        "",
+      );
+    const parser = createClaudeCodeParser();
+    parser.push(rows);
+    expect(JSON.stringify(parser.snapshot()).length).toBeLessThan(30_000);
+    const { graph } = restoreEachLine(rows);
+    expect(normalOrder(graph)).toEqual(normalOrder(parseClaudeCodeSession({ main: rows, subagents: [] })));
+  });
+});
+
+function normalOrder(graph: ReturnType<typeof parseClaudeCodeSession>) {
+  return { ...graph, toolCalls: [...graph.toolCalls].sort((a, b) => a.id.localeCompare(b.id)) };
+}

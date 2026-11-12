@@ -5,7 +5,7 @@
 
 import type { Dirent } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { join, relative, sep } from "node:path";
 
 /** The files of one log: a main transcript and its subagents. The main transcript may not exist (yet). */
 export interface LogFiles {
@@ -55,36 +55,53 @@ export async function discoverLogs(root: string): Promise<{ logs: LogFiles[]; er
   return { logs, errors };
 }
 
-/** The main transcript of the log a file belongs to: a subagent file belongs to `<session>.jsonl`. */
+/**
+ * The main transcript of the log a file belongs to: a file anywhere under `<session>/subagents/` (also a workflow's
+ * `subagents/workflows/<id>/`) belongs to `<session>.jsonl`.
+ */
 export function logOf(path: string): string {
-  if (basename(dirname(path)) === "subagents") return `${dirname(dirname(path))}.jsonl`;
-  return path;
+  const parts = path.split(sep);
+  const at = parts.lastIndexOf("subagents", parts.length - 2);
+  return at > 0 ? `${parts.slice(0, at - 1).join(sep)}${sep}${parts[at - 1]}.jsonl` : path;
 }
 
-/** The files of the log of a main transcript, with the subagents that exist now. */
+/**
+ * The files of the log of a main transcript, with the subagents that exist now, at any depth under its
+ * `subagents/` folder. A subagent's transcript name is its path below that folder, without `.jsonl`.
+ */
 export async function logFiles(main: string): Promise<{ files: LogFiles; errors: PathError[] }> {
-  const dir = join(main.replace(/\.jsonl$/, ""), "subagents");
-  let names: string[];
-  try {
-    names = await readdir(dir);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT" || (error as NodeJS.ErrnoException).code === "ENOTDIR") {
-      return { files: { main, subagents: [] }, errors: [] };
+  const root = join(main.replace(/\.jsonl$/, ""), "subagents");
+  const subagents: SubagentFile[] = [];
+  const errors: PathError[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    let entries: Dirent[];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (dir === root && (code === "ENOENT" || code === "ENOTDIR")) return;
+      errors.push({ path: dir, error: describe(error) });
+      return;
     }
-    return { files: { main, subagents: [] }, errors: [{ path: dir, error: describe(error) }] };
-  }
-  const present = new Set(names);
-  const subagents = names
-    .filter((n) => n.endsWith(".jsonl"))
-    .sort()
-    .map((n): SubagentFile => {
-      const name = n.replace(/\.jsonl$/, "");
-      const meta = `${name}.meta.json`;
-      const file: SubagentFile = { path: join(dir, n), name };
-      if (present.has(meta)) file.meta = join(dir, meta);
-      return file;
-    });
-  return { files: { main, subagents }, errors: [] };
+    const names = new Set(entries.map((e) => e.name));
+    for (const entry of entries) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) await walk(path);
+      else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+        const name = relative(root, path)
+          .split(sep)
+          .join("/")
+          .replace(/\.jsonl$/, "");
+        const meta = entry.name.replace(/\.jsonl$/, ".meta.json");
+        const file: SubagentFile = { path, name };
+        if (names.has(meta)) file.meta = join(dir, meta);
+        subagents.push(file);
+      }
+    }
+  };
+  await walk(root);
+  subagents.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return { files: { main, subagents }, errors };
 }
 
 /** An error as one line: its code and message. */

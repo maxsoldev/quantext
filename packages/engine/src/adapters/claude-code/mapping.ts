@@ -68,7 +68,44 @@ export function setUsage(call: Call, usage: Usage, raw?: JsonObject): void {
   call.issues.push(...issues);
 }
 
-/** Two usages are the same counts. */
-export function sameUsage(a: Usage, b: Usage): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+const INPUT_SIDE = [
+  "inputTokens",
+  "cacheReadTokens",
+  "cacheWriteTokens",
+  "cacheWrite5mTokens",
+  "cacheWrite1hTokens",
+] as const;
+const OUTPUT_SIDE = ["outputTokens", "reasoningOutputTokens"] as const;
+
+/** The input side of a Usage is reported: some input, cache read or cache write counter is above 0. */
+export function hasInput(u: Usage): boolean {
+  return u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens > 0;
+}
+
+/** Two usages have the same input side (what the split of the Call rests on). */
+export function sameInput(a: Usage, b: Usage): boolean {
+  return INPUT_SIDE.every((k) => a[k] === b[k]);
+}
+
+/**
+ * The Usage of a response logged over several rows: the first input side that is reported (later rows of one
+ * message may carry 0 there, with only a cache write split), and the latest output side.
+ */
+export function mergeUsage(known: Usage, next: Usage): Usage {
+  const merged: Usage = { ...(hasInput(known) ? known : next) };
+  for (const k of OUTPUT_SIDE) {
+    if (next[k] === undefined) delete merged[k];
+    else merged[k] = next[k];
+  }
+  return merged;
+}
+
+/** The counters of `b` less those of `a`, for running sums (a counter absent on one side counts as 0). */
+export function usageChange(a: Usage | undefined, b: Usage): Usage {
+  const out: Usage = { ...b };
+  for (const k of [...INPUT_SIDE, ...OUTPUT_SIDE]) {
+    const v = (b[k] ?? 0) - (a?.[k] ?? 0);
+    if (b[k] !== undefined || a?.[k] !== undefined) out[k] = v;
+  }
+  return out;
 }
