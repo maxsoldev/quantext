@@ -1,5 +1,5 @@
 /** The store: one SQLite database in the data folder, written by one engine at a time. */
-import { existsSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { MemoryDocument, MemoryMark, RequestLog, StoreCodec } from "@quantext/shared";
 import type { SqlDriver } from "./driver.ts";
@@ -71,12 +71,15 @@ export interface Store {
 
 /** Open the store for writing: take the writer lock, open the database, migrate it to the current schema. */
 export async function openStore(options: OpenStoreOptions): Promise<Store> {
-  mkdirSync(options.dataDir, { recursive: true });
+  // The store holds whole transcripts: a new data folder and its files are the user's alone.
+  mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
   const lock = await acquireLock(join(options.dataDir, "writer.lock"), join(options.dataDir, "writer.pid"));
   const path = join(options.dataDir, "quantext.db");
   let db: SqlDriver | undefined;
   try {
     db = await openDriver(path);
+    // SQLite gives its WAL and shared-memory files the database file's mode.
+    if (process.platform !== "win32") chmodSync(path, 0o600);
     const schemaVersion = migrate(db);
     const opened = db;
     const sql = new Statements(opened);

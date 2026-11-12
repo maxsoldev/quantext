@@ -40,3 +40,5 @@ an engine nobody uses must not stay.
 - A start costs one file read and one local request when an engine runs.
 - The mod finds the engine by `engine.json` when 4747 was taken; probing 4747 alone is not enough.
 - Engines of two versions never share a store: the newer one refuses until the older one is stopped.
+- A new data folder is made mode 0700, and the database, the lock and `engine.json` are 0600: the store holds
+  whole transcripts.
