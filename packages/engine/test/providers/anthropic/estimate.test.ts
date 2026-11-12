@@ -53,6 +53,13 @@ describe("imageSize", () => {
     expect(imageSize(btoa(String.fromCharCode(...jpeg)))).toEqual({ width: 400, height: 300 });
   });
 
+  test("reads only the header bytes: a huge image decodes no more than its first 64 KB", () => {
+    const huge = PNG_96x64 + "A".repeat(20_000_000);
+    const start = performance.now();
+    expect(imageSize(huge)).toEqual({ width: 96, height: 64 });
+    expect(performance.now() - start).toBeLessThan(50);
+  });
+
   test("returns undefined for data that is not a known image format", () => {
     expect(imageSize(btoa("not an image at all"))).toBeUndefined();
   });
@@ -96,8 +103,16 @@ describe("estimateBlock", () => {
     const result = { type: "tool_result", tool_use_id: "", content: [image] };
     expect(estimateBlock(block("tool-result", result))).toEqual({
       tokens: Math.ceil((96 * 64) / 750) + BLOCK_OVERHEAD_TOKENS,
+      min: BLOCK_OVERHEAD_TOKENS,
       method: "image",
     });
+  });
+
+  test("gives a tool result a lower bound: its tool use id and the block's structure", () => {
+    const result = { type: "tool_result", tool_use_id: "x".repeat(33), content: "" };
+    expect(estimateBlock(block("tool-result", result)).min).toBe(
+      Math.ceil(33 / CHARS_PER_TOKEN) + BLOCK_OVERHEAD_TOKENS,
+    );
   });
 
   test("marks a document as unknown", () => {

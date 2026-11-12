@@ -5,10 +5,11 @@
 
 /**
  * How a token number was found. `exact`: reported by the model provider for this Call. `derived`: computed from
- * exact counters (for example the change of a cumulative total). `estimate`: from an estimator, used only to split
- * an exact or derived total.
+ * exact counters (for example the change of a cumulative total). `anchored`: an exact change less the previous
+ * reply's output tokens, so near-exact (off by tens of tokens, with a known bias). `estimate`: from an estimator,
+ * used only to split an exact or derived total.
  */
-export type TokenBasis = "exact" | "derived" | "estimate";
+export type TokenBasis = "exact" | "derived" | "anchored" | "estimate";
 
 /** One conversation in a harness. A subagent run is its own Session, with a parent. */
 export interface Session {
@@ -114,10 +115,17 @@ export interface Call {
  * incomplete. `no-usage`: the log holds no Usage, so the Call has no exact total. `unreconciled-tokens`: the exact
  * change from the previous Call does not fit the new Blocks, so the whole total is split by estimate. `no-price`:
  * there is no list price for the model, so the Call has no cost. `price-assumption`: the cost rests on an
- * assumption that the log cannot confirm (a cache write's time to live, a long-context price).
+ * assumption that the log cannot confirm (a cache write's time to live, a long-context price). `estimate-clamped`: a
+ * Block's share fell below its lower bound (its tool use id and structure) and was raised to it.
  */
 export interface CallIssue {
-  kind: "unresolved-request" | "no-usage" | "unreconciled-tokens" | "no-price" | "price-assumption";
+  kind:
+    | "unresolved-request"
+    | "no-usage"
+    | "unreconciled-tokens"
+    | "no-price"
+    | "price-assumption"
+    | "estimate-clamped";
   detail: string;
 }
 
@@ -235,9 +243,31 @@ export interface IngestReport {
 
 /**
  * What one read of new input added or changed: new and updated entities (each in full, by id), and the report's
- * new counts. Merging every delta in order gives the SessionGraph.
+ * new counts. Merging every delta in order gives the SessionGraph. `records` are the adapter's own data (in Claude
+ * Code: messages, shapes, requests) that the caller keeps and gives back through a ContentLookup.
  */
-export type SessionDelta = SessionGraph;
+export interface SessionDelta extends SessionGraph {
+  records: AdapterRecord[];
+}
+
+/** A piece of an adapter's own data, by key. A later record with the same key replaces the earlier one. */
+export interface AdapterRecord {
+  key: string;
+  value: JsonValue;
+}
+
+/**
+ * What an adapter may ask its caller for, when its snapshot no longer holds it: what the caller kept from earlier
+ * deltas. The store implements it in build step 5; each answer must reflect every delta applied so far.
+ */
+export interface ContentLookup {
+  record(key: string): JsonValue | undefined;
+  block(hash: string): Block | undefined;
+  call(id: string): Call | undefined;
+  toolCall(id: string): ToolCall | undefined;
+  /** The runs of a lane that are still open (no `lastCall`): the input of the lane's latest split Call. */
+  openRuns(sessionId: string, lane: string): CallBlock[];
+}
 
 /** Everything an adapter found in one Session and its subagent Sessions. */
 export interface SessionGraph {

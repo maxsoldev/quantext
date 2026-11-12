@@ -6,17 +6,19 @@
 import type { Call, CallBlock, RequestSection, TokenBasis, Usage } from "@quantext/shared";
 import type { FreshBlock, Share } from "../../core/attribute.ts";
 import { attributeCall, cachedPrefixLength, reconcile } from "../../core/attribute.ts";
+import type { Estimator } from "../../core/estimate.ts";
 import { replaysThinking } from "../../providers/anthropic/content.ts";
 import type { Changes } from "./changes.ts";
 import type { BlockRef, Classifier, ShapeRefs } from "./classify.ts";
+import type { Content } from "./lookup.ts";
 import { get, put } from "./records.ts";
 import type { CallSpec, Lane, ParserState } from "./state.ts";
-import { wireHash } from "./wire.ts";
 
 export interface SplitContext {
-  state: ParserState;
+  store: Content;
   classifier: Classifier;
   changes: Changes;
+  estimator: Estimator;
 }
 
 interface FreshEntry {
@@ -58,13 +60,15 @@ export function laneOf(state: ParserState, key: string, sessionId: string): Lane
 
 /** Split a Call with a complete request and a Usage; sets its tokens, framing, cache boundary and runs. */
 export function splitCall(ctx: SplitContext, call: Call, spec: CallSpec, usage: Usage): void {
-  const { state, classifier, changes } = ctx;
+  const { store, classifier, changes } = ctx;
+  const state = store.state;
   const lane = laneOf(state, spec.lane, call.sessionId);
+  if (lane.cold) warmLane(ctx, lane);
   const shape = spec.shapeHash === undefined ? undefined : classifier.shape(spec.shapeHash);
   if (shape === undefined) return;
-  const messages = messagesOf(state, spec, lane);
+  const messages = messagesOf(ctx, spec, lane);
   let shared = lane.shapeKey === shape.key ? commonPrefix(messages, lane.messages) : 0;
-  shared = Math.min(shared, deferredLimit(lane, shape), thinkingLimit(state, lane, messages, call));
+  shared = Math.min(shared, deferredLimit(lane, shape), thinkingLimit(store, lane, messages, call));
   const keptPos =
     lane.shapeKey !== shape.key ? 0 : shared === 0 ? shape.refs.length : (lane.messageEnds[shared - 1] ?? 0);
 
@@ -87,9 +91,9 @@ export function splitCall(ctx: SplitContext, call: Call, spec: CallSpec, usage: 
       return carried === undefined ? { estimate: f.ref.estimate } : { estimate: f.ref.estimate, carried };
     }),
     ...(breakpoints.length > 0 ? { lastBreakpoint: Math.max(...breakpoints) } : {}),
-    groupSize: (g) => get(state.groupSizes, g) ?? 0,
+    groupSize: (g) => store.groupSize(g) ?? 0,
   });
-  for (const g of result.groups) put(state.groupSizes, g.id, g.size);
+  for (const g of result.groups) store.putGroupSize(g.id, g.size);
 
   // A Call that is not split has no blocks (no blockCount), so runs may go on across it; only a new split restarts.
   const restart = result.kept !== undefined;
@@ -117,29 +121,84 @@ export function splitCall(ctx: SplitContext, call: Call, spec: CallSpec, usage: 
     tokens: read,
     position: cachedPrefixLength((i) => lane.prefix[i] ?? 0, lane.blocks.length, read),
   };
-  linkResults(state, fresh, changes);
+  linkResults(store, fresh, changes);
 }
 
-/** The message hashes of a request: the base's first `keep` messages, then the tail. */
-function messagesOf(state: ParserState, spec: CallSpec, lane: Lane): string[] {
-  // Walk the base chain back to a Call whose messages are known: the lane's latest Call, or one with no base.
+/**
+ * The message hashes of a request: the base's first `keep` messages, then the tail. A base that is the latest Call
+ * of any lane has its list at hand; only a base older than that needs a walk back along the chain of requests.
+ */
+function messagesOf(ctx: SplitContext, spec: CallSpec, lane: Lane | undefined): string[] {
   const chain: CallSpec[] = [];
   let start: readonly string[] = [];
   for (let at: CallSpec | undefined = spec; at !== undefined; ) {
     chain.push(at);
     if (at.baseId === undefined) break;
-    if (at.baseId === lane.lastCallId) {
-      start = lane.messages;
+    const known = lane !== undefined && at.baseId === lane.lastCallId ? lane : latestLaneOf(ctx, at.baseId);
+    if (known !== undefined) {
+      start = known.messages;
       break;
     }
-    at = get(state.specs, at.baseId);
+    at = ctx.store.spec(at.baseId);
   }
-  let list: readonly string[] = start;
+  const list = [...start];
   for (let i = chain.length - 1; i >= 0; i--) {
     const s = chain[i] as CallSpec;
-    list = [...list.slice(0, s.baseId === undefined ? 0 : s.keep), ...s.tail];
+    list.length = Math.min(list.length, s.baseId === undefined ? 0 : s.keep);
+    for (const hash of s.tail) list.push(hash);
   }
-  return [...list];
+  return list;
+}
+
+/** The lane whose latest split Call is `callId`, warmed if it came from a snapshot. */
+function latestLaneOf(ctx: SplitContext, callId: string): Lane | undefined {
+  for (const lane of Object.values(ctx.store.state.lanes)) {
+    if (lane.lastCallId !== callId) continue;
+    if (lane.cold) warmLane(ctx, lane);
+    return lane;
+  }
+  return undefined;
+}
+
+/**
+ * Rebuild a lane restored from a snapshot: its layout is the open runs that the caller kept, and its message list
+ * is its latest Call's, walked back along the requests the caller kept as records.
+ */
+function warmLane(ctx: SplitContext, lane: Lane): void {
+  const { store } = ctx;
+  delete lane.cold;
+  const runs = store.lookup.openRuns(lane.sessionId, lane.key).sort((a, b) => a.position - b.position);
+  const contentIndex = new Map<number, number>();
+  for (const run of runs) {
+    const p = lane.blocks.length;
+    const block = store.lookup.block(run.blockHash);
+    const message = run.message ?? -1;
+    const deferred = run.section === "messages" && block?.kind === "tool-schema";
+    lane.blocks.push(run.blockHash);
+    lane.sections.push(run.section);
+    lane.messageOf.push(message);
+    const index = contentIndex.get(message) ?? 0;
+    lane.contentOf.push(deferred ? -1 : index);
+    if (!deferred) contentIndex.set(message, index + 1);
+    lane.estimates.push(block === undefined ? { tokens: 0, method: "unknown" } : ctx.estimator(block));
+    lane.reasoning.push(block?.kind === "reasoning");
+    lane.runs.push(structuredClone(run));
+    setShare(lane, p, {
+      tokens: run.tokens ?? 0,
+      basis: run.basis ?? "estimate",
+      ...(run.group ? { group: run.group } : {}),
+    });
+    if (deferred) lane.deferred.push({ position: p, tool: block?.source.tool ?? "", hash: run.blockHash });
+    if (message >= 0) lane.messageEnds[message] = p + 1;
+  }
+  for (const g of Object.keys(lane.groupCount)) {
+    if ((get(lane.groupCount, g) ?? 0) < (store.groupSize(g) ?? 0)) put(lane.partial, g, 1);
+  }
+  const spec = lane.lastCallId === undefined ? undefined : store.spec(lane.lastCallId);
+  lane.messages = spec === undefined ? [] : messagesOf(ctx, spec, undefined);
+  for (let m = 0; m < lane.messages.length; m++) {
+    lane.messageEnds[m] ??= m === 0 ? lane.shapeCount : (lane.messageEnds[m - 1] ?? lane.shapeCount);
+  }
 }
 
 function commonPrefix(a: readonly string[], b: readonly string[]): number {
@@ -163,9 +222,9 @@ function deferredLimit(lane: Lane, shape: ShapeRefs): number {
  * A model that drops the thinking of earlier turns sends the last assistant message differently once a newer
  * assistant message follows it: from that message on, nothing is kept unchanged.
  */
-function thinkingLimit(state: ParserState, lane: Lane, messages: readonly string[], call: Call): number {
+function thinkingLimit(store: Content, lane: Lane, messages: readonly string[], call: Call): number {
   if (replaysThinking(call.canonicalModel)) return Number.POSITIVE_INFINITY;
-  const role = (hash: string | undefined) => get(state.messages, hash ?? "")?.role;
+  const role = (hash: string | undefined) => store.message(hash ?? "")?.role;
   for (let m = lane.messages.length - 1; m >= 0; m--) {
     if (role(lane.messages[m]) !== "assistant") continue;
     const start = m === 0 ? lane.shapeCount : (lane.messageEnds[m - 1] ?? 0);
@@ -213,9 +272,8 @@ function applyOutputAnchor(
   call: Call,
 ): void {
   const response = lane.lastCallId === undefined ? undefined : get(state.responses, lane.lastCallId);
-  const content = response === undefined ? undefined : get(state.assistant, response.messageId);
-  if (response === undefined || content === undefined) return;
-  const m = messages.indexOf(wireHash("assistant", content));
+  if (response?.hash === undefined) return;
+  const m = messages.indexOf(response.hash);
   const own = fresh.filter((f) => f.message === m && m >= 0 && f.deferredTool === undefined);
   if (own.length === 0) return;
   const thinking = own.filter((f) => f.ref.kind === "reasoning");
@@ -228,14 +286,13 @@ function applyOutputAnchor(
       total,
     ).forEach((tokens, i) => {
       const entry = entries[i];
-      if (entry !== undefined) entry.ref = { ...entry.ref, estimate: { tokens, method: "chars" } };
+      if (entry !== undefined) entry.ref = { ...entry.ref, estimate: { tokens, method: "output" } };
     });
   weigh(thinking, reasoning);
   weigh(others, rest);
   // The other new Blocks of the Call (tool results) take what the response leaves.
   for (const f of fresh) {
-    if (f.message !== m && f.message >= 0)
-      f.ref = { ...f.ref, estimate: { tokens: f.ref.estimate.tokens, method: "rest" } };
+    if (f.message !== m && f.message >= 0) f.ref = { ...f.ref, estimate: { ...f.ref.estimate, method: "rest" } };
   }
 }
 
@@ -383,10 +440,10 @@ function closeRun(lane: Lane, p: number, changes: Changes): void {
 }
 
 /** A tool result sent for the first time is the result Block of its ToolCall. */
-function linkResults(state: ParserState, fresh: readonly FreshEntry[], changes: Changes): void {
+function linkResults(store: Content, fresh: readonly FreshEntry[], changes: Changes): void {
   for (const { ref } of fresh) {
     if (ref.toolUseId === undefined) continue;
-    const toolCall = get(state.toolCalls, ref.toolUseId);
+    const toolCall = store.toolCall(ref.toolUseId);
     if (toolCall === undefined || toolCall.resultBlockHash !== undefined) continue;
     toolCall.resultBlockHash = ref.hash;
     changes.toolCalls.add(toolCall.id);

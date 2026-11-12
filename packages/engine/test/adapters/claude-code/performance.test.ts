@@ -25,3 +25,14 @@ test(`a ${CALLS}-call session parses in under ${MAX_MS} ms and ${MAX_HEAP_MB} MB
   expect(ms).toBeLessThan(MAX_MS);
   expect(mb).toBeLessThan(MAX_HEAP_MB);
 });
+
+test(`side calls that branch from the main loop's latest call stay linear: ${CALLS} calls, one side call in 20`, () => {
+  const text = syntheticSession(CALLS, 20);
+  const start = performance.now();
+  const graph = parseClaudeCodeSession({ main: text, subagents: [] });
+  const ms = performance.now() - start;
+  const side = graph.calls.filter((c) => c.lane.endsWith("|side_question"));
+  expect(side).toHaveLength(CALLS / 20);
+  expect(side.filter((c) => c.issues.some((i) => i.kind === "unresolved-request"))).toEqual([]);
+  expect(ms).toBeLessThan(MAX_MS);
+});

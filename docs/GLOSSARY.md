@@ -98,8 +98,9 @@ _Avoid_: cache hit, warm part
 
 **Token basis**:
 How a token number was found: `exact` (from Usage), `derived` (computed from exact counters, such as the change of a
-running total, when a Call's own Usage is not logged) or `estimate` (from an estimator, used only to split an exact
-or derived total).
+running total, when a Call's own Usage is not logged), `anchored` (an exact change less the previous reply's output
+tokens: near-exact, off by tens of tokens) or `estimate` (from an estimator, used only to split an exact or derived
+total).
 _Avoid_: precision, confidence, source
 
 **Framing tokens**:

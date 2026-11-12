@@ -10,7 +10,7 @@ describe.each(scenarios())("attribution of $version/$name", ({ name }) => {
   test.each(logged.map((call) => [call.index, call] as const))(
     "call %i: its blocks and framing add up to the exact input total",
     (_, call) => {
-      expect(call.issues).toEqual([]);
+      expect(call.issues.filter((i) => i.kind !== "estimate-clamped")).toEqual([]);
       const runs = runsAt(graph, call);
       expect(runs.every((r) => r.basis !== undefined && Number.isInteger(r.tokens))).toBe(true);
       expect(tokensOf(runs) + call.framingTokens).toBe(inputTotal(call));
@@ -71,6 +71,19 @@ describe("exact parts of the attribution", () => {
     expect(end).toBeLessThanOrEqual((call?.usage?.cacheReadTokens ?? 0) + (call?.usage?.cacheWriteTokens ?? 0));
   });
 
+  test("a tool result below its lower bound is raised to it, and the call says so", () => {
+    // compaction call 1: a change of 116 tokens after a reply of 112 output tokens leaves 4 for the tool result.
+    const graph = parseClaudeCodeSession(transcriptsOf("compaction"));
+    const byHash = new Map(graph.blocks.map((b) => [b.hash, b]));
+    const result = runsAt(graph, graph.calls[1]).find(
+      (r) => r.firstCall === 1 && byHash.get(r.blockHash)?.kind === "tool-result",
+    );
+    expect(result).toMatchObject({ tokens: 16, basis: "anchored" }); // a 34-character id: 11 tokens, plus 5
+    expect(graph.calls[1]?.issues).toEqual([
+      { kind: "estimate-clamped", detail: "1 block raised to its lower bound (16 tokens instead of 4)" },
+    ]);
+  });
+
   test("the previous response gets its output tokens as weight, the tool result the rest", () => {
     // basic-tools call 1: the Bash tool use came back with 86 output tokens; the change is 105 tokens.
     const graph = parseClaudeCodeSession(transcriptsOf("basic-tools"));
@@ -78,7 +91,7 @@ describe("exact parts of the attribution", () => {
     const fresh = runsAt(graph, graph.calls[1]).filter((r) => r.firstCall === 1);
     expect(fresh.map((r) => [byHash.get(r.blockHash)?.kind, r.tokens, r.basis])).toEqual([
       ["tool-call", 86, "estimate"],
-      ["tool-result", 19, "estimate"],
+      ["tool-result", 19, "anchored"],
     ]);
   });
 });

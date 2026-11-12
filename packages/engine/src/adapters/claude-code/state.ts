@@ -32,6 +32,8 @@ export interface ParserState {
   nextIndex: Record<string, number>;
   /** Calls with a complete request that wait for their response. */
   pending: Record<string, 1>;
+  /** Calls whose request is not complete yet, with their transcript: a later row may bring the missing part. */
+  waiting: Record<string, string>;
   lanes: Record<string, Lane>;
   /** The size of each group of Blocks split from one exact total. */
   groupSizes: Record<string, number>;
@@ -53,8 +55,8 @@ export interface ParserState {
   agentToolUse: Record<string, string>;
   transcriptAgent: Record<string, string>;
   metaToolUse: Record<string, string>;
-  /** The response of each call: its message id and output tokens, for the next call's estimate. */
-  responses: Record<string, { messageId: string; outputTokens: number; reasoningTokens?: number }>;
+  /** The response of each call: the hash of its message so far and its output tokens, for the next call's estimate. */
+  responses: Record<string, { messageId: string; hash?: string; outputTokens: number; reasoningTokens?: number }>;
   report: IngestReport;
 }
 
@@ -64,12 +66,19 @@ export interface TranscriptState {
   lines: number;
   /** Adjacent user rows since the last assistant row; the API joins them into one message. */
   userRun: Json[][];
-  /** The running totals of the last `cost-state` row, and the Calls logged since. */
+  /** The message ids of the latest assistant rows, newest last: their later rows add to them (bounded). */
+  openAssistantIds: string[];
+  /** The last Call logged in the transcript. */
+  lastCallId?: string;
+  /** The running totals of the last `cost-state` row, and the Usage of the Calls logged since, per model. */
   costTotals?: JsonObject;
-  callsSinceCost: string[];
+  usageSinceCost: Record<string, UsageSum>;
   /** A compaction whose summarising usage waits for the next `cost-state` row. */
-  openCompaction?: { summaryCallId: string; before?: JsonObject; calls: string[]; preTokens?: number };
+  openCompaction?: { summaryCallId: string; before?: JsonObject; logged: Record<string, UsageSum>; preTokens?: number };
 }
+
+/** The sum of the Usage counters of some Calls, by the names of `cost-state`'s counters. */
+export type UsageSum = Record<string, number>;
 
 export interface WireMessage {
   role: string;
@@ -100,6 +109,8 @@ export interface CallSpec {
 export interface Lane {
   key: string;
   sessionId: string;
+  /** Restored from a snapshot: the layout below is empty until it is rebuilt from the open runs. */
+  cold?: true;
   lastIndex?: number;
   lastCallId?: string;
   shapeKey?: string;
@@ -140,6 +151,7 @@ export function emptyState(): ParserState {
     calls: {},
     nextIndex: {},
     pending: {},
+    waiting: {},
     lanes: {},
     groupSizes: {},
     toolCalls: {},

@@ -151,6 +151,34 @@ describe("attributeCall", () => {
     expect(run({ usage: usage(50), fresh: [est(86), rest(10)] }).fresh.map((s) => s.tokens)).toEqual([50, 0]);
   });
 
+  test("marks the one other block after the previous reply as anchored: the exact change less the reply's output", () => {
+    const output = (tokens: number) => ({ estimate: { tokens, method: "output" as const } });
+    const rest = (tokens: number) => ({ estimate: { tokens, method: "rest" as const } });
+    const result = run({ usage: usage(205), kept: kept([100]), fresh: [output(86), rest(22)] });
+    expect(result.fresh).toEqual([
+      { tokens: 86, basis: "estimate", group: "c#0" },
+      { tokens: 19, basis: "anchored", group: "c#0" },
+    ]);
+    expect(result.issues).toEqual([]);
+  });
+
+  test("raises a block below its lower bound to the bound, takes the excess from the reply, and says so", () => {
+    const output = { estimate: { tokens: 112, method: "output" as const } };
+    const result = attributeCall({
+      id: "c",
+      usage: usage(216),
+      kept: kept([100]),
+      fresh: [output, { estimate: { tokens: 10, method: "rest" as const, min: 15 } }],
+    });
+    expect(result.fresh.map((s) => [s.tokens, s.basis])).toEqual([
+      [101, "estimate"],
+      [15, "anchored"],
+    ]);
+    expect(result.issues).toEqual([
+      { kind: "estimate-clamped", detail: "1 block raised to its lower bound (15 tokens instead of 4)" },
+    ]);
+  });
+
   test("marks the single block of a derived total as derived", () => {
     const derived = { ...usage(100), basis: "derived" as const };
     expect(run({ usage: derived, fresh: [est(30)] }).fresh).toEqual([{ tokens: 100, basis: "derived" }]);

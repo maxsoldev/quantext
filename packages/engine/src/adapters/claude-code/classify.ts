@@ -4,10 +4,11 @@
  */
 import type { Block, BlockKind, BlockSource, RequestSection } from "@quantext/shared";
 import type { Estimate, Estimator } from "../../core/estimate.ts";
-import { blockText, isDeferredSchema, toolReferences } from "../../providers/anthropic/content.ts";
+import { blockText, isDeferredSchema, KNOWN_CONTENT_TYPES, toolReferences } from "../../providers/anthropic/content.ts";
 import { sha256Sorted } from "./hash.ts";
 import type { Json, JsonObject } from "./json.ts";
 import { obj, str } from "./json.ts";
+import type { Content } from "./lookup.ts";
 import { get, put } from "./records.ts";
 import type { ParserState } from "./state.ts";
 
@@ -42,29 +43,20 @@ export interface Classifier {
 /** A Block seen for the first time, and the content block type the adapter does not know, if so. */
 export type BlockSink = (block: Block, unknownType: string | undefined) => void;
 
-const KNOWN_CONTENT = new Set([
-  "text",
-  "thinking",
-  "redacted_thinking",
-  "tool_use",
-  "tool_result",
-  "image",
-  "document",
-]);
 const AT_FILE_CALL =
   /^<system-reminder>\nCalled the (\S+) tool with the following input: (\{.*\})\n<\/system-reminder>/s;
 const AT_FILE_RESULT = /^<system-reminder>\nResult of calling the (\S+) tool:/;
 
-export function createClassifier(state: ParserState, sink: BlockSink, estimator: Estimator): Classifier {
+export function createClassifier(store: Content, sink: BlockSink, estimator: Estimator): Classifier {
   const messages = new Map<string, BlockRef[]>();
   const shapes = new Map<string, ShapeRefs>();
   const ref = (role: string, content: Json, contentIndex: number): BlockRef => {
     const hash = blockHash(role, content);
-    const fresh = get(state.seenBlocks, hash) === undefined;
-    const { kind, source, unknownType } = classify(role, obj(content) ?? {}, state, fresh);
+    const fresh = !store.seen(hash);
+    const { kind, source, unknownType } = classify(role, obj(content) ?? {}, store, fresh);
     const block: Block = { hash, kind, source, text: blockText(content), content };
     if (fresh) {
-      put(state.seenBlocks, hash, 1);
+      store.markSeen(hash);
       sink(block, unknownType);
     }
     const out: BlockRef = { hash, kind, contentIndex, estimate: estimator(block), references: toolReferences(content) };
@@ -76,7 +68,7 @@ export function createClassifier(state: ParserState, sink: BlockSink, estimator:
     message(hash) {
       const cached = messages.get(hash);
       if (cached !== undefined) return cached;
-      const message = get(state.messages, hash);
+      const message = store.message(hash);
       if (message === undefined) return undefined;
       const refs = message.content.map((content, i) => ref(message.role, content, i));
       messages.set(hash, refs);
@@ -85,7 +77,7 @@ export function createClassifier(state: ParserState, sink: BlockSink, estimator:
     shape(hash) {
       const cached = shapes.get(hash);
       if (cached !== undefined) return cached;
-      const shape = get(state.shapes, hash);
+      const shape = store.shape(hash);
       if (shape === undefined) return undefined;
       const refs: BlockRef[] = [];
       const sections: RequestSection[] = [];
@@ -123,10 +115,10 @@ interface Classified {
 }
 
 /** Kind and source of one content block. `fresh`: first seen, so it may update what later blocks refer to. */
-function classify(role: string, block: JsonObject, state: ParserState, fresh: boolean): Classified {
+function classify(role: string, block: JsonObject, store: Content, fresh: boolean): Classified {
   if (role === "tools") return { kind: "tool-schema", source: toolSource(str(block.name)) };
   const type = str(block.type) ?? "";
-  if (!KNOWN_CONTENT.has(type)) return { kind: roleKind(role), source: {}, unknownType: type };
+  if (!KNOWN_CONTENT_TYPES.has(type)) return { kind: roleKind(role), source: {}, unknownType: type };
   if (role === "system") return { kind: "system", source: {} };
   switch (type) {
     case "thinking":
@@ -134,19 +126,21 @@ function classify(role: string, block: JsonObject, state: ParserState, fresh: bo
       return { kind: "reasoning", source: {} };
     case "tool_use": {
       const source = toolSource(str(block.name), obj(block.input));
-      put(state.toolSources, str(block.id) ?? "", source);
+      store.putToolSource(str(block.id) ?? "", source);
       return { kind: "tool-call", source };
     }
     case "tool_result": {
       const id = str(block.tool_use_id) ?? "";
-      return { kind: "tool-result", source: get(state.toolCalls, id)?.source ?? get(state.toolSources, id) ?? {} };
+      return { kind: "tool-result", source: store.toolCall(id)?.source ?? store.toolSource(id) ?? {} };
     }
     case "image":
       return { kind: "image", source: {} };
     case "document":
       return { kind: "document", source: {} };
     default:
-      return role === "assistant" ? { kind: "assistant", source: {} } : userText(str(block.text) ?? "", state, fresh);
+      return role === "assistant"
+        ? { kind: "assistant", source: {} }
+        : userText(str(block.text) ?? "", store.state, fresh);
   }
 }
 
