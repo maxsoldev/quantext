@@ -187,6 +187,41 @@ describe("contextAt", () => {
     expect(blocks.filter((b) => b.section === "tools").every((b) => b.deferred === undefined)).toBe(true);
   });
 
+  test("lists the parts of a Block that holds several attached texts, with estimates that add up to its tokens", async () => {
+    const q = await query(["basic-tools"]);
+    const ctx = q.contextAt(key(q, 1), 0);
+    const merged = ctx?.blocks.find((b) => (b.parts?.length ?? 0) > 1);
+    expect(merged).toMatchObject({ kind: "system", category: "injected-context" });
+    expect(merged?.parts?.map((p) => p.label)).toEqual([
+      "Environment",
+      "Model",
+      "Deferred tools",
+      "Agent listing",
+      "Skill listing",
+      "Auto mode",
+      "Date",
+    ]);
+    const parts = merged?.parts ?? [];
+    expect(parts.reduce((n, p) => n + (p.tokens ?? 0), 0)).toBe(merged?.tokens);
+    expect(parts.every((p) => p.basis === "estimate")).toBe(true);
+    const skills = parts.find((p) => p.label === "Skill listing");
+    expect(skills).toMatchObject({ source: { attachment: "skill_listing" }, truncated: true });
+    expect(skills?.preview).toMatch(/^The following skills are available/);
+    expect(skills?.tokens).toBeGreaterThan((merged?.tokens ?? 0) / 2); // 6.3k of 9.6k characters
+    expect(ctx?.partTotals).toContainEqual({
+      category: "injected-context",
+      label: "Skill listing",
+      tokens: skills?.tokens,
+    });
+  });
+
+  test("gives a Block that one attached text is all of one part with the Block's own tokens and basis", async () => {
+    const q = await query(["basic-tools"]);
+    const ctx = q.contextAt(key(q, 1), 0);
+    const block = ctx?.blocks.find((b) => b.source.attachment === "session_context");
+    expect(block?.parts).toMatchObject([{ label: "Session context", tokens: block?.tokens, basis: block?.basis }]);
+  });
+
   test("is undefined for a Call or Session that does not exist", async () => {
     const q = await query(["image"]);
     expect(q.contextAt(key(q, 3), 99)).toBeUndefined();

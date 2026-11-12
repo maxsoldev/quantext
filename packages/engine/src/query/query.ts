@@ -6,6 +6,7 @@ import type {
   BlockDetail,
   BlockKind,
   BlockLifetime,
+  BlockPart,
   CacheBreak,
   CacheBreakReason,
   CallContext,
@@ -58,6 +59,7 @@ import {
 import { categoryOf, emptyCategories, isDeferred } from "./categories.ts";
 import type { LifetimeRow } from "./lifetimes.ts";
 import { lifetimes, PRICED_CALLS, PRICED_RUNS, pricedCall, pricedRun } from "./lifetimes.ts";
+import { contextParts, partTotals } from "./parts.ts";
 import { previewOf } from "./preview.ts";
 import { API_VERSION } from "./sql.ts";
 import { cacheBreaksSql, installViews, toolOutputsSql } from "./views.ts";
@@ -301,7 +303,7 @@ export function createQuery(options: QueryOptions): Query {
     return s;
   };
   /** The Blocks of one Call: one range lookup on the runs' key, with each Block's kind, source and content. */
-  const RUNS_AT = `SELECT r.*, b.kind, b.tool, b.file_path, b.mcp_server, b.skill, b.attachment, k.content
+  const RUNS_AT = `SELECT r.*, b.kind, b.tool, b.file_path, b.mcp_server, b.skill, b.attachment, b.parts, k.content
     FROM call_blocks r
     JOIN log_blocks b ON b.log = r.log AND b.hash = r.block_hash
     JOIN blocks k ON k.hash = r.block_hash
@@ -353,7 +355,8 @@ export function createQuery(options: QueryOptions): Query {
     const blocks: ContextBlock[] = runs.map((r) => {
       const run = runFromRow(r);
       const source = sourceOf(r);
-      const shown = previewOf(textOf(r.content), previewChars);
+      const text = textOf(r.content);
+      const shown = previewOf(text, previewChars);
       const b: ContextBlock = {
         position: run.position,
         section: run.section,
@@ -373,6 +376,10 @@ export function createQuery(options: QueryOptions): Query {
       if (run.tokens !== undefined) b.tokens = run.tokens;
       if (run.basis !== undefined) b.basis = run.basis;
       if (run.group !== undefined) b.group = run.group;
+      if (r.parts !== null && r.parts !== undefined) {
+        const parts = JSON.parse(String(r.parts)) as BlockPart[];
+        b.parts = contextParts(text, parts, run.tokens, run.basis, previewChars);
+      }
       return b;
     });
     if (rebuilt) {
@@ -417,6 +424,7 @@ export function createQuery(options: QueryOptions): Query {
       blocks,
       sections,
       categories,
+      partTotals: partTotals(blocks),
       totalTokens:
         u === undefined
           ? blocks.reduce((n, b) => n + (b.tokens ?? 0), 0)

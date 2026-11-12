@@ -190,6 +190,33 @@ export interface ContextBlock {
   truncated: boolean;
   /** The CallBlock run: the Calls (by index) this entry stays the same over; `lastCall` absent while open. */
   run?: { firstCall: number; lastCall?: number };
+  /** The attached texts the Block holds (Block parts), in order, when it holds any. */
+  parts?: ContextPart[];
+}
+
+/**
+ * One part of a Block's text, with its share of the Block's tokens: an estimate by characters, reconciled so the
+ * parts add up to the Block's tokens. A Block's only part has the Block's tokens and basis.
+ */
+export interface ContextPart {
+  label: string;
+  source: BlockSource;
+  /** Offsets in the Block's display text. */
+  start: number;
+  end: number;
+  /** Absent for a Call with no Usage. */
+  tokens?: number;
+  basis?: TokenBasis;
+  preview: string;
+  chars: number;
+  truncated: boolean;
+}
+
+/** The tokens of the parts with one label in one category: a part of that category's total. */
+export interface PartTotal {
+  category: ContextCategory;
+  label: string;
+  tokens: number;
 }
 
 export interface CallContext extends Meta {
@@ -202,6 +229,8 @@ export interface CallContext extends Meta {
   /** Tokens by request section, and the framing tokens. */
   sections: Record<RequestSection | "framing", number>;
   categories: Record<ContextCategory, number>;
+  /** Tokens by part label within each category, most first (estimates, except a Block's only part). */
+  partTotals: PartTotal[];
   /** The input total of the Call: the blocks and framing add up to it. */
   totalTokens: number;
 }
