@@ -79,16 +79,22 @@ export interface Call {
   /** Absent when the log holds no response for the request; then the Call has no exact total. */
   usage?: Usage;
   cost?: Cost;
+  /**
+   * Input tokens that belong to no Block: the end of the request after its last Block, known exactly when the last
+   * Block carries the last cache breakpoint. The CallBlocks' tokens plus these add up to the input total.
+   */
+  framingTokens: number;
   /** What is wrong with this Call's data. Empty when its request is complete and its numbers reconcile. */
   issues: CallIssue[];
 }
 
 /**
  * A flag on a Call. `unresolved-request`: part of the request is not in the log, so the rebuilt input is
- * incomplete.
+ * incomplete. `no-usage`: the log holds no Usage, so the Call has no exact total. `unreconciled-tokens`: the exact
+ * change from the previous Call does not fit the new Blocks, so the whole total is split by estimate.
  */
 export interface CallIssue {
-  kind: "unresolved-request";
+  kind: "unresolved-request" | "no-usage" | "unreconciled-tokens";
   detail: string;
 }
 
@@ -144,6 +150,11 @@ export interface CallBlock {
   message?: number;
   /** The Block carries a cache breakpoint. */
   cacheBreakpoint: boolean;
+  /** The Block's share of the Call's input total; absent when the Call has no Usage. */
+  tokens?: number;
+  basis?: TokenBasis;
+  /** Inside the Cached prefix: the part of the input the provider read from its cache. */
+  inCachedPrefix: boolean;
 }
 
 /** Input that the adapter could not map, counted so that nothing is dropped in silence. */

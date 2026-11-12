@@ -90,6 +90,11 @@ running total, when a Call's own Usage is not logged) or `estimate` (from an est
 or derived total).
 _Avoid_: precision, confidence, source
 
+**Framing tokens**:
+Input tokens of a Call that belong to no Block: the end of the request after its last Block. A Call's CallBlocks
+and its framing tokens add up to its input total.
+_Avoid_: overhead, padding
+
 **Lifetime cost**:
 What one Block costs over all the Calls it appears in, in tokens or money.
 _Avoid_: total cost, cumulative tokens

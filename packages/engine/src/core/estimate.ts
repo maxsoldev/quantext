@@ -11,6 +11,9 @@ import type { Block, JsonValue } from "@quantext/shared";
  */
 export const CHARS_PER_TOKEN = 3.3;
 
+/** Tokens of structure around each content block (role and block markers), so that small blocks get a share. */
+export const BLOCK_OVERHEAD_TOKENS = 5;
+
 /** Image tokens are width x height / 750, after the image is scaled to at most 1568 pixels on its long edge. */
 const IMAGE_PIXELS_PER_TOKEN = 750;
 const IMAGE_MAX_EDGE = 1568;
@@ -47,8 +50,8 @@ function estimateContent(content: JsonValue): Estimate {
   if (parts.some((part) => part.method === "unknown")) return { tokens: 0, method: "unknown" };
   const chars = parts.reduce((sum, part) => sum + part.chars, 0);
   const imageTokens = parts.reduce((sum, part) => sum + part.imageTokens, 0);
-  const tokens = Math.ceil(chars / CHARS_PER_TOKEN) + imageTokens;
-  return { tokens, method: imageTokens > 0 && chars === 0 ? "image" : "chars" };
+  const tokens = Math.ceil(chars / CHARS_PER_TOKEN) + imageTokens + BLOCK_OVERHEAD_TOKENS;
+  return { tokens, method: imageTokens > 0 ? "image" : "chars" };
 }
 
 interface Part {
@@ -70,11 +73,16 @@ function partsOf(content: JsonValue): Part[] {
     case "redacted_thinking":
       return [chars(0)];
     case "tool_use":
-      return [chars(String(block.name ?? "").length + JSON.stringify(block.input ?? null).length)];
+      return [
+        chars(
+          String(block.id ?? "").length + String(block.name ?? "").length + JSON.stringify(block.input ?? null).length,
+        ),
+      ];
     case "tool_result": {
+      const id = chars(String(block.tool_use_id ?? "").length);
       const inner = block.content;
-      if (typeof inner === "string") return [chars(inner.length)];
-      return Array.isArray(inner) ? inner.flatMap(partsOf) : [chars(0)];
+      if (typeof inner === "string") return [id, chars(inner.length)];
+      return Array.isArray(inner) ? [id, ...inner.flatMap(partsOf)] : [id];
     }
     case "tool_reference":
       return [chars(String(block.tool_name ?? "").length)];

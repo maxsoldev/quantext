@@ -1,6 +1,12 @@
 import type { Block } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
-import { CHARS_PER_TOKEN, estimateBlock, estimateRequest, imageSize } from "../../src/core/estimate.ts";
+import {
+  BLOCK_OVERHEAD_TOKENS,
+  CHARS_PER_TOKEN,
+  estimateBlock,
+  estimateRequest,
+  imageSize,
+} from "../../src/core/estimate.ts";
 
 const block = (kind: Block["kind"], content: Block["content"]): Block => ({ hash: kind, kind, source: {}, content });
 
@@ -47,30 +53,43 @@ describe("imageSize", () => {
 });
 
 describe("estimateBlock", () => {
-  test("estimates text by characters", () => {
+  test("estimates text by characters, plus the overhead of a block", () => {
     const text = "x".repeat(330);
     expect(estimateBlock(block("user", { type: "text", text }))).toEqual({
-      tokens: Math.ceil(330 / CHARS_PER_TOKEN),
+      tokens: Math.ceil(330 / CHARS_PER_TOKEN) + BLOCK_OVERHEAD_TOKENS,
       method: "chars",
     });
   });
 
+  test("counts the tool use id of a tool call and of a tool result", () => {
+    const use = { type: "tool_use", id: "x".repeat(33), name: "", input: "" };
+    const result = { type: "tool_result", tool_use_id: "x".repeat(33), content: "" };
+    const expected = Math.ceil(35 / CHARS_PER_TOKEN) + BLOCK_OVERHEAD_TOKENS; // id + the JSON '""' of the input
+    expect(estimateBlock(block("tool-call", use)).tokens).toBe(expected);
+    expect(estimateBlock(block("tool-result", result)).tokens).toBe(
+      Math.ceil(33 / CHARS_PER_TOKEN) + BLOCK_OVERHEAD_TOKENS,
+    );
+  });
+
   test("estimates an image by width x height / 750 from its header, not by its base64 length", () => {
     const image = { type: "image", source: { type: "base64", media_type: "image/png", data: PNG_96x64 } };
-    expect(estimateBlock(block("image", image))).toEqual({ tokens: Math.ceil((96 * 64) / 750), method: "image" });
+    expect(estimateBlock(block("image", image))).toEqual({
+      tokens: Math.ceil((96 * 64) / 750) + BLOCK_OVERHEAD_TOKENS,
+      method: "image",
+    });
   });
 
   test("scales a large image down to 1568 pixels on the long edge first", () => {
     const big = btoa("GIF89a\x40\x1f\xa0\x0f"); // 8000 x 4000
     const image = { type: "image", source: { type: "base64", media_type: "image/gif", data: big } };
-    expect(estimateBlock(block("image", image)).tokens).toBe(Math.ceil((1568 * 784) / 750));
+    expect(estimateBlock(block("image", image)).tokens).toBe(Math.ceil((1568 * 784) / 750) + BLOCK_OVERHEAD_TOKENS);
   });
 
   test("estimates an image inside a tool result by its header too", () => {
     const image = { type: "image", source: { type: "base64", media_type: "image/png", data: PNG_96x64 } };
-    const result = { type: "tool_result", tool_use_id: "t", content: [image] };
+    const result = { type: "tool_result", tool_use_id: "", content: [image] };
     expect(estimateBlock(block("tool-result", result))).toEqual({
-      tokens: Math.ceil((96 * 64) / 750),
+      tokens: Math.ceil((96 * 64) / 750) + BLOCK_OVERHEAD_TOKENS,
       method: "image",
     });
   });
