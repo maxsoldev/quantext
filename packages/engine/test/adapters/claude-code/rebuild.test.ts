@@ -29,9 +29,11 @@ describe.each(scenarios())("rebuild of $version/$name", ({ name }) => {
     },
   );
 
-  test("no Call has an issue", () => {
+  test("no logged Call has an issue", () => {
     const graph = parseClaudeCodeSession(transcriptsOf(name));
-    expect(graph.calls.filter((call) => call.issues.length > 0)).toEqual([]);
+    const logged = graph.calls.filter((call) => call.usage?.basis === "exact");
+    expect(logged).toHaveLength(graph.calls.length - graph.compactions.length);
+    expect(logged.filter((call) => call.issues.length > 0)).toEqual([]);
   });
 });
 

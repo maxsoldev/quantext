@@ -178,6 +178,20 @@ export interface ToolCall {
   childSessionId?: string;
 }
 
+/** An event where the harness replaced most of a Session's context with a shorter summary. */
+export interface Compaction {
+  id: string;
+  sessionId: string;
+  ts: string;
+  /** What started it, in the harness's words (for example `manual` or `auto`). */
+  trigger: string;
+  /** The context size before and after, as the harness reports it. */
+  beforeTokens?: number;
+  afterTokens?: number;
+  /** The Call that wrote the summary, when its usage could be derived. */
+  summaryCallId?: string;
+}
+
 /** Input that the adapter could not map, counted so that nothing is dropped in silence. */
 export interface IngestReport {
   /** Unknown record kinds, by the harness's own name, with their counts. */
@@ -193,5 +207,6 @@ export interface SessionGraph {
   blocks: Block[];
   callBlocks: CallBlock[];
   toolCalls: ToolCall[];
+  compactions: Compaction[];
   report: IngestReport;
 }

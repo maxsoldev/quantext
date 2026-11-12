@@ -1,9 +1,11 @@
 /** The Claude Code adapter: turn the JSONL transcripts of one session into the domain model. */
-import type { Block, IngestReport, SessionGraph } from "@quantext/shared";
+import type { Block, Call, IngestReport, SessionGraph } from "@quantext/shared";
 import type { Estimator } from "../../core/estimate.ts";
 import { attributeSession } from "./attribution.ts";
 import { splitRequest } from "./blocks.ts";
 import { callsOf } from "./calls.ts";
+import type { SummaryCall } from "./compaction.ts";
+import { compactionsOf } from "./compaction.ts";
 import { obj, str } from "./json.ts";
 import type { ContentNotes } from "./notes.ts";
 import { contentNotes } from "./notes.ts";
@@ -57,6 +59,7 @@ export function parseClaudeCodeSession(input: ClaudeCodeTranscripts, options: Pa
     graph.calls.push(...child.calls);
     graph.callBlocks.push(...child.callBlocks);
     graph.toolCalls.push(...child.toolCalls);
+    graph.compactions.push(...child.compactions);
   }
   return { ...graph, blocks: [...context.blocks.values()], report };
 }
@@ -76,9 +79,12 @@ function readSession(
   context: Context,
   estimator?: Estimator,
 ): Omit<SessionGraph, "blocks" | "report"> {
-  const calls = callsOf(rows, id, context.requests);
+  const logged = callsOf(rows, id, context.requests);
+  const { compactions, summaries } = compactionsOf(rows, id, logged, context.requests);
+  const calls = inLogOrder(rows, logged, summaries);
+  const summaryRequests = new Map(summaries.flatMap((s) => (s.request ? [[s.call.id, s.request] as const] : [])));
   const split = calls.map((call) => {
-    const request = context.requests.get(call.id);
+    const request = summaryRequests.get(call.id) ?? context.requests.get(call.id);
     const entries = request === undefined ? [] : splitRequest(request, context.notes);
     for (const { block, unknownType } of entries) {
       if (context.blocks.has(block.hash)) continue;
@@ -89,7 +95,21 @@ function readSession(
   });
   const callBlocks = attributeSession(split, estimator);
   const toolCalls = toolCallsOf(rows, id, new Set(context.blocks.keys()));
-  return { sessions: [sessionOf(rows, id)], calls, callBlocks, toolCalls };
+  return { sessions: [sessionOf(rows, id)], calls, callBlocks, toolCalls, compactions };
+}
+
+/** Logged Calls and summarising Calls in the order of their rows, numbered from 0. */
+function inLogOrder(rows: readonly Row[], logged: readonly Call[], summaries: readonly SummaryCall[]): Call[] {
+  const at = new Map<string, number>();
+  rows.forEach((row, i) => {
+    if (row.type === "api-request") at.set(str(row.data.id) ?? row.at, i);
+  });
+  for (const summary of summaries) at.set(summary.call.id, summary.at);
+  const calls = [...logged, ...summaries.map((s) => s.call)].sort((a, b) => (at.get(a.id) ?? 0) - (at.get(b.id) ?? 0));
+  calls.forEach((call, index) => {
+    call.index = index;
+  });
+  return calls;
 }
 
 function agentIdOf(rows: readonly Row[]): string {

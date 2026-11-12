@@ -111,7 +111,7 @@ describe("block kinds and sources", () => {
 
   test("a compaction summary is a summary block", () => {
     const compaction = parseClaudeCodeSession(transcriptsOf("compaction"));
-    const after = blocksOfCall(compaction, 3);
+    const after = blocksOfCall(compaction, 4);
     expect(after.filter((b) => b.kind === "summary")).toHaveLength(1);
   });
 

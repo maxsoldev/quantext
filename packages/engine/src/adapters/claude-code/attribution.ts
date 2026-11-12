@@ -22,9 +22,9 @@ export function attributeSession(calls: readonly SplitCall[], estimator?: Estima
   const inputs: AttributionCall[] = [];
   const lastByModel = new Map<string, string>();
   for (const { call, request, entries } of calls) {
-    const previousId = request?.baseId ?? lastByModel.get(call.model);
-    lastByModel.set(call.model, call.id);
     if (request === undefined || request.missing.length > 0) continue;
+    const previousId = request.baseId ?? lastByModel.get(call.model);
+    lastByModel.set(call.model, call.id);
     const estimates = estimateRequest(
       entries.map((e) => e.block),
       estimator,
