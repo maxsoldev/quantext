@@ -2,7 +2,14 @@
  * What changed at Call N against the Call before it, as two strips on one token scale: each Block of the previous
  * Call (kept or removed) and of this Call (kept, moved or added), with the end of each Call's cached prefix.
  */
-import type { CallContext, ContextBlock, ContextCategory, ContextDiff } from "@quantext/shared";
+import type {
+  CacheBreak,
+  CacheBreakReason,
+  CallContext,
+  ContextBlock,
+  ContextCategory,
+  ContextDiff,
+} from "@quantext/shared";
 
 export type ChangeStatus = "kept" | "added" | "removed" | "moved";
 
@@ -104,4 +111,19 @@ function percentOf(n: number, scale: number): number {
 
 function total(blocks: readonly ContextBlock[]): ChangeTotal {
   return { blocks: blocks.length, tokens: blocks.reduce((n, b) => n + (b.tokens ?? 0), 0) };
+}
+
+/** A lane's cache breaks by reason (most first), and the breaks just before and after Call `call`. */
+export function breakSummary(
+  breaks: readonly CacheBreak[],
+  call: number,
+): { counts: [CacheBreakReason, number][]; previous?: CacheBreak | undefined; next?: CacheBreak | undefined } {
+  const counts = new Map<CacheBreakReason, number>();
+  for (const b of breaks) counts.set(b.reason, (counts.get(b.reason) ?? 0) + 1);
+  const sorted = [...breaks].sort((a, b) => a.index - b.index);
+  return {
+    counts: [...counts].sort((a, b) => b[1] - a[1]),
+    previous: sorted.filter((b) => b.index < call).at(-1),
+    next: sorted.find((b) => b.index > call),
+  };
 }

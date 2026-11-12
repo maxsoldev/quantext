@@ -13,8 +13,14 @@ test("a Session that grows updates in the list, and two tabs share one event str
     const status = (await (await first.request.get(`${engine.url}/api/v1/status`)).json()) as { streams: number };
     expect(status.streams).toBe(1);
     const before = Number(await first.getByTestId("calls").first().textContent());
+    const reads: string[] = [];
+    first.on("request", (r) => {
+      if (r.url().includes("/api/v1/sessions?")) reads.push(r.url());
+    });
     appendRest(engine, "basic-tools", half);
     for (const page of [first, second]) await expect(page.getByTestId("calls").first()).not.toHaveText(String(before));
+    // The list reads only what changed since its cursor, not all of its pages again.
+    expect(reads.some((u) => u.includes("changedSince="))).toBe(true);
   } finally {
     await engine.stop();
   }

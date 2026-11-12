@@ -58,6 +58,11 @@ describe("a tool call's input in a few words", () => {
     expect(inputSummary("Agent", { description: "Find add", prompt: "long…" })).toBe("Find add");
   });
 
+  test("a path inside the session's folder is shown relative to it", () => {
+    expect(inputSummary("Read", { file_path: "/repo/src/a.ts" }, "/repo")).toBe("src/a.ts");
+    expect(inputSummary("Read", { file_path: "/repository/a.ts" }, "/repo")).toBe("/repository/a.ts");
+  });
+
   test("any other input as short JSON", () => {
     expect(inputSummary("mcp__x__y", { q: "a" })).toBe('{"q":"a"}');
   });

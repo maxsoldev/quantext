@@ -170,6 +170,18 @@ const Layers = memo(function Layers({
         cls={(k) => (k === "unrebuilt" ? "cat-unrebuilt" : `cat-${k}`)}
       />
       <Marks stack={bottom} y={yBottom} band={band} xOf={xOf} cls={(k) => `cache-${k}`} />
+      {view.calls.map((c, p) =>
+        c.usage ? null : (
+          <rect
+            key={`n${c.index}`}
+            className="no-usage"
+            x={xOf(p) + (band.mode === "columns" ? (band.step - band.width) / 2 : 0)}
+            y={M.top}
+            width={Math.max(1, band.width)}
+            height={TOP_H + RAIL_H + BOTTOM_H}
+          />
+        ),
+      )}
       <text className="panel-label" x={M.left} y={M.top - 12}>
         What the context holds
       </text>
@@ -351,6 +363,7 @@ function CallTip({ call, x, width }: { call: TimelineCall; x: number; width: num
         <span className="muted">{when(call.ts)}</span>
       </div>
       <div className="chart-tip-total">
+        {!call.usage && <b>No usage in the log: its tokens and cost are unknown. </b>}
         <b className="num">{tokens(total)}</b> input tokens{call.usage?.basis === "derived" ? " (Δ derived)" : ""}
         {call.cost && <span className="muted">, {usd(call.cost.totalUsd)}</span>}
       </div>

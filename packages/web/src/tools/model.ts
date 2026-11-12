@@ -31,7 +31,7 @@ const obj = (v: JsonValue): Record<string, JsonValue> =>
 const str = (v: JsonValue | undefined): string | undefined => (typeof v === "string" ? v : undefined);
 
 /** The input as people read it: the command, the file, the pattern or the task; else short JSON. */
-export function inputSummary(name: string, input: JsonValue): string {
+export function inputSummary(name: string, input: JsonValue, cwd?: string): string {
   const i = obj(input);
   const pick =
     str(i.command) ??
@@ -42,7 +42,8 @@ export function inputSummary(name: string, input: JsonValue): string {
     str(i.query) ??
     (name === "Agent" || name === "Task" ? str(i.description) : undefined) ??
     str(i.skill);
-  return pick ?? JSON.stringify(input).slice(0, 200);
+  if (pick === undefined) return JSON.stringify(input).slice(0, 200);
+  return cwd && pick.startsWith(`${cwd}/`) ? pick.slice(cwd.length + 1) : pick;
 }
 
 export interface DiffLine {

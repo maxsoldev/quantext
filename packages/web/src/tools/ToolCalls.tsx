@@ -109,11 +109,12 @@ export function ToolCalls({
               </button>
             ))}
           </fieldset>
-          <ToolTable rows={rows} maxCost={maxCost} onOpen={setOpen} selected={open?.call.id} />
+          <ToolTable rows={rows} maxCost={maxCost} onOpen={setOpen} selected={open?.call.id} cwd={session.cwd} />
         </>
       )}
       {open && (
         <ToolPanel
+          cwd={session.cwd}
           row={open}
           route={route}
           child={subagents.find((s) => s.id === open.call.childSessionId)}
@@ -129,7 +130,9 @@ function ToolTable({
   maxCost,
   onOpen,
   selected,
+  cwd,
 }: {
+  cwd: string | undefined;
   rows: ToolRow[];
   maxCost: number;
   onOpen: (r: ToolRow) => void;
@@ -168,6 +171,7 @@ function ToolTable({
         <tr className="spacer" style={{ height: w.before }} />
         {rows.slice(w.start, w.end).map((r, i) => (
           <ToolRowView
+            cwd={cwd}
             key={r.call.id}
             r={r}
             index={w.start + i}
@@ -183,12 +187,14 @@ function ToolTable({
 }
 
 function ToolRowView({
+  cwd,
   r,
   index,
   maxCost,
   selected,
   onOpen,
 }: {
+  cwd: string | undefined;
   r: ToolRow;
   index: number;
   maxCost: number;
@@ -206,12 +212,12 @@ function ToolRowView({
           type="button"
           className="tool-main"
           onClick={onOpen}
-          aria-label={`Open the tool call: ${c.name}, ${inputSummary(c.name, c.input)}`}
+          aria-label={`Open the tool call: ${c.name}, ${inputSummary(c.name, c.input, cwd)}`}
         >
           <span className="tool-name">{c.name}</span>
           {c.isError && <span className="tag error-tag">Error</span>}
           {c.childSessionId && <span className="tag">Subagent</span>}
-          <span className="tool-input content">{inputSummary(c.name, c.input)}</span>
+          <span className="tool-input content">{inputSummary(c.name, c.input, cwd)}</span>
         </button>
       </td>
       <td className="right">
@@ -266,11 +272,13 @@ function lifetimeTip(l: NonNullable<ToolRow["lifetime"]>): string {
 }
 
 function ToolPanel({
+  cwd,
   row,
   route,
   child,
   onClose,
 }: {
+  cwd: string | undefined;
   row: ToolRow;
   route: SessionRoute;
   child: SessionSummary | undefined;
@@ -297,7 +305,7 @@ function ToolPanel({
       <div className="block-panel-head">
         <div>
           <h3 id="tool-title">{c.name}</h3>
-          <p className="content tool-what">{inputSummary(c.name, c.input)}</p>
+          <p className="content tool-what">{inputSummary(c.name, c.input, cwd)}</p>
           <p className="muted">
             Called in call {c.callIndex ?? "unknown"}
             {c.durationMs !== undefined && `, ran ${duration(c.durationMs)}`}

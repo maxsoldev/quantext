@@ -34,7 +34,7 @@ describe("a compaction, before and after", () => {
     kept: group({ "tool-definitions": 500, "base-instructions": 100 }),
     summaryTokens: 50,
   });
-  const v = compactionView(c, 700) as CompactionView;
+  const v = compactionView(c, { total: 700 }) as CompactionView;
 
   test("before: what was kept, then what was removed, by category, in request order", () => {
     expect(v.before.map((s) => [s.part, s.category, s.tokens])).toEqual([
@@ -63,7 +63,21 @@ describe("a compaction, before and after", () => {
     expect(v.figures).toEqual({ before: 1000, removed: 400, kept: 600, summary: 50, after: 700, freed: 0.3 });
   });
 
+  test("with the next call's own counts, after is drawn from them, the summary marked", () => {
+    const after = {
+      total: 650,
+      categories: group({ "tool-definitions": 500, "compaction-summary": 60, user: 90 }).categories,
+    };
+    const w = compactionView(c, after) as CompactionView;
+    expect(w.after.map((s) => [s.part, s.category, s.tokens])).toEqual([
+      ["after", "tool-definitions", 500],
+      ["after", "user", 90],
+      ["summary", "compaction-summary", 60],
+    ]);
+    expect(w.figures.summary).toBe(60);
+  });
+
   test("without block counts (no request log) there is nothing to draw", () => {
-    expect(compactionView(compaction({ beforeTokens: 9000 }), undefined)).toBeUndefined();
+    expect(compactionView(compaction({ beforeTokens: 9000 }), {})).toBeUndefined();
   });
 });

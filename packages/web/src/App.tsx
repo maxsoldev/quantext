@@ -6,6 +6,7 @@ import { SessionPage } from "./pages/SessionPage.tsx";
 import { GlossaryPanel } from "./teach/GlossaryPanel.tsx";
 import { KeysHelp } from "./teach/KeysHelp.tsx";
 import { overlay, useOverlay } from "./teach/panel.ts";
+import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
 import { LiveStatus } from "./ui/LiveStatus.tsx";
 import { Tooltip } from "./ui/Tooltip.tsx";
 import type { Theme } from "./ui/theme.ts";
@@ -65,17 +66,19 @@ export function App() {
         </div>
       </header>
       <main className="page" id="main">
-        {route.page === "sessions" && <SessionList route={route} />}
-        {route.page === "session" && <SessionPage key={`${route.key.log}/${route.key.id}`} route={route} />}
-        {route.page === "memory" && <MemoryPage route={route} />}
-        {route.page === "not-found" && (
-          <section className="empty">
-            <h1>No page at this address</h1>
-            <p>
-              <Link to={{ page: "sessions" }}>Open the session list</Link>
-            </p>
-          </section>
-        )}
+        <ErrorBoundary key={location.pathname}>
+          {route.page === "sessions" && <SessionList route={route} />}
+          {route.page === "session" && <SessionPage key={`${route.key.log}/${route.key.id}`} route={route} />}
+          {route.page === "memory" && <MemoryPage route={route} />}
+          {route.page === "not-found" && (
+            <section className="empty">
+              <h1>No page at this address</h1>
+              <p>
+                <Link to={{ page: "sessions" }}>Open the session list</Link>
+              </p>
+            </section>
+          )}
+        </ErrorBoundary>
       </main>
       {shown.kind === "glossary" && <GlossaryPanel term={shown.term} />}
       {shown.kind === "keys" && <KeysHelp />}

@@ -9,13 +9,13 @@ import { BlockPanel } from "../context/BlockPanel.tsx";
 import { CATEGORY_LABEL } from "../context/categories.ts";
 import { KIND_LABEL } from "../context/kinds.ts";
 import { sourceLabel } from "../context/model.ts";
-import { duration, shortModel, tokens } from "../format/format.ts";
+import { count, duration, shortModel, tokens } from "../format/format.ts";
 import { BREAK_REASONS } from "../teach/cacheBreaks.ts";
 import { Term } from "../teach/Term.tsx";
 import { Tokens } from "../ui/Num.tsx";
 import type { Load } from "../ui/useLoad.ts";
 import type { ChangeStatus, DiffView, Strip } from "./model.ts";
-import { diffView } from "./model.ts";
+import { breakSummary, diffView } from "./model.ts";
 
 const STATUS_LABEL: Record<ChangeStatus, string> = {
   kept: "Unchanged",
@@ -78,27 +78,38 @@ export function DiffCard({
       {d && view && !here && <Lede d={d} view={view} ctx={ctx} />}
       {d && view && d.previous !== undefined && <Strips d={d} view={view} />}
       {d && view && <Changes d={d} onOpen={setOpen} />}
-      {breaks.length > 0 && (
-        <p className="diff-breaks">
-          <Term id="cache-break">Cache breaks</Term> in this lane:{" "}
-          {breaks.map((b, i) => (
-            <span key={b.index}>
-              {i > 0 && ", "}
-              <button
-                type="button"
-                className="link"
-                aria-current={b.index === d?.call ? "true" : undefined}
-                onClick={() => onGoTo(b.index)}
-              >
-                call {b.index}
-              </button>{" "}
-              ({BREAK_REASONS[b.reason].title.toLowerCase()})
-            </span>
-          ))}
-        </p>
-      )}
+      {breaks.length > 0 && <BreakNav breaks={breaks} call={d?.call ?? ctx?.call.index ?? 0} onGoTo={onGoTo} />}
       {open && <BlockPanel log={sessionKey.log} block={open.block} call={open.call} onClose={() => setOpen(null)} />}
     </section>
+  );
+}
+
+function BreakNav({
+  breaks,
+  call,
+  onGoTo,
+}: {
+  breaks: readonly CacheBreak[];
+  call: number;
+  onGoTo: (call: number) => void;
+}) {
+  const s = breakSummary(breaks, call);
+  return (
+    <p className="diff-breaks" data-testid="break-nav">
+      <Term id="cache-break">{count(breaks.length, "cache break")}</Term> in this lane:{" "}
+      {s.counts.map(([reason, n]) => `${n} ${BREAK_REASONS[reason].title.toLowerCase()}`).join(", ")}.{" "}
+      {s.previous && (
+        <button type="button" className="link" onClick={() => onGoTo((s.previous as CacheBreak).index)}>
+          Previous: call {s.previous.index}
+        </button>
+      )}
+      {s.previous && s.next && " "}
+      {s.next && (
+        <button type="button" className="link" onClick={() => onGoTo((s.next as CacheBreak).index)}>
+          Next: call {s.next.index}
+        </button>
+      )}
+    </p>
   );
 }
 
@@ -210,7 +221,10 @@ function StripRow({ label, strip, testId }: { label: string; strip: Strip; testI
         ))}
         {strip.cachedTo > 0 && <span className="diff-cached" style={{ left: `${strip.cachedTo}%` }} />}
         {strip.firstChange !== undefined && (
-          <span className="diff-first" style={{ left: `${strip.firstChange}%` }}>
+          <span
+            className={strip.firstChange > 80 ? "diff-first flip" : "diff-first"}
+            style={{ left: `${strip.firstChange}%` }}
+          >
             <span>first change</span>
           </span>
         )}
