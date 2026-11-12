@@ -22,7 +22,7 @@ import { reasoningShown } from "../../providers/anthropic/content.ts";
 import { estimateBlock } from "../../providers/anthropic/estimate.ts";
 import { canonicalModel, MAX_CONTEXT_WINDOW } from "../../providers/anthropic/pricing.ts";
 import type { Attached } from "./attached.ts";
-import { holds, remember } from "./attached.ts";
+import { holds, OFTEN_UNSENT, remember } from "./attached.ts";
 import { Changes } from "./changes.ts";
 import type { Classifier } from "./classify.ts";
 import { blockHash, createClassifier, textHash, toolSource } from "./classify.ts";
@@ -320,7 +320,9 @@ class Rows {
 
   /**
    * The attached texts of this transcript that no request checked yet must be in a message of this request; one
-   * that is in none gets an issue on the Call, and is not looked for again. With a message missing, none is blamed.
+   * that is in none gets an issue on the Call, and is not looked for again. With a message missing, none is blamed;
+   * nor is one that a newer attachment of its type replaced before the request (the harness sends the newest).
+   * A type the harness often logs without sending it is counted in the report instead.
    */
   private locateAttached(call: Call, spec: CallSpec, missing: boolean): void {
     const open = this.state.attached.filter((a) => a.transcript === this.name && a.checked === undefined);
@@ -332,9 +334,13 @@ class Rows {
     const texts = spec.tail.flatMap((hash) =>
       (resolve(this.store, this.t, hash)?.content ?? []).flatMap((c) => str(obj(c)?.text) ?? []),
     );
+    const newest = new Map(open.map((a) => [a.type, a]));
     for (const a of open) {
-      if (texts.some((t) => holds(t, a))) a.checked = 1;
-      else {
+      if (texts.some((t) => holds(t, a)) || newest.get(a.type) !== a) a.checked = 1;
+      else if (OFTEN_UNSENT.has(a.type)) {
+        countIgnored(this.changes().report, `attachment ${a.type} (not sent)`);
+        this.state.attached = this.state.attached.filter((x) => x !== a);
+      } else {
         call.issues.push({
           kind: "unlocated-attachment",
           detail: `the ${a.type} attachment is in no message of the request`,

@@ -16,6 +16,9 @@ export interface Attached {
   checked?: 1;
 }
 
+/** Attachment types that Claude Code logs before a request but often does not send in it (seen on real logs). */
+export const OFTEN_UNSENT: ReadonlySet<string> = new Set(["total_tokens_reminder"]);
+
 const WRAPPED = /^<system-reminder>\n([\s\S]*)\n<\/system-reminder>$/;
 
 /** The forms in which an attached text can be sent: as logged, then without its wrapper. */

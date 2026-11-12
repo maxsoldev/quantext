@@ -29,7 +29,10 @@ seen as such.
   source, as before, now with one part. The label ("Skill listing", "Deferred tools", …) comes from the adapter,
   so no layer above it knows Claude Code's attachment names.
 - **An attached text that no message of the next request holds** gets an `unlocated-attachment` issue on that
-  Call. A Call with a missing message blames none.
+  Call. A Call with a missing message blames none; nor is an attachment flagged that a newer one of its type
+  replaced before the request (the harness sends the newest). Claude Code logs many `total_tokens_reminder` rows
+  that it never sends (their text is in no message of the log): those are counted in the ingest report as
+  ignored (`attachment total_tokens_reminder (not sent)`), not flagged on each Call.
 - The parser keeps the attached texts in its snapshot, newest last, at most 64 and 256 KiB of characters: the
   same text may be sent again in a later Block.
 
@@ -42,3 +45,5 @@ cached prefix and cache breakpoints off content-block boundaries.
 - `ADAPTER_VERSION` 9: stored logs are read again. Parser state version 5.
 - The context of a Call lists each Block's parts with estimated tokens; the category totals do not change.
 - A text that a user types and that is equal to an attached text would be labelled as that attachment.
+- On a real corpus (about 29k Calls), 107 Calls in 30 logs keep an `unlocated-attachment` issue. Harness notices
+  that come from no attachment row stay unlabelled reminders.

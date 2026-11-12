@@ -86,3 +86,30 @@ describe("an attachment whose text is in no request", () => {
     });
   });
 });
+
+test("an attachment that a newer one of its type replaces before the request is not flagged", () => {
+  const rows = mainRows("basic-tools");
+  const at = rows.findIndex((r) => r.type === "attachment" && (r.attachment as { type?: string }).type === "date");
+  const date = rows[at] as Record<string, unknown>;
+  const older = {
+    ...date,
+    rendered: [{ content: "<system-reminder>\nToday's date is 2026-11-11.\n</system-reminder>" }],
+  };
+  const main = [...rows.slice(0, at), older, ...rows.slice(at)].map((r) => JSON.stringify(r)).join("\n");
+  const graph = parseClaudeCodeSession({ main: `${main}\n`, subagents: [] });
+  expect(graph.calls.flatMap((c) => c.issues).filter((i) => i.kind === "unlocated-attachment")).toEqual([]);
+});
+
+test("a token reminder the harness logged but did not send is counted in the report, not flagged on the call", () => {
+  const rows = mainRows("basic-tools");
+  const at = rows.findIndex((r) => r.type === "attachment" && (r.attachment as { type?: string }).type === "date");
+  const reminder = {
+    ...(rows[at] as Record<string, unknown>),
+    attachment: { type: "total_tokens_reminder" },
+    rendered: [{ content: "<system-reminder>\nA count the request does not hold.\n</system-reminder>" }],
+  };
+  const main = [...rows.slice(0, at), reminder, ...rows.slice(at)].map((r) => JSON.stringify(r)).join("\n");
+  const graph = parseClaudeCodeSession({ main: `${main}\n`, subagents: [] });
+  expect(graph.calls.flatMap((c) => c.issues).filter((i) => i.kind === "unlocated-attachment")).toEqual([]);
+  expect(graph.report.ignoredRecords).toContainEqual({ kind: "attachment total_tokens_reminder (not sent)", count: 1 });
+});
