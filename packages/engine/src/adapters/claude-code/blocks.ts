@@ -41,11 +41,13 @@ export function splitRequest(request: WireRequest, notes: ContentNotes): Request
     out.push(entry);
   };
   const context: Context = { notes, toolUses: new Map(), lastFileCall: undefined };
-  request.shape?.tools.forEach((tool, i) => push("tools", tool, "tools", `tools.${i}`));
-  request.shape?.system.forEach((block, i) => push("system", block, "system", `system.${i}`));
-  request.messages.forEach((message, m) => {
-    message.content.forEach((block, b) => push(message.role, block, "messages", `messages.${m}.content.${b}`, m));
-  });
+  for (const [i, tool] of (request.shape?.tools ?? []).entries()) push("tools", tool, "tools", `tools.${i}`);
+  for (const [i, block] of (request.shape?.system ?? []).entries()) push("system", block, "system", `system.${i}`);
+  for (const [m, message] of request.messages.entries()) {
+    for (const [b, block] of message.content.entries()) {
+      push(message.role, block, "messages", `messages.${m}.content.${b}`, m);
+    }
+  }
   return out;
 }
 
@@ -95,13 +97,14 @@ function userText(text: string, context: Context): Classified {
   if (!text.startsWith("<system-reminder>")) return { kind: "user", source: {} };
   const call = AT_FILE_CALL.exec(text);
   if (call !== null) {
-    context.lastFileCall = toolSource(call[1], parseObject(call[2] ?? ""));
-    return { kind: "reminder", source: context.lastFileCall };
+    const source = toolSource(call[1], parseObject(call[2] ?? ""));
+    context.lastFileCall = source;
+    return { kind: "reminder", source };
   }
   const result = AT_FILE_RESULT.exec(text);
   if (result !== null) {
-    const source = context.lastFileCall?.tool === result[1] ? context.lastFileCall : toolSource(result[1]);
-    return { kind: "reminder", source };
+    const last = context.lastFileCall;
+    return { kind: "reminder", source: last !== undefined && last.tool === result[1] ? last : toolSource(result[1]) };
   }
   return { kind: "reminder", source: {} };
 }
