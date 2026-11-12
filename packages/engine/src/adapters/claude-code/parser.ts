@@ -108,7 +108,7 @@ export function createClaudeCodeParser(
 function transcriptOf(state: ParserState, name: string): TranscriptState {
   return (
     get(state.transcripts, name) ??
-    put(state.transcripts, name, { buffer: "", lines: 0, userRun: [], usageSinceCost: {} })
+    put(state.transcripts, name, { buffer: "", lines: 0, userRun: [], openAssistantIds: [], usageSinceCost: {} })
   );
 }
 
@@ -171,7 +171,16 @@ class Rows {
   private wait(id: string): void {
     put(this.state.waiting, id, this.name);
     const ids = Object.keys(this.state.waiting);
-    if (ids.length > MAX_WAITING) delete this.state.waiting[ids[0] ?? ""];
+    if (ids.length <= MAX_WAITING) return;
+    const oldest = ids[0] ?? "";
+    delete this.state.waiting[oldest];
+    const call = this.store.call(oldest);
+    if (call === undefined) return;
+    call.issues.push({
+      kind: "unresolved-request",
+      detail: `stopped waiting after ${MAX_WAITING} newer incomplete calls`,
+    });
+    this.changes().calls.add(oldest);
   }
 
   /** Check the waiting calls again, oldest first; a call whose request is now complete waits for, or gets, its split. */
@@ -226,6 +235,7 @@ class Rows {
       }
       case "api-request":
         if (session !== undefined) this.request(row, session);
+        this.t.userRun = []; // the request took the run of user rows before it: later rows start a new message
         break;
       case "assistant":
         if (message !== undefined) this.assistant(row, message, session);
@@ -577,7 +587,7 @@ function frontier(state: ParserState): ParserState {
   const toolCalls = new Set(
     Object.values(state.toolCalls).flatMap((t) => (t.resultBlockHash === undefined ? [t.id] : [])),
   );
-  const assistantIds = new Set(Object.values(state.transcripts).flatMap((t) => t.lastAssistantId ?? []));
+  const assistantIds = new Set(Object.values(state.transcripts).flatMap((t) => t.openAssistantIds));
   const pick = <T>(record: Record<string, T>, keys: Set<string>) => {
     const out: Record<string, T> = {};
     for (const key of keys) {
