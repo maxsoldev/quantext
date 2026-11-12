@@ -10,6 +10,16 @@ import { copyScenario } from "../ingest/corpus.ts";
 import { onCleanup, tempDir } from "../store/temp.ts";
 
 const QX = join(import.meta.dirname, "../../src/cli/qx.ts");
+
+/** Whether this runtime's SQLite lets a program deny statements (`node:sqlite` from Node 24). */
+function authorizerSupported(): boolean {
+  if (process.versions.bun !== undefined) return false;
+  const run = spawnSync(process.execPath, [
+    "-e",
+    "process.exit(typeof require('node:sqlite').DatabaseSync.prototype.setAuthorizer === 'function' ? 0 : 1)",
+  ]);
+  return run.status === 0;
+}
 const COMPACTION = "00000000-0000-4000-8000-000000000005";
 
 async function qx(...argv: string[]): Promise<{ code: number; out: string; err: string }> {
@@ -99,6 +109,24 @@ describe("qx", () => {
     expect(write).toMatchObject({ code: EXIT.usage, out: "" });
     expect(write.err).toContain("not DELETE");
     expect((await qx("sql", ...data, "SELECT nope FROM calls")).code).toBe(EXIT.failed);
+  });
+
+  test("stops a query that runs too long, in its own process, with a clear message", { timeout: 20_000 }, async () => {
+    const data = await ingested();
+    const forever = "WITH RECURSIVE r(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM r) SELECT count(*) FROM r";
+    const started = Date.now();
+    const run = await qx("sql", ...data, "--timeout", "1", forever);
+    expect(run.code).toBe(EXIT.failed);
+    expect(run.err).toContain("ran longer than 1 s and was stopped");
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  test.skipIf(!authorizerSupported())("lets SQLite deny anything but reads where the runtime can", async () => {
+    const data = await ingested();
+    // Passes the text check, but reads the schema through a pragma: the authorizer denies it.
+    const run = await qx("sql", ...data, "SELECT name FROM pragma_table_info('calls')");
+    expect(run.code).toBe(EXIT.failed);
+    expect(run.err).toMatch(/not authorized/i);
   });
 
   test("reads while an engine holds the writer lock", async () => {

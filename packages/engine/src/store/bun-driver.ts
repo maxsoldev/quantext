@@ -18,6 +18,7 @@ export function openBun(path: string, options: RawOptions = {}): RawDatabase {
       };
     },
     inTransaction: () => db.inTransaction,
+    denyAllButReads: () => false, // bun:sqlite has no authorizer
     close: () => db.close(),
   };
 }

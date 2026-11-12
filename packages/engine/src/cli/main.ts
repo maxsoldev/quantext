@@ -2,13 +2,15 @@
  * The `qx` command: ingest the transcripts, and read the store through the query layer (or SQL, read-only).
  * `main` takes its arguments and I/O from the caller, so tests run it in-process. Exit codes are in `EXIT`.
  */
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import type { DemoOptions, SessionKey } from "@quantext/shared";
+import type { DemoOptions, SessionKey, SqlResult } from "@quantext/shared";
 import packageJson from "../../package.json" with { type: "json" };
 import { claudeCodeCodec } from "../adapters/claude-code/index.ts";
 import { claudeConfigDir, createIngest } from "../ingest/index.ts";
 import type { Query } from "../query/index.ts";
-import { createQuery, createRedactor, installViews, runSql, SqlRejectedError } from "../query/index.ts";
+import { createQuery, createRedactor, installViews, SqlRejectedError } from "../query/index.ts";
 import type { SqlDriver } from "../store/index.ts";
 import { defaultDataDir, openReader, openStore, SCHEMA_VERSION, StoreLockedError } from "../store/index.ts";
 import { printCall, printReport, printSession, printSessions, printSql } from "./print.ts";
@@ -34,7 +36,9 @@ Usage:
   qx call <session> <n> [--lane <lane>] [--diff]
                                                 The context of Call n (its index in the Session; with --lane, the
                                                 n-th Call of that lane), and with --diff its change from the last
-  qx sql "<select>" [--limit <n>]               One read-only statement over the tables and views
+  qx sql "<select>" [--limit <n>] [--timeout <s>]
+                                                One read-only statement over the tables and views, in its own
+                                                process, stopped after --timeout seconds (default 30)
   qx report                                     What ingest could not read or map, and the Calls' issues
   qx --version | --help
 
@@ -62,6 +66,7 @@ const OPTIONS = {
   offset: { type: "string" },
   lane: { type: "string" },
   diff: { type: "boolean" },
+  timeout: { type: "string" },
   version: { type: "boolean" },
   help: { type: "boolean", short: "h" },
 } as const;
@@ -95,6 +100,7 @@ export async function main(argv: readonly string[], given: CliIo): Promise<numbe
     if (command === undefined) throw new UsageError("no command given");
     const dataDir = values["data-dir"] ?? defaultDataDir(io.home);
     if (command === "ingest") return await ingest(values, args, dataDir, io);
+    if (command === "sql") return await sql(values, args, dataDir, io);
     const run = COMMANDS[command];
     if (run === undefined) throw new UsageError(`unknown command: ${command}`);
     const db = await openReader(dataDir, { setup: installViews });
@@ -179,15 +185,6 @@ const COMMANDS: Record<string, (c: Context) => number> = {
     );
     return EXIT.ok;
   },
-  sql({ values, args, db, io }) {
-    arity(args, 1, 'sql "<select>"');
-    if (demoOf(values).demo !== undefined) {
-      throw new UsageError("qx sql reads the tables as they are: it does not run in demo mode");
-    }
-    const result = runSql(db, args[0] ?? "", { limit: integer(values.limit, "--limit") ?? 1000 });
-    io.stdout(values.json === true ? json(result) : printSql(result));
-    return EXIT.ok;
-  },
   report({ values, args, query, io }) {
     arity(args, 0, "report");
     const report = query.ingestReport();
@@ -195,6 +192,59 @@ const COMMANDS: Record<string, (c: Context) => number> = {
     return EXIT.ok;
   },
 };
+
+const SQL_CHILD = fileURLToPath(new URL("./sql-child.ts", import.meta.url));
+export const DEFAULT_SQL_TIMEOUT_S = 30;
+
+/** `qx sql`: the statement runs in a child process, killed after the time limit. */
+async function sql(values: Values, args: string[], dataDir: string, io: CliIo): Promise<number> {
+  arity(args, 1, 'sql "<select>"');
+  if (demoOf(values).demo !== undefined) {
+    throw new UsageError("qx sql reads the tables as they are: it does not run in demo mode");
+  }
+  const limit = integer(values.limit, "--limit") ?? 1000;
+  const timeout = integer(values.timeout, "--timeout") ?? DEFAULT_SQL_TIMEOUT_S;
+  const reply = await runChild(JSON.stringify({ dataDir, sql: args[0] ?? "", limit }), timeout * 1000);
+  if (reply === "timeout") {
+    io.stderr(`qx: the query ran longer than ${timeout} s and was stopped (--timeout)\n`);
+    return EXIT.failed;
+  }
+  const parsed = JSON.parse(reply) as { result?: SqlResult; error?: string; rejected?: boolean };
+  if (parsed.result === undefined) {
+    io.stderr(`qx: ${parsed.error ?? "the query failed"}\n`);
+    return parsed.rejected === true ? EXIT.usage : EXIT.failed;
+  }
+  io.stdout(values.json === true ? json(parsed.result) : printSql(parsed.result));
+  return EXIT.ok;
+}
+
+/** Run the SQL child with `input` on stdin; its stdout, or "timeout" when it was killed after `ms`. */
+function runChild(input: string, ms: number): Promise<string> {
+  const flags = process.versions.bun === undefined ? ["--no-warnings"] : [];
+  const child = spawn(process.execPath, [...flags, SQL_CHILD], { stdio: ["pipe", "pipe", "pipe"] });
+  return new Promise((resolve, reject) => {
+    let out = "";
+    let err = "";
+    let killed = false;
+    const timer = setTimeout(() => {
+      killed = true;
+      child.kill("SIGKILL");
+    }, ms);
+    child.stdout.on("data", (d: Buffer) => (out += d.toString("utf8")));
+    child.stderr.on("data", (d: Buffer) => (err += d.toString("utf8")));
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (killed) resolve("timeout");
+      else if (code === 0 && out !== "") resolve(out);
+      else reject(new Error(`the SQL process failed (exit ${code}): ${err.trim()}`));
+    });
+    child.stdin.end(input);
+  });
+}
 
 async function ingest(values: Values, args: string[], dataDir: string, io: CliIo): Promise<number> {
   arity(args, 0, "ingest");

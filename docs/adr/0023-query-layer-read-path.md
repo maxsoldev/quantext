@@ -16,8 +16,9 @@ same numbers whether they use the API or SQL. The meetup needs a demo mode that 
   by a migration: they change with the engine, need no write to the store, and exist only where the query layer
   reads. The query layer reads `v_sessions` itself, so SQL and the API share one definition.
 - **`qx sql`** runs one statement that starts as a read and holds no word of a write or of a connection change,
-  on the read-only connection, at most 1000 rows. There is no time limit: neither `node:sqlite` nor `bun:sqlite`
-  has an interrupt or a progress handler.
+  on the read-only connection, at most 1000 rows, with SQLite's authorizer denying all but reads where the runtime
+  has one (Node 24). It runs in a child process that is killed after a time limit (30 s by default), because
+  neither `node:sqlite` nor `bun:sqlite` can interrupt a statement; so it never runs in the engine.
 - **Lifetime cost in SQL.** Each run is joined with the Calls of its lane through the index `calls_lane`, which
   holds what pricing needs: the store keeps per Call its tokens before the cache boundary and its price per token
   (schema v3), so a run is priced as read in all its Calls and corrected only where it lies at or after the

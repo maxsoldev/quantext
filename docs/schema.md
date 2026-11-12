@@ -247,10 +247,12 @@ WHERE log = :log AND session_id = :session
 
 **`qx sql` rules.** One statement that starts with `SELECT`, `WITH`, `VALUES` or `EXPLAIN`, and holds no word of a
 write, a schema or connection change (`INSERT`, `UPDATE`, `DELETE`, `CREATE`, `DROP`, `ALTER`, `ATTACH`, `DETACH`,
-`PRAGMA`, `VACUUM`, transactions, …). Comments and quoted text do not count. The connection is also opened
-read-only, with `query_only` set. At most 1000 rows (`--limit`); a BLOB shows as its size. There is no time
-limit: neither `node:sqlite` nor `bun:sqlite` has an interrupt or a progress handler; stop a long query with
-Ctrl-C. `qx sql` does not run in demo mode: it reads the tables as they are.
+`PRAGMA`, `VACUUM`, transactions, …). Comments and quoted text do not count. The connection is opened read-only,
+with `query_only` set, and where the runtime has an authorizer (`node:sqlite` from Node 24; not `bun:sqlite`)
+SQLite itself denies every action but reading, selecting, functions and recursive queries (so also pragma
+functions such as `pragma_table_info`). The statement runs in a child process, which is killed after
+`--timeout` seconds (default 30): neither SQLite module can interrupt a statement. At most 1000 rows
+(`--limit`); a BLOB shows as its size. `qx sql` does not run in demo mode: it reads the tables as they are.
 
 ## Later
 

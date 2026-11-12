@@ -10,7 +10,7 @@ API and the viewer. It makes no network calls. In the repo: `pnpm qx <command>` 
 | `qx sessions [--project <p>] [--search <s>] [--sort ended\|started\|cost\|calls] [--limit <n>] [--offset <n>]` | Main Sessions, newest first, with their subagents |
 | `qx session <id>` | One Session: totals, lanes, compactions (before, after, removed, kept), events, subagents |
 | `qx call <session> <n> [--lane <lane>] [--diff]` | The context of Call `n` (its index in the Session; with `--lane`, the `n`-th Call of that lane): every Block in order with section, kind, source, tokens, basis, cached or not, cost share and a preview; totals by section and by context-bar group. `--diff`: what changed from the lane's previous Call |
-| `qx sql "<select>" [--limit <n>]` | One read-only statement over the tables and views (`docs/schema.md`, "Views"); at most 1000 rows by default |
+| `qx sql "<select>" [--limit <n>] [--timeout <s>]` | One read-only statement over the tables and views (`docs/schema.md`, "Views"), in its own process, killed after `--timeout` seconds (default 30); at most 1000 rows by default |
 | `qx report` | What ingest could not read or map, the Calls' issues by kind, bytes waiting for a newline |
 | `qx --version`, `qx --help` | |
 
@@ -26,7 +26,7 @@ Every reading command opens the store read-only (no writer lock), so it also wor
 | Code | Meaning |
 |---|---|
 | 0 | Done (`ingest`: also when some files could not be read; they are listed on stderr and in `qx report`) |
-| 1 | Failed: no store, a store of another schema version, the writer lock is held, a SQL error |
+| 1 | Failed: no store, a store of another schema version, the writer lock is held, a SQL error, a query over its time limit |
 | 2 | Wrong use: unknown command or option, a bad number, an ambiguous session, a statement that is not a single read, `sql` in demo mode |
 | 3 | Not found: no such session or call |
 

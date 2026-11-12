@@ -36,6 +36,11 @@ export interface RawDatabase {
   prepare(sql: string): SqlStatement;
   /** Whether a transaction is open: SQLite ends one by itself on some errors (SQLITE_FULL, SQLITE_IOERR). */
   inTransaction(): boolean;
+  /**
+   * Let SQLite deny every later statement that does more than read (an authorizer); false when the runtime's SQLite
+   * module has no authorizer (`bun:sqlite`, `node:sqlite` before Node 24).
+   */
+  denyAllButReads(): boolean;
   close(): void;
 }
 
@@ -55,18 +60,28 @@ export async function openRaw(path: string, options: RawOptions = {}): Promise<R
  * Open an existing database file read-only: the file is opened read-only, `setup` runs (temporary views), and then
  * `query_only` stops every write, also to the temporary schema. Writes still fail inside `transaction`.
  */
-export async function openReadOnlyDriver(path: string, setup?: (db: SqlDriver) => void): Promise<SqlDriver> {
+export async function openReadOnlyDriver(
+  path: string,
+  setup?: (db: SqlDriver) => void,
+  readsOnly = false,
+): Promise<SqlDriver> {
   const raw = await openRaw(path, { readOnly: true });
   try {
     raw.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
     const db = withTransactions(raw);
     setup?.(db);
     raw.exec("PRAGMA query_only = 1");
+    if (readsOnly) raw.denyAllButReads();
     return db;
   } catch (error) {
     raw.close();
     throw error;
   }
+}
+
+/** Whether `denyAllButReads` works on this runtime: its SQLite module has an authorizer. */
+export async function readsOnlyEnforced(): Promise<boolean> {
+  return process.versions.bun === undefined && (await import("./node-driver.ts")).hasAuthorizer();
 }
 
 /** Open (or create) the database file with the runtime's built-in SQLite: WAL, foreign keys, a busy timeout. */

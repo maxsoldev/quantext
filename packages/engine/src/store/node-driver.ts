@@ -2,6 +2,18 @@
 import { DatabaseSync } from "node:sqlite";
 import type { RawDatabase, RawOptions, SqlRow, SqlValue } from "./driver.ts";
 
+/** SQLite's authorizer codes for reading (sqlite3.h): READ, SELECT, FUNCTION, RECURSIVE. */
+const READ_ACTIONS = new Set([20, 21, 31, 33]);
+const SQLITE_OK = 0;
+const SQLITE_DENY = 1;
+
+/** The authorizer of `node:sqlite` (Node 24 and later); not in the Node 22 types. */
+type WithAuthorizer = { setAuthorizer?: (callback: ((action: number) => number) | null) => void };
+
+export function hasAuthorizer(): boolean {
+  return typeof (DatabaseSync.prototype as unknown as WithAuthorizer).setAuthorizer === "function";
+}
+
 export function openNode(path: string, options: RawOptions = {}): RawDatabase {
   const db = new DatabaseSync(path, options.readOnly === true ? { readOnly: true } : {});
   return {
@@ -18,6 +30,12 @@ export function openNode(path: string, options: RawOptions = {}): RawDatabase {
       };
     },
     inTransaction: () => db.isTransaction,
+    denyAllButReads() {
+      const set = (db as unknown as WithAuthorizer).setAuthorizer;
+      if (typeof set !== "function") return false;
+      set.call(db, (action) => (READ_ACTIONS.has(action) ? SQLITE_OK : SQLITE_DENY));
+      return true;
+    },
     close: () => db.close(),
   };
 }
