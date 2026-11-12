@@ -1,2 +1,3 @@
-// Proves the workspace link to @quantext/shared type checks; real imports replace it.
-import type {} from "@quantext/shared";
+/** cli: the `qx` command and the composition root. No business logic. */
+export type { CliIo } from "./main.ts";
+export { EXIT, main, USAGE } from "./main.ts";
