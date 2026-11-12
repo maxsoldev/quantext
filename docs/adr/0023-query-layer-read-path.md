@@ -19,16 +19,18 @@ same numbers whether they use the API or SQL. The meetup needs a demo mode that 
   on the read-only connection, at most 1000 rows. There is no time limit: neither `node:sqlite` nor `bun:sqlite`
   has an interrupt or a progress handler.
 - **Lifetime cost in SQL.** Each run is joined with the Calls of its lane through the index `calls_lane`, which
-  holds what pricing needs (schema v2); the Block at the cache boundary is split by token offset with one
-  aggregate per Call. The result equals core's `blockCosts` for every Call whose input tokens are its framing
-  tokens.
+  holds what pricing needs: the store keeps per Call its tokens before the cache boundary and its price per token
+  (schema v3), so a run is priced as read in all its Calls and corrected only where it lies at or after the
+  boundary. The result equals core's `blockCosts` for every Call whose input tokens are its framing tokens.
+- **Per Session, not by view.** A filter on a view comes after the whole view is computed, so the viewer and the
+  API use `blockLifetimes(session)` and `toolOutputs(session)`, whose filter is inside.
 - **Demo mode in the query layer.** `createQuery({ demo })` filters by project and redacts every string it gives
   out (paths relative to the project, home folders as `~`, the user name next to paths and addresses). `qx sql`
   does not apply it.
 
 ## Consequences
 
-- The whole-corpus lifetime views take about 3 s on the real corpus (6.5 million Block-Call pairs); per-session
-  queries are tens of milliseconds.
+- The whole-corpus lifetime views take about 1.7 s on the real corpus (6.5 million Block-Call pairs); one
+  Session's lifetimes take under 10 ms for most Sessions and about 130 ms for the largest.
 - The HTTP API (step 7) builds a `createQuery` on its own read-only connection, with the same options.
 - A consumer that needs demo mode must not read the store around the query layer.

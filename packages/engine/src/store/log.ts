@@ -102,11 +102,18 @@ const UPSERT_MESSAGE = upsertSql("messages", ["key", "role", "blocks"], ["key"])
 const UPSERT_SHAPE = upsertSql("shapes", ["key", "tools", "system"], ["key"]);
 const UPSERT_RECORD = upsertSql("records", ["key", "value"], ["key"]);
 const UPSERT_LOG_BLOCK = upsertSql("log_blocks", LOG_BLOCK_COLUMNS, ["hash"]);
-/** A Call's tokens before its cache boundary: the Blocks wholly inside the Cached prefix (NULL when not split). */
-const SET_BOUNDARY_OFFSET = `UPDATE calls SET cache_boundary_offset = CASE WHEN cache_boundary_position IS NULL THEN NULL
+/**
+ * What the store derives for a Call when it writes it: its tokens before the cache boundary (the Blocks wholly inside
+ * the Cached prefix; NULL when not split), its price per cache-read token, and per other input token (cache write,
+ * or plain input when it wrote none). The lifetime cost reads them from the lane index.
+ */
+const SET_DERIVED = `UPDATE calls SET cache_boundary_offset = CASE WHEN cache_boundary_position IS NULL THEN NULL
   ELSE (SELECT coalesce(sum(r.tokens), 0) FROM call_blocks r
     WHERE r.log = calls.log AND r.session_id = calls.session_id AND r.lane = calls.lane AND r.first_call <= calls.idx
-      AND (r.last_call IS NULL OR r.last_call >= calls.idx) AND r.position < calls.cache_boundary_position) END
+      AND (r.last_call IS NULL OR r.last_call >= calls.idx) AND r.position < calls.cache_boundary_position) END,
+  unit_read_usd = CASE WHEN cache_read_tokens > 0 THEN cost_cache_read_usd / cache_read_tokens END,
+  unit_rest_usd = CASE WHEN cache_write_tokens > 0 THEN cost_cache_write_usd / cache_write_tokens
+    WHEN input_tokens > 0 THEN cost_input_usd / input_tokens END
   WHERE log = ? AND id = ?`;
 const UPSERT_FILE = `INSERT INTO ingest_files
   (path, log, transcript, kind, file_id, size, mtime_ms, byte_offset, fingerprint, error)
@@ -281,8 +288,8 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
         const touched = new Set<string>();
         const calls = new Set<string>();
         for (const delta of batch.deltas) apply(delta, result, touched, calls);
-        // After every run of the batch is in: the tokens before each written Call's cache boundary.
-        for (const callId of calls) sql.get(SET_BOUNDARY_OFFSET).run(id, callId);
+        // After every run of the batch is in: what the store derives for each written Call.
+        for (const callId of calls) sql.get(SET_DERIVED).run(id, callId);
         let cursor = Number(sql.get("SELECT seq FROM change_cursor").get()?.seq ?? 0);
         if (touched.size > 0) {
           cursor++;

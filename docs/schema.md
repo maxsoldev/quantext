@@ -76,6 +76,7 @@ version logs only usage, so its Calls are usage-only and have no Blocks; `partia
 | `block_count` | Blocks in the input, once the request is split; NULL for a Call that was not split |
 | `cache_breakpoints` | JSON list of the positions that carry a cache breakpoint |
 | `cache_boundary_tokens`, `cache_boundary_position` | The Cached prefix: cache read tokens, and the number of leading Blocks wholly inside it |
+| `unit_read_usd`, `unit_rest_usd` | Set by the store: the price of one cache-read token, and of one other input token (the cache write, or plain input when the Call wrote none); NULL without a price |
 | `cache_boundary_offset` | The tokens of those leading Blocks, set by the store when it writes the Call: the Block at the boundary has `cache_read_tokens - cache_boundary_offset` of its tokens in the cache read |
 | `framing_tokens` | Input tokens after the last Block; the Call's runs plus these add up to its input total |
 | `issues` | JSON list of `{kind, detail}`, sorted by kind and detail: `no-request` (a usage-only Call), `missing-message` (a gap Block stands for a message, or the message came after the Call was split), `derived-usage-invalid` (a summarising Call whose derived input is 0 or less: it has no usage), `unresolved-request`, `no-usage`, `unreconciled-tokens`, `no-price`, `price-assumption`, `estimate-clamped` |
@@ -214,14 +215,17 @@ tables; `last_call` in a view is never NULL (an open run ends at the lane's late
 
 **Lifetime cost.** For each Call a run covers (the Calls of its lane from `first_call` to `last_call`), a Block
 wholly inside the Cached prefix (`position < cache_boundary_position`) counts at that Call's cache read price per
-token; the Block at the boundary has the rest of the cache read; the rest counts at the Call's cache write price,
-or at its input price when the Call wrote no cache. This is the query layer's split by token offset (core
-`blockCosts`) for every Call whose input tokens are its framing tokens (all Calls of the real corpus); otherwise
-the uncached rest of a Block is priced as cache write. A Call with no price adds tokens and no cost.
+token (`unit_read_usd`); the Block at the boundary has `cache_read_tokens - cache_boundary_offset` of its tokens in
+the cache read; the rest counts at `unit_rest_usd` (cache write, or plain input when the Call wrote no cache). This
+is the query layer's split by token offset (core `blockCosts`) for every Call whose input tokens are its framing
+tokens (all Calls of the real corpus); otherwise the uncached rest of a Block is priced as cache write. A Call
+with no price adds tokens and no cost.
 
-**Speed** (real corpus, 26,700 Calls, 6.5 million Block-Call pairs, Apple silicon): `v_block_lifetime_cost` and
-`v_tool_outputs` about 3 s for the whole corpus (they price every Block in every Call); the other views under
-0.1 s. Filter by `log` and `session_id` where you can.
+**Speed** (real corpus, 26,900 Calls, 6.5 million Block-Call pairs, Apple silicon): `v_block_lifetime_cost` and
+`v_tool_outputs` about 1.7 s over the whole corpus (they price every Block in every Call), the other views under
+0.15 s. A filter on a view is applied after the whole view is computed: for one Session, use the query layer's
+`blockLifetimes(session)` and `toolOutputs(session)` (the viewer and the API do), which read only that Session's
+runs (under 10 ms for most Sessions, about 130 ms for the largest).
 
 **Examples.**
 
@@ -234,9 +238,11 @@ FROM v_tool_outputs ORDER BY lifetime_cost_usd DESC LIMIT 10;
 SELECT session_id, idx, prev_idx, gap_seconds, drop_tokens, break_position, break_kind, break_tool
 FROM v_cache_breaks ORDER BY drop_tokens DESC LIMIT 10;
 
--- The context of Call 7 of a Session, in order
+-- The context of Call 7 of a Session, in order (runs belong to one lane: filter by the Call's lane)
 SELECT position, kind, tool, file_path, tokens, basis FROM v_context
-WHERE session_id = :session AND first_call <= 7 AND last_call >= 7 ORDER BY position;
+WHERE log = :log AND session_id = :session
+  AND lane = (SELECT lane FROM calls WHERE log = :log AND session_id = :session AND idx = 7)
+  AND first_call <= 7 AND last_call >= 7 ORDER BY position;
 ```
 
 **`qx sql` rules.** One statement that starts with `SELECT`, `WITH`, `VALUES` or `EXPLAIN`, and holds no word of a
@@ -262,7 +268,7 @@ Options that are not needed yet, with what they would bring:
 
 - **1**: the tables above, except `project_memory`.
 - **2**: `project_memory`; the index `calls_lane`.
-- **3**: `calls.cache_boundary_offset` (in `calls_lane`), `sessions.changed_seq`, `change_cursor`.
+- **3**: `calls.cache_boundary_offset`, `unit_read_usd`, `unit_rest_usd` (in `calls_lane`), `sessions.changed_seq`, `change_cursor`.
 
 ## Changing the schema
 

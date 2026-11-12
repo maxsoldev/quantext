@@ -241,7 +241,9 @@ CREATE INDEX calls_lane ON calls (log, session_id, lane, idx, usage_basis, cache
 
 /**
  * The tokens before each Call's cache boundary, so that the lifetime cost splits the Block at the boundary without
- * summing the Blocks before it; a change cursor and each Session's last change, for live readers.
+ * summing the Blocks before it, and each Call's price per token read from the cache and per other input token (the
+ * cache write, or plain input when it wrote none), in the lane index; a change cursor and each Session's last
+ * change, for live readers.
  */
 const V3 = `
 ALTER TABLE calls ADD COLUMN cache_boundary_offset INTEGER;
@@ -250,10 +252,14 @@ UPDATE calls SET cache_boundary_offset = (
   WHERE r.log = calls.log AND r.session_id = calls.session_id AND r.lane = calls.lane AND r.first_call <= calls.idx
     AND (r.last_call IS NULL OR r.last_call >= calls.idx) AND r.position < calls.cache_boundary_position)
 WHERE cache_boundary_position IS NOT NULL;
+ALTER TABLE calls ADD COLUMN unit_read_usd REAL;
+ALTER TABLE calls ADD COLUMN unit_rest_usd REAL;
+UPDATE calls SET unit_read_usd = CASE WHEN cache_read_tokens > 0 THEN cost_cache_read_usd / cache_read_tokens END,
+  unit_rest_usd = CASE WHEN cache_write_tokens > 0 THEN cost_cache_write_usd / cache_write_tokens
+    WHEN input_tokens > 0 THEN cost_input_usd / input_tokens END;
 DROP INDEX calls_lane;
-CREATE INDEX calls_lane ON calls (log, session_id, lane, idx, usage_basis, cache_boundary_position,
-  cache_boundary_offset, cache_read_tokens, cache_write_tokens, input_tokens, cost_cache_read_usd,
-  cost_cache_write_usd, cost_input_usd);
+CREATE INDEX calls_lane ON calls (log, session_id, lane, idx, cache_boundary_position, cache_boundary_offset,
+  cache_read_tokens, cache_write_tokens, unit_read_usd, unit_rest_usd);
 
 ALTER TABLE sessions ADD COLUMN changed_seq INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX sessions_changed ON sessions (changed_seq);

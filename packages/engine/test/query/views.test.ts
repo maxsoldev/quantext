@@ -131,3 +131,35 @@ describe("the views against the query layer", () => {
     expect(expected.length).toBeGreaterThan(0);
   });
 });
+
+describe("lifetime cost per Session", () => {
+  test("blockLifetimes and toolOutputs give the view's numbers for the Session's own Calls, sorted and capped", async () => {
+    const { q, sessions, rows } = await setup();
+    for (const s of sessions) {
+      const view = rows(
+        `SELECT r.block_hash, count(*) AS calls FROM call_blocks r JOIN calls c ON c.log = r.log
+           AND c.session_id = r.session_id AND c.lane = r.lane
+           AND c.idx BETWEEN r.first_call AND coalesce(r.last_call, 1e18)
+         WHERE r.log = ${s.log} AND r.session_id = '${s.id}' GROUP BY r.block_hash`,
+      );
+      const lifetimes = q.blockLifetimes(s, { limit: 1000 }).items;
+      expect(lifetimes).toHaveLength(view.length);
+      for (const v of view) expect(lifetimes.find((b) => b.hash === v.block_hash)?.calls).toBe(v.calls);
+      const costs = lifetimes.map((b) => b.costUsd.total);
+      expect(costs).toEqual([...costs].sort((a, b) => b - a));
+      const outputs = q.toolOutputs(s, { sort: "tokens", limit: 2 }).items;
+      const tools = q.toolCalls(s);
+      expect(outputs.length).toBe(Math.min(2, tools.length));
+      for (const o of outputs) {
+        const [all] = rows(`SELECT * FROM v_tool_outputs WHERE log = ${s.log} AND tool_use_id = '${o.toolUseId}'`);
+        if (s.parentId === undefined) expect(o.lifetimeTokens).toBe(all?.lifetime_tokens);
+        expect(o).toMatchObject({
+          tool: all?.tool,
+          calls: all?.calls,
+          firstCall: all?.first_call,
+          lastCall: all?.last_call,
+        });
+      }
+    }
+  });
+});

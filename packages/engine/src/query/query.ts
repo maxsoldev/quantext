@@ -6,6 +6,7 @@
 import type {
   BlockDetail,
   BlockKind,
+  BlockLifetime,
   CallContext,
   CallIssue,
   CallSummary,
@@ -13,8 +14,11 @@ import type {
   ContextBlock,
   ContextDiff,
   DemoOptions,
+  Items,
   JsonValue,
   LaneSummary,
+  Lifetime,
+  LifetimeOptions,
   MemoryDocumentView,
   Meta,
   Page,
@@ -27,6 +31,7 @@ import type {
   StoreCodec,
   TokenGroup,
   ToolCallSummary,
+  ToolOutput,
 } from "@quantext/shared";
 import { blockCosts } from "../core/pricing.ts";
 import type { SqlDriver, SqlRow, SqlValue } from "../store/index.ts";
@@ -42,7 +47,15 @@ import { categoryOf, emptyCategories } from "./categories.ts";
 import type { Redactor } from "./redact.ts";
 import { createRedactor, lastFolder, projectAllowed, trimSeparators } from "./redact.ts";
 import { API_VERSION } from "./sql.ts";
-import { installViews } from "./views.ts";
+import { installViews, lifetimeSql, toolOutputsSql } from "./views.ts";
+
+const LIFETIME_SORTS: Record<NonNullable<LifetimeOptions["sort"]>, string> = {
+  cost: "lifetime_cost_usd",
+  tokens: "lifetime_tokens",
+  calls: "calls",
+};
+/** One Session's lifetime rows: the filter is inside, so only its runs are read. */
+const SESSION_LIFETIME = lifetimeSql(true);
 
 export interface QueryOptions {
   /** A connection to the store (read-only is enough); the views are made on it when missing. */
@@ -75,6 +88,10 @@ export interface Query {
   getMedia(block: string, log: number, hash: string): { mediaType: string; bytes: Uint8Array } | undefined;
   toolCalls(key: SessionKey): ToolCallSummary[];
   compactions(key: SessionKey): CompactionDetail[];
+  /** The Session's Blocks by their lifetime cost in its own Calls. */
+  blockLifetimes(key: SessionKey, options?: LifetimeOptions): Items<BlockLifetime>;
+  /** The Session's tool uses by their result's lifetime cost. */
+  toolOutputs(key: SessionKey, options?: LifetimeOptions): Items<ToolOutput>;
   /** The memory documents of a project (by its path, or its last folder name), by path. */
   projectMemory(project: string): MemoryDocumentView[];
   ingestReport(): QueryReport;
@@ -638,6 +655,46 @@ export function createQuery(options: QueryOptions): Query {
       return hide(out, found.project);
     },
     compactions: compactionsOf,
+    blockLifetimes(key, options = {}) {
+      const found = sessionProject(key);
+      if (found === undefined) return { ...meta, items: [] };
+      const rows = db
+        .prepare(`${SESSION_LIFETIME} ORDER BY ${LIFETIME_SORTS[options.sort ?? "cost"]} DESC, block_hash LIMIT ?`)
+        .all(key.log, key.id, options.limit ?? 50);
+      const items = rows.map(
+        (r): BlockLifetime => ({
+          hash: String(r.block_hash),
+          kind: String(r.kind) as BlockKind,
+          source: sourceOf(r),
+          ...lifetimeOf(r),
+        }),
+      );
+      return { ...meta, items: hide(items, found.project) };
+    },
+    toolOutputs(key, options = {}) {
+      const found = sessionProject(key);
+      if (found === undefined) return { ...meta, items: [] };
+      const sql = toolOutputsSql(`(${SESSION_LIFETIME})`, "WHERE t.log = ? AND t.session_id = ?");
+      const rows = db
+        .prepare(`${sql} ORDER BY coalesce(${LIFETIME_SORTS[options.sort ?? "cost"]}, 0) DESC, tool_use_id LIMIT ?`)
+        .all(key.log, key.id, key.log, key.id, options.limit ?? 50);
+      const items = rows.map((r) => {
+        const o: ToolOutput = {
+          toolUseId: String(r.tool_use_id),
+          tool: String(r.tool),
+          source: sourceOf(r),
+          isError: Number(r.is_error) === 1,
+          ...lifetimeOf(r),
+        };
+        if (r.call_idx !== null) o.callIndex = Number(r.call_idx);
+        if (r.input_summary !== null) o.inputSummary = String(r.input_summary);
+        if (r.result_block_hash !== null) o.resultBlockHash = String(r.result_block_hash);
+        if (r.first_call !== null) o.firstCall = Number(r.first_call);
+        if (r.last_call !== null) o.lastCall = Number(r.last_call);
+        return o;
+      });
+      return { ...meta, items: hide(items, found.project) };
+    },
     projectMemory(project) {
       const logs = q("SELECT DISTINCT l.path, s.project FROM sessions s JOIN logs l ON l.id = s.log")
         .all()
@@ -727,6 +784,25 @@ export function createQuery(options: QueryOptions): Query {
       return { ...hide(report), ...meta };
     },
   };
+}
+
+/** The lifetime columns of a view row. */
+function lifetimeOf(r: SqlRow): Lifetime {
+  const n = (v: SqlValue | undefined) => Number(v ?? 0);
+  const l: Lifetime = {
+    calls: n(r.calls),
+    runs: n(r.runs),
+    lifetimeTokens: n(r.lifetime_tokens),
+    tokensByPart: { cacheRead: n(r.cache_read_tokens), cacheWrite: n(r.cache_write_tokens), input: n(r.input_tokens) },
+    costUsd: {
+      cacheRead: n(r.cost_cache_read_usd),
+      cacheWrite: n(r.cost_cache_write_usd),
+      input: n(r.cost_input_usd),
+      total: n(r.lifetime_cost_usd),
+    },
+  };
+  if (r.tokens !== null && r.tokens !== undefined) l.tokens = Number(r.tokens);
+  return l;
 }
 
 function sourceOf(r: SqlRow): ContextBlock["source"] {

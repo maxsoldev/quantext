@@ -181,6 +181,7 @@ test("migrates a database of schema version 1 to the current version and keeps i
   // Back to version 1: drop what version 2 added.
   db.exec(`DROP TABLE change_cursor; DROP INDEX sessions_changed; ALTER TABLE sessions DROP COLUMN changed_seq;
     DROP INDEX calls_lane; ALTER TABLE calls DROP COLUMN cache_boundary_offset;
+    ALTER TABLE calls DROP COLUMN unit_read_usd; ALTER TABLE calls DROP COLUMN unit_rest_usd;
     DROP TABLE project_memory; UPDATE schema_version SET version = 1`);
   db.exec("INSERT INTO logs (path, harness, adapter_version) VALUES ('/l.jsonl', 'claude-code', 1)");
   store.close();

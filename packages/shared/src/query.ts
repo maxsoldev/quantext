@@ -291,3 +291,47 @@ export interface SqlResult extends Meta {
   /** More rows were left out after the limit. */
   truncated: boolean;
 }
+
+/** A list response. */
+export interface Items<T> extends Meta {
+  items: T[];
+}
+
+/** How to sort and cap a lifetime list: by cost (default), lifetime tokens, or Calls; most first. */
+export interface LifetimeOptions {
+  sort?: "cost" | "tokens" | "calls";
+  limit?: number;
+}
+
+/** Token counts and cost of a Block over the Calls it was sent in, by price part. */
+export interface Lifetime {
+  /** Calls it was sent in, and the runs (positions over Calls) it had. */
+  calls: number;
+  runs: number;
+  /** Its tokens in one Call (the largest, when they changed). */
+  tokens?: number;
+  lifetimeTokens: number;
+  tokensByPart: { cacheRead: number; cacheWrite: number; input: number };
+  costUsd: { cacheRead: number; cacheWrite: number; input: number; total: number };
+}
+
+export interface BlockLifetime extends Lifetime {
+  hash: string;
+  kind: BlockKind;
+  source: BlockSource;
+}
+
+/** A tool use with its result Block's lifetime in the Session. */
+export interface ToolOutput extends Lifetime {
+  toolUseId: string;
+  tool: string;
+  source: BlockSource;
+  isError: boolean;
+  callIndex?: number;
+  /** The first 200 characters of the input, as JSON. */
+  inputSummary?: string;
+  resultBlockHash?: string;
+  /** The Calls (by index) its result stayed in. */
+  firstCall?: number;
+  lastCall?: number;
+}

@@ -63,70 +63,57 @@ SELECT r.log, r.session_id, r.lane, r.first_call,
 FROM call_blocks r JOIN log_blocks b ON b.log = r.log AND b.hash = r.block_hash`;
 
 /**
- * A run's tokens count for each Call of its lane in its range; a Call with no Usage has no tokens. Per Call, a
- * Block wholly inside the Cached prefix is priced at the Call's cache read price, the rest at its cache
- * write price (its input price when it wrote no cache). The Block at the boundary is split by token offset: the
- * read part is the cache read less the Blocks before it (the \`straddle\` rows). This is core's \`blockCosts\` for
- * every Call whose input tokens are its framing tokens.
+ * The lifetime cost of each Block of a log: a run's tokens count for each Call of its lane in its range. Per Call,
+ * a Block wholly inside the Cached prefix is priced at the Call's price per cache-read token; the Block at the
+ * boundary has the rest of the cache read (\`cache_read_tokens\` less the store's \`cache_boundary_offset\`); the
+ * rest of a Block at the price of the cache write, or of plain input when the Call wrote no cache. This is core's
+ * \`blockCosts\` for every Call whose input tokens are its framing tokens. A run is priced as read in all its
+ * Calls, then corrected for the Calls where it lies at or after the boundary. \`session\`: only one Session's runs
+ * are read; the query then takes (log, session id).
  */
-const LIFETIME = `
-CREATE TEMP VIEW v_block_lifetime_cost AS
+export function lifetimeSql(session = false): string {
+  const runs = session ? "WHERE r.log = ? AND r.session_id = ?" : "";
+  const after = "r.position >= c.cache_boundary_position";
+  const rest = `(CASE WHEN r.position > c.cache_boundary_position THEN r.tokens
+    ELSE r.tokens - min(r.tokens, max(0, c.cache_read_tokens - c.cache_boundary_offset)) END)`;
+  return `
 WITH per_run AS (
-  SELECT r.log, r.block_hash, max(r.tokens) AS tokens, count(*) AS calls, sum(r.tokens) AS lifetime_tokens,
-    sum(CASE WHEN r.position < c.cache_boundary_position THEN r.tokens END) AS rd,
-    sum(CASE WHEN r.position >= c.cache_boundary_position AND c.cache_write_tokens > 0 THEN r.tokens END) AS wr,
-    sum(CASE WHEN r.position < c.cache_boundary_position
-      THEN r.tokens * c.cost_cache_read_usd / c.cache_read_tokens END) AS rd_usd,
-    sum(CASE WHEN r.position < c.cache_boundary_position THEN NULL WHEN c.cache_write_tokens > 0
-      THEN r.tokens * c.cost_cache_write_usd / c.cache_write_tokens END) AS wr_usd,
-    sum(CASE WHEN r.position >= c.cache_boundary_position AND c.cache_write_tokens = 0
-      THEN r.tokens * c.cost_input_usd / nullif(c.input_tokens, 0) END) AS inp_usd
-  FROM ${RUN_CALLS}
+  SELECT r.log, r.block_hash, r.tokens, count(*) AS calls, sum(c.unit_read_usd) AS unit_read,
+    sum(CASE WHEN ${after} THEN ${rest} END) AS rest,
+    sum(CASE WHEN ${after} THEN ${rest} * c.unit_read_usd END) AS rest_read_usd,
+    sum(CASE WHEN ${after} THEN ${rest} * c.unit_rest_usd END) AS rest_usd,
+    sum(CASE WHEN ${after} AND c.cache_write_tokens > 0 THEN ${rest} END) AS wr,
+    sum(CASE WHEN ${after} AND c.cache_write_tokens > 0 THEN ${rest} * c.unit_rest_usd END) AS wr_usd
+  FROM ${RUN_CALLS} ${runs}
   GROUP BY r.log, r.session_id, r.lane, r.first_call, r.position
 ),
-boundary AS (
-  SELECT c.log, c.cache_read_tokens AS cr, c.cache_write_tokens AS cw, c.input_tokens AS it,
-    c.cost_cache_read_usd AS cr_usd, c.cost_cache_write_usd AS cw_usd, c.cost_input_usd AS it_usd,
-    sum(CASE WHEN r.position < c.cache_boundary_position THEN r.tokens ELSE 0 END) AS before,
-    max(CASE WHEN r.position = c.cache_boundary_position THEN r.block_hash END) AS block_hash,
-    max(CASE WHEN r.position = c.cache_boundary_position THEN r.tokens END) AS tokens
-  FROM calls c JOIN call_blocks r ON r.log = c.log AND r.session_id = c.session_id AND r.lane = c.lane
-    AND r.first_call <= c.idx AND (r.last_call IS NULL OR r.last_call >= c.idx)
-    AND r.position <= c.cache_boundary_position
-  WHERE c.usage_basis IS NOT NULL AND c.cache_read_tokens > 0
-  GROUP BY c.log, c.id
-),
-straddle AS (
-  SELECT log, block_hash, min(tokens, max(0, cr - before)) AS rd, cr, cw, it, cr_usd, cw_usd, it_usd
-  FROM boundary WHERE block_hash IS NOT NULL
-),
-parts AS (
-  SELECT log, block_hash, 1 AS runs, calls, tokens, lifetime_tokens, rd, wr,
-    lifetime_tokens - coalesce(rd, 0) - coalesce(wr, 0) AS inp, rd_usd, wr_usd, inp_usd
+priced AS (
+  SELECT log, block_hash, tokens, calls, tokens * calls AS lifetime_tokens,
+    tokens * calls - coalesce(rest, 0) AS rd, coalesce(wr, 0) AS wr, coalesce(rest, 0) - coalesce(wr, 0) AS inp,
+    tokens * coalesce(unit_read, 0) - coalesce(rest_read_usd, 0) AS rd_usd, coalesce(wr_usd, 0) AS wr_usd,
+    coalesce(rest_usd, 0) - coalesce(wr_usd, 0) AS inp_usd
   FROM per_run
-  UNION ALL
-  SELECT log, block_hash, 0, 0, NULL, 0, rd,
-    CASE WHEN cw > 0 THEN -rd ELSE 0 END, CASE WHEN cw > 0 THEN 0 ELSE -rd END,
-    rd * cr_usd / cr,
-    CASE WHEN cw > 0 THEN -rd * cw_usd / cw ELSE 0 END,
-    CASE WHEN cw > 0 THEN 0 ELSE -rd * it_usd / nullif(it, 0) END
-  FROM straddle WHERE rd > 0
 )
 SELECT p.log, p.block_hash, b.kind, b.tool, b.file_path, b.mcp_server, b.skill, b.attachment,
-  sum(p.runs) AS runs, sum(p.calls) AS calls, max(p.tokens) AS tokens,
+  count(*) AS runs, sum(p.calls) AS calls, max(p.tokens) AS tokens,
   coalesce(sum(p.lifetime_tokens), 0) AS lifetime_tokens,
   coalesce(sum(p.rd), 0) AS cache_read_tokens,
-  coalesce(sum(p.wr), 0) AS cache_write_tokens,
-  coalesce(sum(p.inp), 0) AS input_tokens,
+  sum(p.wr) AS cache_write_tokens,
+  sum(p.inp) AS input_tokens,
   coalesce(sum(p.rd_usd), 0) AS cost_cache_read_usd,
-  coalesce(sum(p.wr_usd), 0) AS cost_cache_write_usd,
-  coalesce(sum(p.inp_usd), 0) AS cost_input_usd,
-  coalesce(sum(p.rd_usd), 0) + coalesce(sum(p.wr_usd), 0) + coalesce(sum(p.inp_usd), 0) AS lifetime_cost_usd
-FROM parts p JOIN log_blocks b ON b.log = p.log AND b.hash = p.block_hash
+  sum(p.wr_usd) AS cost_cache_write_usd,
+  sum(p.inp_usd) AS cost_input_usd,
+  coalesce(sum(p.rd_usd), 0) + sum(p.wr_usd) + sum(p.inp_usd) AS lifetime_cost_usd
+FROM priced p JOIN log_blocks b ON b.log = p.log AND b.hash = p.block_hash
 GROUP BY p.log, p.block_hash`;
+}
 
-const TOOL_OUTPUTS = `
-CREATE TEMP VIEW v_tool_outputs AS
+/**
+ * Each tool use with its result Block's lifetime cost. \`lifetime\`: the lifetime rows to join (the view, or a
+ * Session's own); \`where\` filters the tool uses (\`t\`).
+ */
+export function toolOutputsSql(lifetime: string, where = ""): string {
+  return `
 SELECT t.log, t.session_id, t.id AS tool_use_id, t.name AS tool, t.mcp_server, t.file_path, t.skill, t.is_error,
   c.idx AS call_idx,
   substr(coalesce(t.input, (SELECT json_extract(k.content, '$.input') FROM blocks k WHERE k.hash = t.block_hash)),
@@ -142,7 +129,13 @@ SELECT t.log, t.session_id, t.id AS tool_use_id, t.name AS tool, t.mcp_server, t
   l.cost_cache_read_usd, l.cost_cache_write_usd, l.cost_input_usd, l.lifetime_cost_usd
 FROM tool_calls t
 LEFT JOIN calls c ON c.log = t.log AND c.id = t.call_id
-LEFT JOIN v_block_lifetime_cost l ON l.log = t.log AND l.block_hash = t.result_block_hash`;
+LEFT JOIN ${lifetime} l ON l.log = t.log AND l.block_hash = t.result_block_hash
+${where}`;
+}
+
+const LIFETIME = `CREATE TEMP VIEW v_block_lifetime_cost AS ${lifetimeSql()}`;
+
+const TOOL_OUTPUTS = `CREATE TEMP VIEW v_tool_outputs AS ${toolOutputsSql("v_block_lifetime_cost")}`;
 
 const CACHE_BREAKS = `
 CREATE TEMP VIEW v_cache_breaks AS
