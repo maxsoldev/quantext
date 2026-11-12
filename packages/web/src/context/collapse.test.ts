@@ -50,6 +50,7 @@ const ctx = {
   blocks: [block(0, "tools"), block(1, "tools", { basis: "estimate" }), block(2, "system"), merged],
   sections: { tools: 20, system: 10, messages: 10, framing: 0 },
   partTotals: [{ category: "injected-context", label: "Date", tokens: 5 }],
+  turns: [],
   totalTokens: 40,
 } as unknown as CallContext;
 const shape = (rows: Row[]) =>
@@ -104,7 +105,7 @@ describe("the open sections of the block list", () => {
   });
 
   test("a link to a block opens its section", () => {
-    expect(revealBlock(DEFAULT_COLLAPSE, block(2, "system")).open.system).toBe(true);
+    expect(revealBlock(DEFAULT_COLLAPSE, block(2, "system"), ctx).open.system).toBe(true);
   });
 
   test("a category of the token shares shows its parts with the list's, and opens their section", () => {

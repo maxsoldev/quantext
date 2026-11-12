@@ -79,6 +79,18 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // The resumed session's last call: the earlier turns open, turn 2 open, the call's own turn below.
+    name: "turns",
+    both: true,
+    go: async (page, engine) => {
+      await page.goto(`${await engine.sessionUrl("resume")}?call=4`);
+      await page.getByTestId("earlier-row").locator(".group-toggle").click();
+      await page.locator('[data-testid="turn-row"][data-turn="2"] .group-toggle').click();
+      await expect(page.locator('[data-testid="block-row"][data-pos="19"]')).toBeVisible();
+      await page.evaluate(`document.querySelector(".block-list")?.scrollIntoView({ block: "start" })`);
+    },
+  },
+  {
     name: "block-panel",
     both: false,
     go: async (page, engine) => {

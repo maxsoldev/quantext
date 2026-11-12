@@ -8,6 +8,7 @@ import type {
   CallResponseDetail,
   ContextBlock,
   ContextCategory,
+  ContextDiff,
   ResponseEntry,
   SessionKey,
 } from "@quantext/shared";
@@ -20,7 +21,7 @@ import type { Load } from "../ui/useLoad.ts";
 import type { ListActions } from "./BlockList.tsx";
 import { BlockList } from "./BlockList.tsx";
 import { BlockPanel } from "./BlockPanel.tsx";
-import { CATEGORIES, CATEGORY_LABEL } from "./categories.ts";
+import { CATEGORY_LABEL } from "./categories.ts";
 import type { Collapse } from "./collapse.ts";
 import {
   collapseAll,
@@ -29,13 +30,13 @@ import {
   revealBlock,
   toggleBlock,
   toggleCategory,
+  toggleEarlier,
   toggleSection,
+  toggleTurn,
 } from "./collapse.ts";
 import { KIND_LABEL } from "./kinds.ts";
-import { barSegments, blockSource, hiddenPart } from "./model.ts";
+import { barSegments, blockSource, hiddenPart, shareRows } from "./model.ts";
 
-/** The label of text in a block that no attached text accounts for. */
-const OTHER_PART = "Other text";
 const STORE = "quantext.context.open";
 
 /** The open sections, kept in localStorage: the same on every call and after a reload. */
@@ -70,6 +71,7 @@ export function ContextAt({
   call,
   ctx,
   resp,
+  diff,
   next,
   cwd,
   openHash,
@@ -80,6 +82,8 @@ export function ContextAt({
   ctx: Load<CallContext>;
   /** The Call's answer, shown as the Output section. */
   resp: Load<CallResponseDetail>;
+  /** What changed since the previous Call: its added blocks feed "Only new in this call". */
+  diff?: Load<ContextDiff> | undefined;
   /** The next Call of the lane, which sends the answer back; absent for the lane's latest Call. */
   next?: number | undefined;
   /** The Session's folder: tool inputs are shown relative to it. */
@@ -92,12 +96,15 @@ export function ContextAt({
   const [selected, setSelected] = useState<number | null>(null);
   const [jump, setJump] = useState<{ position: number; n: number } | undefined>(undefined);
   const [fold, setFold] = useCollapse();
+  const [onlyNew, setOnlyNew] = useState(false);
   const c = ctx.value;
+  const d = diff?.value;
+  const added = useMemo(() => (d && d.call === call ? new Set(d.added.map((b) => b.position)) : undefined), [d, call]);
   useEffect(() => {
     if (!openHash || !c || c.call.index !== call) return;
     const b = c.blocks.find((x) => x.hash === openHash);
     if (b) {
-      setFold((s) => revealBlock(s, b));
+      setFold((s) => revealBlock(s, b, c));
       setOpen({ block: b });
       setSelected(b.position);
       setJump((j) => ({ position: b.position, n: (j?.n ?? 0) + 1 }));
@@ -112,6 +119,9 @@ export function ContextAt({
       onFold: (f) => setFold((s) => toggleSection(s, f)),
       onParts: (b) => setFold((s) => toggleBlock(s, b)),
       onAll: (all) => setFold((s) => (all && c ? expandAll(s, c) : collapseAll())),
+      onEarlier: () => setFold(toggleEarlier),
+      onTurn: (key) => setFold((s) => toggleTurn(s, key)),
+      onOnlyNew: () => setOnlyNew((x) => !x),
     }),
     [c, setFold],
   );
@@ -143,7 +153,7 @@ export function ContextAt({
             selected={selected}
             onPick={(b) => setSelected(b.position)}
             onOpen={(b) => {
-              setFold((f) => revealBlock(f, b));
+              setFold((f) => revealBlock(f, b, c));
               setOpen({ block: b });
               setJump((j) => ({ position: b.position, n: (j?.n ?? 0) + 1 }));
             }}
@@ -158,6 +168,8 @@ export function ContextAt({
               fold={fold}
               selected={selected}
               jump={jump}
+              added={added}
+              onlyNew={onlyNew}
               act={act}
             />
             <CategoryTable ctx={c} fold={fold} onCategory={onCategory} />
@@ -182,6 +194,8 @@ export function ContextAt({
               fold={fold}
               selected={selected}
               jump={jump}
+              added={added}
+              onlyNew={onlyNew}
               act={act}
             />
           )}
@@ -320,9 +334,7 @@ function CategoryTable({
   onCategory: (cat: ContextCategory) => void;
 }) {
   const total = Math.max(1, ctx.totalTokens);
-  const rows = CATEGORIES.map((c) => ({ ...c, tokens: ctx.categories[c.key] })).filter((r) => r.tokens > 0);
-  const subRows = (key: string) =>
-    ctx.partTotals.filter((p) => p.category === key && p.tokens > 0 && p.label !== OTHER_PART);
+  const rows = shareRows(ctx);
   return (
     <table className="cat-table" aria-label="Tokens by category">
       <thead>
@@ -342,7 +354,7 @@ function CategoryTable({
             <tr>
               <th scope="row">
                 <span className="cat-head">
-                  {subRows(r.key).length > 0 && (
+                  {r.parts.length > 0 && (
                     <button
                       type="button"
                       className="part-toggle"
@@ -371,7 +383,7 @@ function CategoryTable({
                 </span>
               </td>
             </tr>
-            {(fold.cats.includes(r.key) ? subRows(r.key) : []).map((p, k) => (
+            {(fold.cats.includes(r.key) ? r.parts : []).map((p, k) => (
               <tr
                 key={p.label}
                 className="cat-sub"

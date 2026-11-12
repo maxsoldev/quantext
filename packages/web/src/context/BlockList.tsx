@@ -8,6 +8,7 @@ import type {
   CallResponseDetail,
   ContextBlock,
   ContextPart,
+  ContextTurn,
   ResponseEntry,
   SessionKey,
 } from "@quantext/shared";
@@ -23,7 +24,7 @@ import { Tokens } from "../ui/Num.tsx";
 import { useWindow } from "../ui/useWindow.ts";
 import type { Collapse, Fold } from "./collapse.ts";
 import { KIND_EXPLAIN, KIND_LABEL, SECTION } from "./kinds.ts";
-import type { Row, SectionHead } from "./model.ts";
+import type { EarlierHead, Row, SectionHead } from "./model.ts";
 import { blockSource, listRows, outputRows } from "./model.ts";
 
 const ROW = 48;
@@ -35,6 +36,9 @@ export interface ListActions {
   onFold: (fold: Fold) => void;
   onParts: (b: ContextBlock) => void;
   onAll: (open: boolean) => void;
+  onEarlier: () => void;
+  onTurn: (key: string) => void;
+  onOnlyNew: () => void;
 }
 
 export function BlockList({
@@ -46,6 +50,8 @@ export function BlockList({
   fold,
   selected,
   jump,
+  added,
+  onlyNew,
   act,
 }: {
   sessionKey: SessionKey;
@@ -58,12 +64,16 @@ export function BlockList({
   selected: number | null;
   /** A block to scroll to (a link to it); `n` changes on each jump. */
   jump: { position: number; n: number } | undefined;
+  /** The positions of the blocks added since the previous call; absent while the diff loads. */
+  added: ReadonlySet<number> | undefined;
+  onlyNew: boolean;
   act: ListActions;
 }) {
   const [find, setFind] = useState("");
+  const only = onlyNew ? added : undefined;
   const rows = useMemo(
-    () => [...listRows(ctx, find, fold), ...outputRows(resp, { find, open: fold.open.output, next })],
-    [ctx, resp, find, fold, next],
+    () => [...listRows(ctx, find, fold, only), ...outputRows(resp, { find, open: fold.open.output, next })],
+    [ctx, resp, find, fold, next, only],
   );
   const scroller = useRef<HTMLDivElement>(null);
   const w = useWindow(scroller, rows.length, ROW);
@@ -104,6 +114,19 @@ export function BlockList({
     switch (row.type) {
       case "section":
         return <SectionRow key={`s-${row.section}`} row={row} i={i} total={total} act={act} onKey={onKey} />;
+      case "earlier":
+        return <EarlierRow key="earlier" row={row} i={i} id={id} total={total} act={act} onKey={onKey} />;
+      case "turn":
+        return (
+          <TurnRow
+            key={`t-${row.turn.start}`}
+            row={row}
+            i={i}
+            id={id}
+            onToggle={() => act.onTurn(row.key)}
+            onKey={onKey}
+          />
+        );
       case "part":
         return (
           <PartRow
@@ -165,6 +188,18 @@ export function BlockList({
           aria-label="Find a block"
           data-testid="block-find"
         />
+        <button
+          type="button"
+          className="only-new"
+          aria-pressed={onlyNew}
+          disabled={added === undefined}
+          onClick={act.onOnlyNew}
+          data-testid="only-new"
+          data-tip="Show only the blocks this call added to the input since the previous call of its lane."
+        >
+          Only new<span className="wide-only"> in this call</span>
+          {added !== undefined && <span className="num muted"> {added.size}</span>}
+        </button>
         {find.trim() !== "" && (
           <span className="muted" role="status">
             {matched === 0
@@ -205,6 +240,8 @@ function regionId(rows: readonly Row[], i: number): string | undefined {
   const before = rows[i - 1];
   const row = rows[i];
   if (before?.type === "section" && row?.type !== "section") return `fold-${before.section}`;
+  if (before?.type === "earlier" && before.open && row?.type === "turn" && !row.current) return "fold-earlier";
+  if (before?.type === "turn" && before.open && row?.type === "block") return `turn-${before.turn.start}`;
   if (row?.type === "part" && before?.type === "block") return `parts-${row.block.position}`;
   return undefined;
 }
@@ -318,6 +355,131 @@ function SectionRow({
         )}
       </span>
     </div>
+  );
+}
+
+/** The cache split of a group of blocks, in words. */
+function cacheWords(cached: number, tokens: number): string {
+  return cached === tokens ? "All cached" : cached === 0 ? "All new" : `${percent(cached / tokens)} cached`;
+}
+
+/** Folds the earlier turns into one row: how many, their blocks, tokens and cache split. */
+function EarlierRow({
+  row,
+  i,
+  id,
+  total,
+  act,
+  onKey,
+}: {
+  row: EarlierHead;
+  i: number;
+  id: string | undefined;
+  total: number;
+  act: ListActions;
+  onKey: (delta: number) => void;
+}) {
+  const share = `${percent(row.tokens / total)} of the input`;
+  return (
+    <div className={`block-row group-row earlier-row${row.open ? " open" : ""}`} data-testid="earlier-row" id={id}>
+      <button
+        type="button"
+        className="section-toggle group-toggle"
+        data-i={i}
+        aria-expanded={row.open}
+        aria-controls="fold-earlier"
+        onClick={act.onEarlier}
+        onKeyDown={arrows(onKey)}
+        data-tip="The turns before this call's own: each a prompt and all that followed it. They are sent again on every call."
+      >
+        <span className="chevron" aria-hidden="true" />
+        <span className="group-title">Earlier turns</span>
+        <span className="muted num section-count">
+          {row.turns} turns, {row.blocks} {row.blocks === 1 ? "block" : "blocks"}, {share}
+        </span>
+      </button>
+      <span className="right">
+        <Tokens n={row.tokens} basis={row.basis} note={`The earlier turns' tokens, ${share}.`} />
+      </span>
+      <CacheSplit cached={row.cached} tokens={row.tokens} />
+      <span />
+    </div>
+  );
+}
+
+/** A turn's header: its number, its prompt, its size. An earlier turn folds; the call's own turn is a label. */
+function TurnRow({
+  row,
+  i,
+  id,
+  onToggle,
+  onKey,
+}: {
+  row: Extract<Row, { type: "turn" }>;
+  i: number;
+  id: string | undefined;
+  onToggle: () => void;
+  onKey: (delta: number) => void;
+}) {
+  const t: ContextTurn = row.turn;
+  const inner = (
+    <>
+      {!row.current && <span className="chevron" aria-hidden="true" />}
+      <span className="group-title num">Turn {t.turn}</span>
+      {row.current && <span className="tag current-turn">This call's turn</span>}
+      <span className="preview">{t.prompt ? t.prompt.preview : "No prompt: what the context kept before one"}</span>
+      <span className="muted num section-count">
+        {t.blocks} {t.blocks === 1 ? "block" : "blocks"}
+      </span>
+    </>
+  );
+  return (
+    <div
+      className={`block-row group-row turn-row${row.current ? " current" : ""}${row.open ? " open" : ""}`}
+      data-testid="turn-row"
+      data-turn={t.turn}
+      id={id}
+    >
+      {row.current ? (
+        <div className="section-toggle group-toggle" data-i={i}>
+          {inner}
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="section-toggle group-toggle"
+          data-i={i}
+          aria-expanded={row.open}
+          aria-controls={`turn-${t.start}`}
+          aria-label={`Turn ${t.turn}: ${t.prompt?.preview.slice(0, 80) ?? "no prompt"}`}
+          onClick={onToggle}
+          onKeyDown={arrows(onKey)}
+        >
+          {inner}
+        </button>
+      )}
+      <span className="right">
+        <Tokens n={t.tokens} basis={row.basis} note={`Turn ${t.turn}'s tokens.`} />
+      </span>
+      <CacheSplit cached={t.cachedTokens} tokens={t.tokens} />
+      <span />
+    </div>
+  );
+}
+
+function CacheSplit({ cached, tokens: n }: { cached: number; tokens: number }) {
+  return (
+    <span>
+      <span
+        className="tip-anchor cache-split"
+        data-tip={`${tokens(cached)} tokens read from the cache, ${tokens(n - cached)} after the cached prefix.`}
+      >
+        <span className="split-track" aria-hidden="true">
+          <span className="split-fill" style={{ width: `${(100 * cached) / Math.max(1, n)}%` }} />
+        </span>
+        {cacheWords(cached, n)}
+      </span>
+    </span>
   );
 }
 

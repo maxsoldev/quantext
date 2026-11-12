@@ -4,10 +4,15 @@ import type {
   CallContext,
   CallResponseDetail,
   ContextBlock,
+  ContextCategory,
   ContextPart,
+  ContextTurn,
+  PartTotal,
   ResponseEntry,
   TokenBasis,
 } from "@quantext/shared";
+import type { Part } from "./categories.ts";
+import { CATEGORIES } from "./categories.ts";
 import type { Collapse, Fold } from "./collapse.ts";
 import { KIND_LABEL } from "./kinds.ts";
 
@@ -25,8 +30,22 @@ export interface SectionHead {
   costUsd?: number;
 }
 
+/** The earlier turns of the messages, as one row that sums them. */
+export interface EarlierHead {
+  type: "earlier";
+  open: boolean;
+  turns: number;
+  blocks: number;
+  tokens: number;
+  basis: TokenBasis;
+  cached: number;
+}
+
 export type Row =
   | SectionHead
+  | EarlierHead
+  /** A turn's header: an earlier one folds; `current` is the call's own turn, always open. */
+  | { type: "turn"; turn: ContextTurn; key: string; open: boolean; current: boolean; basis: TokenBasis }
   | { type: "block"; block: ContextBlock; parts: number; open: boolean }
   | { type: "part"; block: ContextBlock; part: ContextPart }
   | { type: "output"; entry: ResponseEntry; n: number }
@@ -43,16 +62,26 @@ function weakest(blocks: readonly ContextBlock[]): TokenBasis {
   return out;
 }
 
+/** The key that keeps a turn open across calls: its prompt's hash, else its first block's. */
+export function turnKey(ctx: CallContext, t: ContextTurn): string {
+  const at = (p: number) => ctx.blocks[p]?.hash;
+  return (t.prompt && at(t.prompt.position)) ?? at(t.start) ?? `turn-${t.start}`;
+}
+
 /**
  * The sections in request order, each with a header row and, when open, its blocks, each followed by its parts
- * when it has more than one and they are shown; the framing tokens go last, shown with the messages. `find` keeps the
- * blocks whose kind, source, preview or part matches (case does not count), with only the parts that match when
- * any does, and opens the sections and blocks it finds in. Without `fold`, all is open.
+ * when it has more than one and they are shown; the framing tokens go last, shown with the messages. With more
+ * than one turn, the messages' earlier turns fold into one row, then a row each, and the call's own turn is open.
+ * `find` keeps the blocks whose kind, source, preview or part matches (case does not count), with only the parts
+ * that match when any does; `only` keeps the blocks at those positions. Both open what they find in. Without
+ * `fold`, all is open.
  */
-export function listRows(ctx: CallContext, find = "", fold?: Collapse): Row[] {
+export function listRows(ctx: CallContext, find = "", fold?: Collapse, only?: ReadonlySet<number>): Row[] {
   const needle = find.trim().toLowerCase();
+  const filtered = needle !== "" || only !== undefined;
   const has = (...texts: string[]) => texts.some((t) => t.toLowerCase().includes(needle));
   const blockRows = (block: ContextBlock): Row[] => {
+    if (only !== undefined && !only.has(block.position)) return [];
     const parts = (block.parts?.length ?? 0) > 1 ? (block.parts ?? []) : [];
     const own = has(KIND_LABEL[block.kind], blockSource(block), block.preview);
     const hits = needle === "" ? [] : parts.filter((p) => has(p.label, p.preview));
@@ -65,9 +94,9 @@ export function listRows(ctx: CallContext, find = "", fold?: Collapse): Row[] {
   const rows: Row[] = [];
   for (const section of ORDER) {
     const blocks = ctx.blocks.filter((b) => b.section === section);
-    const shown = blocks.flatMap(blockRows);
+    const shown = section === "messages" ? turnRows(ctx, blocks, blockRows, filtered, fold) : blocks.flatMap(blockRows);
     if (shown.length === 0) continue;
-    const open = needle !== "" || fold === undefined || fold.open[section];
+    const open = filtered || fold === undefined || fold.open[section];
     const sum = (f: (b: ContextBlock) => number) => blocks.reduce((n, b) => n + f(b), 0);
     const cached = sum((b) => (b.inCachedPrefix ? (b.tokens ?? 0) : 0));
     const head: SectionHead = {
@@ -83,8 +112,66 @@ export function listRows(ctx: CallContext, find = "", fold?: Collapse): Row[] {
     if (blocks.some((b) => b.costUsd !== undefined)) head.costUsd = sum((b) => b.costUsd ?? 0);
     rows.push(head, ...(open ? shown : []));
   }
-  const framing = needle !== "" || fold === undefined || fold.open.messages;
+  const framing = filtered || fold === undefined || fold.open.messages;
   for (const block of ctx.blocks.filter((b) => b.section === "framing" && framing)) rows.push(...blockRows(block));
+  return rows;
+}
+
+/**
+ * The messages' rows by turn: the earlier turns' row, a row per earlier turn when it is open, the blocks of each
+ * open turn, then the call's own turn. A filter shows only the turns it finds in, open. One turn: just its blocks.
+ */
+function turnRows(
+  ctx: CallContext,
+  blocks: readonly ContextBlock[],
+  blockRows: (b: ContextBlock) => Row[],
+  filtered: boolean,
+  fold: Collapse | undefined,
+): Row[] {
+  const turns = ctx.turns ?? [];
+  if (turns.length < 2) return blocks.flatMap(blockRows);
+  const byTurn = new Map<number, ContextBlock[]>();
+  for (const b of blocks) {
+    const list = byTurn.get(b.turn ?? 0);
+    if (list) list.push(b);
+    else byTurn.set(b.turn ?? 0, [b]);
+  }
+  const earlier = turns.slice(0, -1);
+  const current = turns.at(-1) as ContextTurn;
+  // Collapsed groups draw nothing, so their block rows are built only when shown or filtered.
+  const inner = (t: ContextTurn) => (byTurn.get(t.turn) ?? []).flatMap(blockRows);
+  const rows: Row[] = [];
+  const open = filtered || fold === undefined || fold.earlier;
+  const earlierRows: Row[] = [];
+  if (open) {
+    for (const t of earlier) {
+      const key = turnKey(ctx, t);
+      const shown = filtered || fold === undefined || fold.turns.includes(key) ? inner(t) : [];
+      if (filtered && shown.length === 0) continue;
+      const basis = weakest(byTurn.get(t.turn) ?? []);
+      earlierRows.push({ type: "turn", turn: t, key, open: shown.length > 0, current: false, basis }, ...shown);
+    }
+  }
+  if (!filtered || earlierRows.length > 0) {
+    const sum = (f: (t: ContextTurn) => number) => earlier.reduce((n, t) => n + f(t), 0);
+    rows.push(
+      {
+        type: "earlier",
+        open,
+        turns: earlier.length,
+        blocks: sum((t) => t.blocks),
+        tokens: sum((t) => t.tokens),
+        basis: weakest(earlier.flatMap((t) => byTurn.get(t.turn) ?? [])),
+        cached: sum((t) => t.cachedTokens),
+      },
+      ...earlierRows,
+    );
+  }
+  const own = inner(current);
+  if (!filtered || own.length > 0) {
+    const basis = weakest(byTurn.get(current.turn) ?? []);
+    rows.push({ type: "turn", turn: current, key: turnKey(ctx, current), open: true, current: true, basis }, ...own);
+  }
   return rows;
 }
 
@@ -138,6 +225,25 @@ export function blockSource(b: ContextBlock): string {
   if (parts.length === 1 && only !== undefined && s === (b.source.attachment ?? "")) return only.label;
   const attached = parts.filter((p) => p.source.attachment !== undefined).length;
   return s === "" && parts.length > 1 ? `${attached} attached texts` : s;
+}
+
+/** The label of text in a block that no attached text accounts for. */
+const OTHER_PART = "Other text";
+
+/**
+ * The token-share table: the categories that hold tokens, largest share first (ties in the categories' order),
+ * each with its part totals the same way, without the text no attached text accounts for.
+ */
+export function shareRows(ctx: CallContext): (Part<ContextCategory> & { tokens: number; parts: PartTotal[] })[] {
+  return CATEGORIES.map((c) => ({
+    ...c,
+    tokens: ctx.categories[c.key] ?? 0,
+    parts: ctx.partTotals
+      .filter((p) => p.category === c.key && p.tokens > 0 && p.label !== OTHER_PART)
+      .sort((a, b) => b.tokens - a.tokens),
+  }))
+    .filter((r) => r.tokens > 0)
+    .sort((a, b) => b.tokens - a.tokens);
 }
 
 /** The tool schemas and the system prompt: sent before the first message, never shown in the chat. */
