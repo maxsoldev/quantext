@@ -1,0 +1,266 @@
+/**
+ * The query layer on the recorded fixtures. Expected values come from the fixtures themselves: the manifests, and
+ * the harness's own `cost-state` totals in the transcripts, never from the store's rows.
+ */
+import { describe, expect, test } from "vitest";
+import { claudeCodeCodec } from "../../src/adapters/claude-code/index.ts";
+import type { Query } from "../../src/query/index.ts";
+import { createQuery } from "../../src/query/index.ts";
+import { mainRows } from "../fixtures.ts";
+import { ingested } from "./corpus.ts";
+
+const ID = (n: number) => `00000000-0000-4000-8000-00000000000${n}`;
+
+async function query(names?: string[]): Promise<Query> {
+  const { db } = await ingested(names);
+  return createQuery({ db, codec: claudeCodeCodec, now: () => Date.parse("2026-11-13T00:00:00Z") });
+}
+
+/** The harness's last cost-state row of a scenario: its own token and cost totals. */
+function harnessTotals(scenario: string) {
+  const row = mainRows(scenario)
+    .filter((r) => r.type === "cost-state")
+    .at(-1) as { totalCostUSD: number; modelUsage: Record<string, Record<string, number>> };
+  const usage = Object.values(row.modelUsage);
+  const sum = (k: string) => usage.reduce((n, u) => n + (u[k] ?? 0), 0);
+  return {
+    input: sum("inputTokens"),
+    cacheRead: sum("cacheReadInputTokens"),
+    cacheWrite: sum("cacheCreationInputTokens"),
+    output: sum("outputTokens"),
+    costUsd: row.totalCostUSD,
+  };
+}
+
+const key = (q: Query, n: number) => {
+  const [found] = q.findSessions(ID(n));
+  if (found === undefined) throw new Error(`no session ${ID(n)}`);
+  return found;
+};
+
+describe("listSessions", () => {
+  test("lists each main Session once, newest first, with its subagents nested", async () => {
+    const q = await query();
+    const page = q.listSessions();
+    expect(page.total).toBe(7);
+    expect(page.items.map((s) => s.id)).toEqual([4, 7, 6, 5, 3, 2, 1].map(ID));
+    const withAgent = page.items.find((s) => s.id === ID(2));
+    expect(withAgent?.subagents?.map((s) => s.parentId)).toEqual([ID(2)]);
+    expect(withAgent?.subagents?.[0]?.calls).toBe(3);
+  });
+
+  test("gives a Session's totals as the harness counted them", async () => {
+    const q = await query(["basic-tools"]);
+    const [s] = q.listSessions().items;
+    const harness = harnessTotals("basic-tools");
+    expect(s?.calls).toBe(8);
+    expect(s?.tokens).toEqual({
+      input: harness.input,
+      cacheRead: harness.cacheRead,
+      cacheWrite: harness.cacheWrite,
+      output: harness.output,
+    });
+    // The harness prices without the Bedrock regional endpoint's 10 % (the price modifier the Calls carry).
+    expect(s?.cost.totalUsd).toBeCloseTo(harness.costUsd * 1.1, 6);
+    const c = s?.cost;
+    expect((c?.inputUsd ?? 0) + (c?.cacheReadUsd ?? 0) + (c?.cacheWriteUsd ?? 0) + (c?.outputUsd ?? 0)).toBeCloseTo(
+      c?.totalUsd ?? 0,
+      9,
+    );
+    expect(s?.cacheHitRate).toBeCloseTo(
+      harness.cacheRead / (harness.input + harness.cacheRead + harness.cacheWrite),
+      9,
+    );
+    expect(s).toMatchObject({ requestLog: "present", project: "/fixture-0000000000000000/repo", live: false });
+  });
+
+  test("sorts, pages, filters by project and searches ids", async () => {
+    const q = await query();
+    const byCalls = q.listSessions({ sort: "calls", order: "desc", limit: 2 });
+    expect(byCalls.items.map((s) => s.calls)).toEqual([8, 5]);
+    expect(q.listSessions({ sort: "started", order: "asc", limit: 2, offset: 1 }).items.map((s) => s.id)).toEqual([
+      ID(2),
+      ID(3),
+    ]);
+    expect(q.listSessions({ project: "repo" }).total).toBe(7);
+    expect(q.listSessions({ project: "other" }).total).toBe(0);
+    expect(q.listSessions({ search: "0000000005" }).items.map((s) => s.id)).toEqual([ID(5)]);
+  });
+
+  test("marks a Session live when its last event is recent", async () => {
+    const { db } = await ingested(["image"]);
+    const at = (iso: string) => createQuery({ db, codec: claudeCodeCodec, now: () => Date.parse(iso) });
+    expect(at("2026-11-12T00:27:00Z").listSessions().items[0]?.live).toBe(true);
+    expect(at("2026-11-12T01:00:00Z").listSessions().items[0]?.live).toBe(false);
+  });
+});
+
+describe("contextAt", () => {
+  test("rebuilds every split Call: its entries add up to its input total, by section and by category", async () => {
+    const q = await query();
+    let checked = 0;
+    for (const s of q.listSessions().items.flatMap((m) => [m, ...(m.subagents ?? [])])) {
+      for (const call of q.listCalls(s)) {
+        const ctx = q.contextAt(s, call.index);
+        if (ctx === undefined || !ctx.rebuilt || call.usage === undefined) continue;
+        const u = call.usage;
+        const total = u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens;
+        const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+        expect(sum(ctx.blocks.map((b) => b.tokens ?? 0))).toBe(total);
+        expect(sum(Object.values(ctx.sections))).toBe(total);
+        expect(sum(Object.values(ctx.categories))).toBe(total);
+        expect(ctx.totalTokens).toBe(total);
+        expect(ctx.blocks.map((b) => b.position)).toEqual(ctx.blocks.map((_, i) => i));
+        expect(ctx.blocks.at(-1)).toMatchObject({ kind: "framing", tokens: call.framingTokens, basis: "framing" });
+        const cached = sum(ctx.blocks.filter((b) => b.inCachedPrefix).map((b) => b.tokens ?? 0));
+        expect(cached).toBeLessThanOrEqual(u.cacheReadTokens);
+        if (call.cost !== undefined) {
+          const c = call.cost;
+          expect(sum(ctx.blocks.map((b) => b.costUsd ?? 0))).toBeCloseTo(
+            c.inputUsd + c.cacheReadUsd + c.cacheWriteUsd,
+            9,
+          );
+        }
+        checked++;
+      }
+    }
+    expect(checked).toBe(29);
+  });
+
+  test("names each Block's kind, group and source, with a preview of its text", async () => {
+    const q = await query(["basic-tools", "image"]);
+    const ctx = q.contextAt(key(q, 1), 7);
+    const kinds = new Set(ctx?.blocks.map((b) => `${b.kind}>${b.category}`));
+    for (const k of [
+      "tool-schema>tool-definitions",
+      "system>base-instructions",
+      "reminder>injected-context",
+      "user>user",
+      "tool-call>tool-calls",
+      "tool-result>tool-outputs",
+      "framing>other",
+    ]) {
+      expect(kinds).toContain(k);
+    }
+    const big = ctx?.blocks.find((b) => b.kind === "tool-result" && b.source.filePath?.endsWith("src/big.txt"));
+    expect(big).toMatchObject({ source: { tool: "Read" }, truncated: true });
+    expect(big?.preview.length).toBe(240);
+    expect(big?.chars).toBeGreaterThan(10_000);
+    const image = q
+      .contextAt(key(q, 3), 1)
+      ?.blocks.find((b) => b.kind === "tool-result" && b.source.filePath?.endsWith("diagram.png"));
+    expect(image).toMatchObject({ kind: "tool-result", category: "tool-outputs", preview: "[image 96x64]" });
+  });
+
+  test("is undefined for a Call or Session that does not exist", async () => {
+    const q = await query(["image"]);
+    expect(q.contextAt(key(q, 3), 99)).toBeUndefined();
+    expect(q.contextAt({ log: 99, id: ID(3) }, 0)).toBeUndefined();
+  });
+});
+
+describe("contextDiff", () => {
+  test("the lane's first Call adds every Block; a later one adds the new turn and keeps the cached prefix", async () => {
+    const q = await query(["basic-tools"]);
+    const s = key(q, 1);
+    const first = q.contextDiff(s, 0);
+    expect(first?.previous).toBeUndefined();
+    expect(first?.added.length).toBe(q.contextAt(s, 0)?.blocks.filter((b) => b.hash !== undefined).length);
+    const next = q.contextDiff(s, 1);
+    expect(next?.previous).toBe(0);
+    expect(next?.removed).toEqual([]);
+    expect(next?.added.map((b) => b.kind)).toContain("tool-result");
+    expect(next?.firstChange).toBe(Math.min(...(next?.added ?? []).map((b) => b.position)));
+  });
+
+  test("shows where the cache broke: the first change, the cache read lost, the Blocks after it", async () => {
+    const q = await query(["compaction"]);
+    const s = key(q, 5);
+    const calls = q.listCalls(s).filter((c) => c.lane === q.listCalls(s)[0]?.lane);
+    const breaks = calls.filter(
+      (c, i) => (c.usage?.cacheReadTokens ?? 0) < (calls[i - 1]?.usage?.cacheReadTokens ?? 0),
+    );
+    // After the compaction: the summary replaces the messages.
+    expect(breaks).toHaveLength(1);
+    const call = breaks[0];
+    const diff = q.contextDiff(s, call?.index ?? -1);
+    const prev = call === undefined ? undefined : calls[calls.indexOf(call) - 1];
+    expect(diff?.previous).toBe(prev?.index);
+    expect(diff?.cacheReadDrop).toBe((prev?.usage?.cacheReadTokens ?? 0) - (call?.usage?.cacheReadTokens ?? 0));
+    // The provider read the unchanged prefix from its cache: up to the first change.
+    expect(diff?.firstChange).toBe(call?.cacheBoundary?.position);
+    expect(diff?.added.find((b) => b.position === diff.firstChange)?.kind).toBe("summary");
+    expect(diff?.removed.map((b) => b.kind)).toContain("tool-result");
+  });
+});
+
+describe("a Session's detail", () => {
+  test("has its lanes, subagents and tool calls", async () => {
+    const q = await query(["subagent", "basic-tools"]);
+    const detail = q.getSession(key(q, 2));
+    expect(detail?.subagents.map((s) => s.agentName ?? s.id)).toHaveLength(1);
+    expect(detail?.lanes.map((l) => l.calls)).toEqual([2]);
+    const tools = q.toolCalls(key(q, 1));
+    // The steps of the scenario, and a Read of the file before its Edit.
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      "Bash",
+      "Bash",
+      "Bash",
+      "Edit",
+      "Read",
+      "Read",
+      "Read",
+      "Read",
+      "Read",
+    ]);
+    expect(tools.filter((t) => t.isError).map((t) => t.input)).toEqual([
+      { file_path: "/fixture-0000000000000000/repo/missing.txt" },
+    ]);
+    expect(tools.every((t) => t.resultTokens !== undefined && t.callIndex !== undefined)).toBe(true);
+    const parallel = q.listCalls(key(q, 1)).filter((c) => c.toolCalls.filter((t) => t.name === "Read").length === 2);
+    expect(parallel).toHaveLength(1);
+  });
+
+  test("has its compaction with the sizes the harness logged, and what was removed and kept", async () => {
+    const q = await query(["compaction"]);
+    const [c] = q.compactions(key(q, 5));
+    expect(c).toMatchObject({ trigger: "manual", beforeTokens: 16778, afterTokens: 2865 });
+    expect(c?.afterCallIndex).toBeGreaterThan(c?.beforeCallIndex ?? 99);
+    const before = q.contextAt(key(q, 5), c?.beforeCallIndex ?? -1);
+    const blockTokens = (before?.blocks ?? [])
+      .filter((b) => b.hash !== undefined)
+      .reduce((n, b) => n + (b.tokens ?? 0), 0);
+    expect((c?.removed?.tokens ?? 0) + (c?.kept?.tokens ?? 0)).toBe(blockTokens);
+    expect(c?.kept?.categories["tool-definitions"]).toBeGreaterThan(0);
+    expect(c?.removed?.categories["tool-outputs"]).toBeGreaterThan(0);
+    expect(c?.summaryTokens).toBeGreaterThan(0);
+    expect(q.getSession(key(q, 5))?.compactions).toEqual([c]);
+  });
+
+  test("gives a Block's whole text and content, and an image's media", async () => {
+    const q = await query(["image"]);
+    const s = key(q, 3);
+    const image = q
+      .contextAt(s, 1)
+      ?.blocks.find((b) => b.kind === "tool-result" && b.source.filePath?.endsWith("diagram.png"));
+    const block = q.getBlock(image?.hash ?? "", s.log);
+    expect(block?.text).toBe("[image 96x64]");
+    expect(block?.media).toHaveLength(1);
+    expect(block?.media[0]?.mediaType).toBe("image/png");
+    const bytes = q.getMedia(block?.media[0]?.hash ?? "")?.bytes;
+    expect([...(bytes ?? []).slice(1, 4)].map((b) => String.fromCharCode(b)).join("")).toBe("PNG");
+    expect(q.getBlock(image?.hash ?? "", 99)).toBeUndefined();
+  });
+});
+
+describe("the report", () => {
+  test("counts the Calls' issues and the record kinds ingest ignored, with nothing pending", async () => {
+    const q = await query();
+    const report = q.ingestReport();
+    expect(report.unknownRecords).toEqual([]);
+    expect(report.ignoredRecords.map((r) => r.kind)).toContain("queue-operation");
+    expect(report.issues["unresolved-request"]).toBe(1);
+    expect(report.pendingBytes).toBe(0);
+    expect(report.requestLogs).toEqual([{ requestLog: "present", sessions: 8 }]);
+  });
+});
