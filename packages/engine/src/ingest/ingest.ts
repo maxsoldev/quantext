@@ -52,13 +52,20 @@ export interface IngestSummary {
   callsAdded: number;
   /** Files and folders that could not be read, and logs whose ingest failed; also kept in the store's report. */
   errors: PathError[];
+  /** The stop signal ended the pass early; what was read is written, the next pass goes on from there. */
+  stopped: boolean;
+}
+
+export interface RunOptions {
+  /** Stop after the batch in progress: every batch written is complete, so the next pass goes on from there. */
+  signal?: AbortSignal;
 }
 
 export interface Ingest {
   /** Find every log under the root and read what is new in it. */
-  ingestAll(): Promise<IngestSummary>;
+  ingestAll(run?: RunOptions): Promise<IngestSummary>;
   /** Read what is new in the logs of these files (a transcript or meta file, main or subagent). */
-  ingestPaths(paths: readonly string[]): Promise<IngestSummary>;
+  ingestPaths(paths: readonly string[], run?: RunOptions): Promise<IngestSummary>;
   /** Listen for Calls added or updated, after each write. Returns a function that stops listening. */
   onCalls(listener: (event: CallsEvent) => void): () => void;
 }
@@ -85,12 +92,23 @@ export function createIngest(options: IngestOptions): Ingest {
       for (const listener of listeners) queueMicrotask(() => listener(event));
     }
   };
-  const pass = async (logs: LogFiles[], errors: PathError[]): Promise<IngestSummary> => {
-    const summary: IngestSummary = { logs: logs.length, files: 0, bytes: 0, callsAdded: 0, errors: [...errors] };
+  const pass = async (logs: LogFiles[], errors: PathError[], signal?: AbortSignal): Promise<IngestSummary> => {
+    const summary: IngestSummary = {
+      logs: logs.length,
+      files: 0,
+      bytes: 0,
+      callsAdded: 0,
+      errors: [...errors],
+      stopped: false,
+    };
     for (const files of logs) {
       const log = store.log(files.main, HARNESS, claudeCodeRecords);
       try {
-        await ingestLog(log, files, limits, summary, (result) => emit(files.main, result));
+        if (signal?.aborted) {
+          summary.stopped = true;
+          break;
+        }
+        await ingestLog(log, files, limits, summary, (result) => emit(files.main, result), signal);
       } catch (error) {
         summary.errors.push({ path: files.main, error: `ingest failed: ${describe(error)}` });
         markFailed(log, files.main, describe(error));
@@ -99,12 +117,12 @@ export function createIngest(options: IngestOptions): Ingest {
     return summary;
   };
   return {
-    ingestAll: () =>
+    ingestAll: (run = {}) =>
       serial(async () => {
         const found = await discoverLogs(root);
-        return pass(found.logs, found.errors);
+        return pass(found.logs, found.errors, run.signal);
       }),
-    ingestPaths: (paths) =>
+    ingestPaths: (paths, run = {}) =>
       serial(async () => {
         const logs: LogFiles[] = [];
         const errors: PathError[] = [];
@@ -113,7 +131,7 @@ export function createIngest(options: IngestOptions): Ingest {
           logs.push(found.files);
           errors.push(...found.errors);
         }
-        return pass(logs, errors);
+        return pass(logs, errors, run.signal);
       }),
     onCalls(listener) {
       listeners.add(listener);
@@ -137,6 +155,7 @@ async function ingestLog(
   limits: Limits,
   summary: IngestSummary,
   emit: (result: WriteResult) => void,
+  signal: AbortSignal | undefined,
 ): Promise<void> {
   const entries: Entry[] = [{ path: files.main, transcript: "main", kind: "transcript" }];
   for (const agent of files.subagents) {
@@ -204,17 +223,25 @@ async function ingestLog(
         continue;
       }
       let offset = old?.offset ?? 0;
+      let print = old?.fingerprint;
       let read = false;
       for await (const piece of completeLines(entry.handle, offset, stat.size, limits.batchBytes)) {
+        if (signal?.aborted) break;
         const delta = parserNow().push(piece.text, entry.transcript);
         const bytes = piece.end - offset;
         summary.bytes += bytes;
         offset = piece.end;
         read = true;
-        write(delta, mark(offset, await fingerprint(entry.handle, offset)), bytes);
+        print = await fingerprint(entry.handle, offset);
+        // Until the read reaches the end, the mark says the file ends here: a restart reads on from it.
+        write(delta, { ...mark(offset, print), size: offset }, bytes);
       }
       if (read) summary.files++;
-      else write(undefined, mark(offset, old?.fingerprint));
+      if (signal?.aborted) {
+        summary.stopped = true;
+        return;
+      }
+      write(undefined, mark(offset, print));
     }
   } finally {
     for (const entry of entries) await entry.handle?.close();

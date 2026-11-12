@@ -27,21 +27,24 @@ function manualChanges(): ChangeSource & { fire(path?: string): void; closed: bo
   return source;
 }
 
-const EMPTY: IngestSummary = { logs: 0, files: 0, bytes: 0, callsAdded: 0, errors: [] };
+const EMPTY: IngestSummary = { logs: 0, files: 0, bytes: 0, callsAdded: 0, errors: [], stopped: false };
 
 /** An Ingest that records what it was asked to read, and can be held inside a read. */
 function recordingIngest() {
   const asked: (string[] | "all")[] = [];
+  const signals: (AbortSignal | undefined)[] = [];
   let release: (() => void) | undefined;
   let held: Promise<void> | undefined;
   const ingest: Ingest = {
-    ingestAll: async () => {
+    ingestAll: async (run) => {
       asked.push("all");
+      signals.push(run?.signal);
       await held;
       return EMPTY;
     },
-    ingestPaths: async (paths) => {
+    ingestPaths: async (paths, run) => {
       asked.push([...paths]);
+      signals.push(run?.signal);
       await held;
       return EMPTY;
     },
@@ -50,6 +53,7 @@ function recordingIngest() {
   return {
     ingest,
     asked,
+    signals,
     hold() {
       held = new Promise((resolve) => {
         release = resolve;
@@ -129,7 +133,7 @@ describe("the watcher", () => {
     expect(fake.asked).toEqual([["/r/projects/p/a.jsonl"], ["/r/projects/p/b.jsonl"]]);
   });
 
-  test("stops cleanly: closes its change source, waits for the read in progress, then reads nothing more", async () => {
+  test("stops cleanly: closes its change source, stops the read in progress and waits for it, then reads nothing more", async () => {
     const fake = recordingIngest();
     const changes = manualChanges();
     const watcher = watchTranscripts({ ingest: fake.ingest, root: "/r", changes, debounceMs: 60_000 });
@@ -142,6 +146,7 @@ describe("the watcher", () => {
     });
     await Promise.resolve();
     expect(stopped).toBe(false);
+    expect(fake.signals[0]?.aborted).toBe(true);
     fake.release();
     await stopping;
     expect(changes.closed).toBe(true);

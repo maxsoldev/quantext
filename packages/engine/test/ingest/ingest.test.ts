@@ -13,7 +13,7 @@ import { describe, expect, test } from "vitest";
 import { claudeCodeRecords } from "../../src/adapters/claude-code/index.ts";
 import type { CallsEvent, Ingest } from "../../src/ingest/index.ts";
 import { createIngest } from "../../src/ingest/index.ts";
-import type { Store } from "../../src/store/index.ts";
+import type { LogStore, Store } from "../../src/store/index.ts";
 import { openStore } from "../../src/store/index.ts";
 import { scenarios } from "../fixtures.ts";
 import { normal, random } from "../store/graph.ts";
@@ -143,6 +143,57 @@ describe("reading again", () => {
   ])("in batches much smaller than the file, with %s, gives the same graph", async (_, restoreBytes) => {
     const s = await setup({ batchBytes: 2048, restoreBytes });
     const files = copyScenario(s.root, "compaction");
+    await s.ingest.ingestAll();
+    expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
+  });
+});
+
+/** The store as seen by a process that dies after `writes` writes: every later write fails. */
+function dyingStore(store: Store, writes: number): Store {
+  let left = writes;
+  return {
+    ...store,
+    log(path, harness, codec): LogStore {
+      const log = store.log(path, harness, codec);
+      return {
+        ...log,
+        write(batch) {
+          if (left-- <= 0) throw new Error("the process died");
+          return log.write(batch);
+        },
+      };
+    },
+  };
+}
+
+describe("an ingest that stops inside a file", () => {
+  test.each([1, 3, 7])("after %i batches (the process died) goes on from there on the next start", async (k) => {
+    const root = tempDir("qx-root-");
+    const dataDir = tempDir("qx-data-");
+    const files = copyScenario(root, "compaction");
+    const first = await openStore({ dataDir });
+    await expect(createIngest({ store: dyingStore(first, k), root, batchBytes: 4096 }).ingestAll()).rejects.toThrow(
+      "the process died",
+    );
+    first.close();
+    const s = await setup({ root, dataDir });
+    await s.ingest.ingestAll();
+    expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
+  });
+
+  test("after a stop signal (shutdown, idle exit) goes on from there on the next start", async () => {
+    const root = tempDir("qx-root-");
+    const dataDir = tempDir("qx-data-");
+    const files = copyScenario(root, "compaction");
+    const first = await openStore({ dataDir });
+    const ingest = createIngest({ store: first, root, batchBytes: 4096 });
+    const stop = new AbortController();
+    ingest.onCalls(() => stop.abort());
+    const summary = await ingest.ingestAll({ signal: stop.signal });
+    expect(summary.stopped).toBe(true);
+    expect(summary.bytes).toBeLessThan(readFileSync(files.main).length);
+    first.close();
+    const s = await setup({ root, dataDir });
     await s.ingest.ingestAll();
     expect(graphOf(s.store, files.main)).toEqual(expectedScenario(files));
   });
