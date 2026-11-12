@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
   buildScriptProblems,
+  LICENCE_ALLOWLIST,
   licenceAllowed,
   licenceProblems,
   lockfileProblems,
@@ -120,4 +123,15 @@ describe("licences", () => {
     expect(text).toContain("## a 1.0.0 (MIT)");
     expect(text).toContain("Copyright A");
   });
+});
+
+test("the dependency review allows the same licences as the licence check", () => {
+  const config = readFileSync(join(import.meta.dirname, "..", "..", ".github", "dependency-review-config.yml"), "utf8");
+  const block = /^allow-licenses:\n((?: {2}- .+\n)+)/m.exec(config)?.[1] ?? "";
+  expect(
+    block
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => l.replace(/^ {2}- /, "")),
+  ).toEqual(LICENCE_ALLOWLIST);
 });
