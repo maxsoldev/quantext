@@ -1,0 +1,9 @@
+{
+  "name": "quantext",
+  "version": "0.1.0",
+  "description": "Live context and cache costs in the status line, user-only nudges, and the Quantext live context viewer. Fully local: no telemetry, no outbound connections.",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "maxsoldev"
+  }
+}
