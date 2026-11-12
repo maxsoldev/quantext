@@ -26,6 +26,9 @@ const manifest = { ...json(join(mod, ".claude-plugin", "plugin.json")), version 
 writeFileSync(join(out, ".claude-plugin", "plugin.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 for (const dir of ["hooks", "src", "types"]) cpSync(join(mod, dir), join(out, dir), { recursive: true });
 cpSync(join(repo, "LICENSE"), join(out, "LICENSE"));
+// The licences of the production dependencies, which the engine and the viewer bundle (SECURITY.md).
+const noticesScript = join(import.meta.dirname, "check-supply-chain.ts");
+execFileSync(process.execPath, [noticesScript, "--notices", join(out, "THIRD_PARTY_NOTICES.md")], { stdio: "inherit" });
 
 // The engine without its source maps; package.json makes its .js files ES modules and names its version,
 // which the mod compares with the running engine's /health.
@@ -44,6 +47,7 @@ const required = [
   "engine/sql-watchdog.js",
   "engine/query-worker.js",
   "engine/web/index.html",
+  "THIRD_PARTY_NOTICES.md",
 ];
 const missing = required.filter((path) => !existsSync(join(out, path)));
 if (missing.length > 0) throw new Error(`dist/plugin lacks ${missing.join(", ")}`);
