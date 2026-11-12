@@ -11,21 +11,51 @@ describe("canaryTerms", () => {
     ]);
   });
 
-  test("takes MCP server names from the user config and every project, and plugins from own marketplaces", () => {
+  test("takes MCP server names from the user config and every project, plugin names, own marketplaces", () => {
     const claudeJson = {
       mcpServers: { "team-graph": {} },
       projects: { "/x": { mcpServers: { "local-notes": {} } }, "/y": {} },
     };
     const settings = {
       mcpServers: { "work-wiki": {} },
-      enabledPlugins: { "trace-hooks@acme-tools": true, "context7@claude-plugins-official": true },
+      enabledPlugins: {
+        "trace-hooks@acme-tools": true,
+        "context7@claude-plugins-official": true,
+        "code-review@claude-plugins-official": true,
+      },
     };
     expect(canaryTerms({ claudeJson, settings }).sort()).toEqual(
-      ["acme-tools", "local-notes", "team-graph", "trace-hooks", "work-wiki"].sort(),
+      ["acme-tools", "context7", "local-notes", "team-graph", "trace-hooks", "work-wiki"].sort(),
     );
   });
 
   test("adds extra terms, drops terms under 4 characters and duplicates", () => {
     expect(canaryTerms({ extra: ["acme", "ab", "acme", " spaced "] })).toEqual(["acme", "spaced"]);
+  });
+
+  test("takes skill, agent and command names and descriptions, but not built-in names", () => {
+    const terms = canaryTerms({
+      skills: [
+        { name: "deep-review", description: "Review a branch against the house rules of Acme" },
+        { name: "research", description: "short" },
+        { name: "code-review" },
+        { name: "pr" },
+      ],
+      agents: [{ name: "triage-bot" }],
+      commands: [{ name: "ship" }],
+    });
+    expect(terms.sort()).toEqual(
+      ["- research:", "/ship", "Review a branch against the house rules of Acme", "deep-review", "triage-bot"].sort(),
+    );
+  });
+
+  test("takes the script names of hook commands, not the interpreters or plain words", () => {
+    const settings = {
+      hooks: {
+        SessionStart: [{ hooks: [{ type: "command", command: "bash ~/x/send-traces.sh --flag" }] }],
+        Stop: [{ hooks: [{ type: "command", command: "node /opt/bin/node session start" }] }],
+      },
+    };
+    expect(canaryTerms({ settings })).toEqual(["send-traces"]);
   });
 });
