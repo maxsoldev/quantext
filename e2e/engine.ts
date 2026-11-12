@@ -4,7 +4,17 @@
  */
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  appendFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { Page } from "@playwright/test";
@@ -20,6 +30,8 @@ export interface Engine {
   sessionUrl(scenario: string): Promise<string>;
   /** The transcript of a scenario's main Session in the temp root. */
   transcript(scenario: string): string;
+  /** Write a memory file into a scenario's project folder, as the harness does. */
+  writeMemory(scenario: string, name: string, content: string): void;
   stop(): Promise<void>;
 }
 
@@ -73,6 +85,11 @@ export async function startEngine(options: EngineOptions = {}): Promise<Engine> 
       return `${url}/s/${key.log}/${id}`;
     },
     transcript: (s) => mainTranscript(join(root, "projects", `-fixture-${s}`)),
+    writeMemory(s, name, content) {
+      const dir = join(root, "projects", `-fixture-${s}`, "memory");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, name), content);
+    },
     stop: () => stop(child, work),
   };
 }

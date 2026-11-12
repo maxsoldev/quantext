@@ -1,6 +1,6 @@
 /**
  * The viewer's pages as URLs: `/` (Sessions, filters in the query), `/s/<log>/<id>?call=<n>` (the context view),
- * `/s/<log>/<id>/tools?sort=<key>` and `/s/<log>/<id>/compactions`.
+ * `/s/<log>/<id>/tools?sort=<key>`, `/s/<log>/<id>/compactions`, and `/memory?project=<project>&file=<name>`.
  */
 import type { SessionKey } from "@quantext/shared";
 
@@ -21,6 +21,7 @@ export type Route =
       view?: SessionView;
       sort?: ToolSort;
     }
+  | { page: "memory"; project: string; file?: string }
   | { page: "not-found" };
 
 const SORTS: readonly string[] = ["ended", "started", "cost", "calls"];
@@ -37,6 +38,12 @@ export function parseRoute(pathname: string, search: string): Route {
     if (sort && SORTS.includes(sort)) route.sort = sort as SortKey;
     if (text) route.search = text;
     return route;
+  }
+  if (pathname === "/memory" || pathname === "/memory/") {
+    const project = q.get("project");
+    if (!project) return { page: "not-found" };
+    const file = q.get("file");
+    return file ? { page: "memory", project, file } : { page: "memory", project };
   }
   const m = /^\/s\/(\d+)\/([^/]+)(?:\/(tools|compactions))?\/?$/.exec(pathname);
   if (m?.[1] && m[2]) {
@@ -62,6 +69,11 @@ export function hrefOf(route: Route): string {
     if (route.view === "tools" && route.sort) q.set("sort", route.sort);
     const s = q.toString();
     return s ? `${path}?${s}` : path;
+  }
+  if (route.page === "memory") {
+    const q = new URLSearchParams({ project: route.project });
+    if (route.file) q.set("file", route.file);
+    return `/memory?${q.toString()}`;
   }
   if (route.page === "sessions") {
     const q = new URLSearchParams();

@@ -36,6 +36,15 @@ describe("routes", () => {
     });
   });
 
+  test("a project's memory is a page of its own, the file in the query", () => {
+    expect(parseRoute("/memory", "?project=%2Fa%2Frepo&file=notes.md")).toEqual({
+      page: "memory",
+      project: "/a/repo",
+      file: "notes.md",
+    });
+    expect(parseRoute("/memory", "")).toEqual({ page: "not-found" });
+  });
+
   test("an unknown path is not found", () => {
     expect(parseRoute("/nope", "")).toEqual({ page: "not-found" });
     expect(parseRoute("/s/x/abc", "")).toEqual({ page: "not-found" });
@@ -49,6 +58,7 @@ describe("routes", () => {
       { page: "session", key: { log: 1, id: "a:b" }, view: "tools", sort: "time" },
       { page: "session", key: { log: 1, id: "a" }, view: "compactions" },
       { page: "session", key: { log: 1, id: "a" }, call: 3, block: "ab12" },
+      { page: "memory", project: "/x y/repo" },
     ] as const) {
       const url = new URL(hrefOf(r), "http://x");
       expect(parseRoute(url.pathname, url.search)).toEqual(r);

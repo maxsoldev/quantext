@@ -88,6 +88,11 @@ export function SessionPage({ route }: { route: SessionRoute }) {
           <h1 id="session-title">{s.title ?? `Untitled session ${s.id.slice(0, 8)}`}</h1>
           <p className="muted">
             {s.project && <Link to={{ page: "sessions", project: s.project }}>{projectName(s.project)}</Link>}
+            {s.project && (
+              <Link to={{ page: "memory", project: s.project }} className="memory-link">
+                Project memory
+              </Link>
+            )}
             {s.started && when(s.started)}
             {span !== undefined && `, ${duration(span)}`}
             {s.harnessVersion && `, Claude Code ${s.harnessVersion}`}
