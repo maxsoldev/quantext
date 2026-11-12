@@ -38,6 +38,7 @@ import type {
   StableCallParams,
   StoreCodec,
   TimelineCall,
+  TokenBasis,
   TokenGroup,
   ToolCallSummary,
   ToolOutput,
@@ -732,7 +733,9 @@ export function createQuery(options: QueryOptions): Query {
       const rows = q(
         `SELECT t.*, c.idx AS call_idx,
            (SELECT r.tokens FROM call_blocks r WHERE r.block_hash = t.result_block_hash AND r.log = t.log
-             AND r.session_id = t.session_id ORDER BY r.first_call LIMIT 1) AS result_tokens
+             AND r.session_id = t.session_id ORDER BY r.first_call LIMIT 1) AS result_tokens,
+           (SELECT r.basis FROM call_blocks r WHERE r.block_hash = t.result_block_hash AND r.log = t.log
+             AND r.session_id = t.session_id ORDER BY r.first_call LIMIT 1) AS result_basis
          FROM tool_calls t LEFT JOIN calls c ON c.log = t.log AND c.id = t.call_id
          WHERE t.log = ? AND t.session_id = ? ORDER BY c.idx, t.id`,
       ).all(key.log, key.id);
@@ -752,6 +755,8 @@ export function createQuery(options: QueryOptions): Query {
         if (t.childSessionId !== undefined) s.childSessionId = t.childSessionId;
         if (t.resultBlockHash !== undefined) s.resultBlockHash = t.resultBlockHash;
         if (r.result_tokens !== null) s.resultTokens = Number(r.result_tokens);
+        if (r.result_basis !== null && r.result_basis !== undefined)
+          s.resultBasis = String(r.result_basis) as TokenBasis;
         return s;
       });
       return { ...meta, items: out };

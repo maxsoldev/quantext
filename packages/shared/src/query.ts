@@ -288,8 +288,9 @@ export interface ToolCallSummary {
   parallel: number;
   childSessionId?: string;
   resultBlockHash?: string;
-  /** The result's tokens in the first Call that sent it. */
+  /** The result's tokens in the first Call that sent it, and how they were found. */
   resultTokens?: number;
+  resultBasis?: TokenBasis;
 }
 
 /** Blocks of a context, counted. */

@@ -132,9 +132,16 @@ export interface LicensedPackage {
   license: string;
 }
 
+/**
+ * Font licences, accepted only for font packages. OFL-1.1 allows bundling and redistribution with the licence text
+ * (THIRD_PARTY_NOTICES carries it) but not selling the font alone, so it fits a font and nothing else.
+ */
+const FONT_LICENCES = ["OFL-1.1"];
+const isFontPackage = (name: string) => /^@fontsource(-variable)?\//.test(name);
+
 export function licenceProblems(pkgs: LicensedPackage[], allow: string[]): string[] {
   return pkgs
-    .filter((p) => !licenceAllowed(p.license, allow))
+    .filter((p) => !licenceAllowed(p.license, isFontPackage(p.name) ? [...allow, ...FONT_LICENCES] : allow))
     .map((p) => `${p.name}@${p.version}: ${p.license} is not on the licence allowlist`);
 }
 

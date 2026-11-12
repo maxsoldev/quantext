@@ -117,6 +117,14 @@ describe("licences", () => {
     expect(licenceProblems(pkgs, allow)).toEqual(["b@2.0.0: GPL-3.0-only is not on the licence allowlist"]);
   });
 
+  test("licenceProblems accepts a font licence for font packages only", () => {
+    const pkgs = [
+      { name: "@fontsource-variable/inter", version: "5.0.0", license: "OFL-1.1" },
+      { name: "left-pad", version: "1.0.0", license: "OFL-1.1" },
+    ];
+    expect(licenceProblems(pkgs, allow)).toEqual(["left-pad@1.0.0: OFL-1.1 is not on the licence allowlist"]);
+  });
+
   test("notices list each bundled package with its licence text, or say there is none", () => {
     expect(notices([])).toMatch(/no third-party packages/);
     const text = notices([{ name: "a", version: "1.0.0", license: "MIT", text: "MIT License\nCopyright A" }]);

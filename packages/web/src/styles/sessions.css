@@ -1,0 +1,214 @@
+/* The session list. */
+.sessions-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+  flex: 1;
+}
+.page-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.lede {
+  font-size: var(--t-lead);
+  color: var(--ink-2);
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: end;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--t-small);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.field input,
+.field select {
+  font-size: var(--t-body);
+  font-weight: 400;
+  color: var(--ink);
+}
+.field input[type="search"] {
+  width: 320px;
+}
+
+/* Tables whose rows are grids, so a windowed body keeps its columns. */
+.table {
+  border-spacing: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-m);
+  min-height: 0;
+}
+.table .tr {
+  display: grid;
+  grid-template-columns: var(--cols);
+  align-items: center;
+  column-gap: var(--space-4);
+  padding: 0 var(--space-4);
+}
+.table .thead .tr {
+  min-height: 44px;
+  border-bottom: 1px solid var(--rule-strong);
+  font-size: var(--t-small);
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.table .thead,
+.table .tbody {
+  display: block;
+}
+.table .tbody {
+  overflow-y: auto;
+  min-height: 0;
+}
+.table .spacer {
+  display: block;
+  border: 0;
+}
+.table th {
+  text-align: left;
+  font-weight: inherit;
+  padding: 0;
+}
+.table td {
+  padding: 0;
+}
+.table .tbody .tr {
+  height: var(--row);
+  border-bottom: 1px solid var(--grid);
+}
+.table .tbody .tr:hover,
+.table .tbody .tr:focus-within {
+  background: var(--surface-2);
+}
+.right {
+  text-align: right;
+  justify-self: end;
+}
+.table td {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.table td.right {
+  align-items: flex-end;
+}
+.sub {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-size: var(--t-small);
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sessions-table {
+  --cols: minmax(240px, 3fr) minmax(110px, 1fr) minmax(110px, 1fr) 64px 132px 96px 104px 100px 64px;
+  --row: 68px;
+  max-height: calc(100vh - 300px);
+  min-height: 240px;
+}
+.session-title {
+  font-weight: 700;
+  font-size: var(--t-body);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-title:hover {
+  text-decoration: underline;
+}
+.project {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--t-small);
+  font-weight: 700;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid currentcolor;
+}
+.badge.live {
+  color: var(--good);
+}
+.table td.models {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.model {
+  font-size: var(--t-small);
+  font-weight: 600;
+  padding: 0 6px;
+  border-radius: var(--radius-s);
+  background: var(--sunken);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.cell-cost {
+  gap: 6px;
+}
+.split-bar {
+  display: flex;
+  gap: 2px;
+  width: 120px;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--sunken);
+}
+.split-part {
+  flex-basis: 0;
+  min-width: 2px;
+}
+.cell-meter {
+  gap: 6px;
+}
+.meter {
+  display: block;
+  width: 88px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--sunken);
+  overflow: hidden;
+}
+.meter-fill {
+  display: block;
+  height: 100%;
+  background: var(--cache-read);
+  border-radius: 4px;
+}
+.request-log {
+  font-weight: 600;
+  text-decoration: underline dotted var(--rule-strong);
+  text-underline-offset: 0.25em;
+}
+.request-log.rl-absent,
+.request-log.rl-partial {
+  color: var(--warning);
+}
+.issues {
+  font-weight: 700;
+  color: var(--warning);
+}
+.basis-mark {
+  color: var(--ink-3);
+  margin-right: 1px;
+}

@@ -2,7 +2,8 @@
  * Build the Claude Code plugin into `dist/plugin/` (ADR 27): the mod as written (Claude Code loads its
  * TypeScript itself), the bundled engine from `pnpm build` in `engine/` with the viewer in `engine/web/`, and a
  * manifest versioned from the root package.json. The repo-root `.claude-plugin/marketplace.json` points here.
- * Fails when a file the plugin needs is missing. Usage: build-plugin.ts (runs build-engine.ts first).
+ * Fails when a file the plugin needs is missing. Usage: `pnpm build:plugin`, which runs `pnpm build` first
+ * (the viewer, then the engine); this script only assembles what is built.
  */
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -17,8 +18,6 @@ const json = (path: string) => JSON.parse(readFileSync(path, "utf8")) as Record<
 const { version } = json(join(repo, "package.json"));
 const engineVersion = json(join(repo, "packages", "engine", "package.json")).version;
 if (typeof version !== "string" || typeof engineVersion !== "string") throw new Error("a package.json has no version");
-
-execFileSync(process.execPath, [join(import.meta.dirname, "build-engine.ts")], { stdio: "inherit" });
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, ".claude-plugin"), { recursive: true });

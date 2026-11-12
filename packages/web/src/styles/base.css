@@ -1,0 +1,312 @@
+/* Base: elements, the page frame, the masthead, controls, the tooltip. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html {
+  font-family: var(--font-ui);
+  font-size: 100%;
+  line-height: 1.45;
+  color: var(--ink);
+  background: var(--page);
+  -webkit-font-smoothing: antialiased;
+}
+body {
+  margin: 0;
+}
+h1,
+h2,
+h3 {
+  margin: 0;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+h1 {
+  font-size: var(--t-h1);
+}
+h2 {
+  font-size: var(--t-h2);
+}
+h3 {
+  font-size: var(--t-lead);
+}
+p {
+  margin: 0;
+  max-width: 72ch;
+}
+a {
+  color: inherit;
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: 1px;
+}
+a:hover {
+  text-decoration-thickness: 2px;
+}
+code,
+pre,
+.content {
+  font-family: var(--font-content);
+}
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+}
+.muted {
+  color: var(--ink-3);
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Page frame. */
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.skip {
+  position: absolute;
+  left: var(--space-3);
+  top: -100px;
+  background: var(--select);
+  color: var(--select-ink);
+  padding: var(--space-2) var(--space-3);
+  z-index: 20;
+}
+.skip:focus {
+  top: var(--space-2);
+}
+.masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-6);
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 800;
+  font-size: var(--t-lead);
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+/* Three strata: the mark is the chart's own idea in miniature. */
+.brand-mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  background: linear-gradient(
+    to top,
+    var(--cat-tool-definitions) 0 30%,
+    var(--surface) 30% 37%,
+    var(--cat-base-instructions) 37% 63%,
+    var(--surface) 63% 70%,
+    var(--cat-injected-context) 70% 100%
+  );
+}
+.crumbs {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1;
+  color: var(--ink-2);
+  font-weight: 600;
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--rule);
+}
+.crumbs .sep {
+  color: var(--rule-strong);
+}
+.crumbs .here {
+  color: var(--ink);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.masthead-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+.page {
+  flex: 1;
+  padding: var(--space-5) var(--space-6) var(--space-7);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+/* Controls. */
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+button,
+select,
+input[type="search"],
+input[type="text"] {
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-s);
+  padding: 6px 12px;
+  min-height: 36px;
+}
+button {
+  cursor: pointer;
+  font-weight: 600;
+}
+button:hover {
+  border-color: var(--ink-2);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button.quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-2);
+  font-weight: 500;
+}
+button.quiet:hover {
+  color: var(--ink);
+  border-color: var(--rule);
+}
+button[aria-pressed="true"] {
+  background: var(--select);
+  color: var(--select-ink);
+  border-color: var(--select);
+}
+kbd {
+  font-family: var(--font-ui);
+  font-size: var(--t-small);
+  font-weight: 700;
+  border: 1px solid var(--rule-strong);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  padding: 0 5px;
+  background: var(--surface);
+}
+
+/* Live status. */
+.live-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+.live-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ink-3);
+}
+.live-dot.good {
+  background: var(--good);
+}
+.live-dot.busy {
+  background: var(--warning);
+}
+.live-dot.bad {
+  background: var(--critical);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .live-dot.busy {
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.live-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 500;
+  color: var(--ink-2);
+}
+progress {
+  width: 120px;
+  height: 8px;
+  appearance: none;
+  border: none;
+  border-radius: 4px;
+  background: var(--sunken);
+  overflow: hidden;
+}
+progress::-webkit-progress-bar {
+  background: var(--sunken);
+}
+progress::-webkit-progress-value {
+  background: var(--ink);
+  border-radius: 4px;
+}
+progress::-moz-progress-bar {
+  background: var(--ink);
+}
+
+/* Tooltip: dark slab in both themes, so it never blends into the surface under it. */
+.tooltip {
+  position: fixed;
+  z-index: 30;
+  visibility: hidden;
+  max-width: 360px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-s);
+  background: var(--select);
+  color: var(--select-ink);
+  font-size: var(--t-small);
+  line-height: 1.4;
+  white-space: pre-line;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.18);
+}
+
+/* Empty and error states. */
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-6) 0;
+}
+.error {
+  border-left: 4px solid var(--critical);
+  padding: var(--space-2) var(--space-4);
+  background: var(--surface);
+}
+
+/* A piece of text that explains itself on hover or focus: a button, so the keyboard reaches it. */
+.tip-anchor {
+  all: unset;
+  cursor: help;
+  border-radius: 2px;
+}
+.tip-anchor:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
