@@ -4,7 +4,7 @@
  * ordered block list by section. Opening a Block shows all of its content.
  */
 import type { CallContext, ContextBlock, SessionKey } from "@quantext/shared";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { percent, shortModel, tokens, usd, when } from "../format/format.ts";
 import { Tokens } from "../ui/Num.tsx";
 import type { Load } from "../ui/useLoad.ts";
@@ -18,10 +18,32 @@ import { barSegments, hiddenPart, listRows, sourceLabel } from "./model.ts";
 const ROW = 48;
 
 /** `ctx` is loaded by the page, which shares it with the diff card. */
-export function ContextAt({ sessionKey, call, ctx }: { sessionKey: SessionKey; call: number; ctx: Load<CallContext> }) {
+export function ContextAt({
+  sessionKey,
+  call,
+  ctx,
+  openHash,
+  onOpened,
+}: {
+  sessionKey: SessionKey;
+  call: number;
+  ctx: Load<CallContext>;
+  /** A Block to open once the context is loaded (a link from a tool call). */
+  openHash?: string | undefined;
+  onOpened?: () => void;
+}) {
   const [open, setOpen] = useState<ContextBlock | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const c = ctx.value;
+  useEffect(() => {
+    if (!openHash || !c || c.call.index !== call) return;
+    const b = c.blocks.find((x) => x.hash === openHash);
+    if (b) {
+      setOpen(b);
+      setSelected(b.position);
+    }
+    onOpened?.();
+  }, [openHash, c, call, onOpened]);
   if (ctx.state === "error" && !c) {
     return (
       <p className="error" role="alert">

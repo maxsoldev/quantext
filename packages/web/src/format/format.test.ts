@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { ago, basisOf, duration, percent, tokens, usd } from "./format.ts";
+import { ago, basisOf, count, duration, percent, tokens, usd } from "./format.ts";
 
 describe("numbers", () => {
   test("tokens are in full under 10,000 and compact above", () => {
@@ -51,9 +51,19 @@ describe("time", () => {
     expect(ago("2026-11-12T09:00:00Z", now)).toBe("3 h ago");
     expect(ago("2026-11-09T12:00:00Z", now)).toBe("3 days ago");
   });
+  test("a count with its noun", () => {
+    expect([count(1, "call"), count(2, "call"), count(1200, "entry", "entries")]).toEqual([
+      "1 call",
+      "2 calls",
+      "1,200 entries",
+    ]);
+  });
+
   test("durations", () => {
-    expect([800, 42_000, 61_000, 7_260_000, 545_940_000].map(duration)).toEqual([
-      "0.8 s",
+    expect([35, 800, 1500, 42_000, 61_000, 7_260_000, 545_940_000].map(duration)).toEqual([
+      "35 ms",
+      "800 ms",
+      "1.5 s",
       "42 s",
       "1 min 1 s",
       "2 h 1 min",

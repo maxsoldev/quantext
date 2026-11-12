@@ -78,6 +78,7 @@ export function ago(iso: string, now: number = Date.now()): string {
 }
 
 export function duration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`;
   const s = ms / 1000;
   if (s < 10) return `${s.toFixed(1)} s`;
   if (s < 60) return `${Math.round(s)} s`;
@@ -109,4 +110,9 @@ export function shortModel(model: string): string {
 export function projectName(project: string): string {
   const parts = project.split(/[\\/]/).filter((p) => p !== "");
   return parts.at(-1) ?? project;
+}
+
+/** "1 call", "2 calls": a count with its noun. */
+export function count(n: number, one: string, many = `${one}s`): string {
+  return `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 }

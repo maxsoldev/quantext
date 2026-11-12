@@ -246,6 +246,7 @@ describe("a Session's detail", () => {
       { file_path: "/fixture-0000000000000000/repo/missing.txt" },
     ]);
     expect(tools.every((t) => t.resultTokens !== undefined && t.callIndex !== undefined)).toBe(true);
+    expect(tools.every((t) => t.resultBasis !== undefined)).toBe(true);
     const parallel = q
       .listCalls(key(q, 1))
       .items.filter((c) => c.toolCalls.filter((t) => t.name === "Read").length === 2);

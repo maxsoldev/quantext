@@ -2,7 +2,7 @@
  * One Session: its numbers, the timeline of one lane, a scrubber over its Calls, and the context of the selected
  * Call. The selected Call is in the URL (`?call=<index>`); with none, the page follows the lane's latest Call.
  */
-import type { CallContext, ContextDiff, SessionKey } from "@quantext/shared";
+import type { CallContext, ContextDiff, SessionKey, SessionSummary } from "@quantext/shared";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client.ts";
 import { laneView, mainLane } from "../chart/lane.ts";
@@ -14,6 +14,7 @@ import { duration, percent, projectName, shortModel, usd, when } from "../format
 import { useLiveVersion } from "../live/hooks.ts";
 import { Link, navigate } from "../nav.tsx";
 import type { Route } from "../route.ts";
+import { ToolCalls } from "../tools/ToolCalls.tsx";
 import { Tokens } from "../ui/Num.tsx";
 import { useLoad } from "../ui/useLoad.ts";
 
@@ -50,9 +51,14 @@ export function SessionPage({ route }: { route: SessionRoute }) {
     },
     [view, key],
   );
-  usePlaceKeys(place, last, select);
+  usePlaceKeys(place, last, select, !route.view);
   const call = useCallData(key, callIndex, version);
   const goTo = useCallback((n: number) => navigate({ page: "session", key, call: n }, { replace: true }), [key]);
+  const clearBlock = useCallback(
+    () =>
+      navigate({ page: "session", key, ...(route.call === undefined ? {} : { call: route.call }) }, { replace: true }),
+    [key, route.call],
+  );
   const showDiff = useCallback(() => {
     requestAnimationFrame(() => document.getElementById("what-changed")?.scrollIntoView({ block: "start" }));
   }, []);
@@ -133,54 +139,111 @@ export function SessionPage({ route }: { route: SessionRoute }) {
           </div>
         </dl>
       </header>
-
-      {view && view.calls.length > 0 ? (
-        <section className="card timeline-card" aria-labelledby="timeline-title">
-          <div className="card-head">
-            <div className="card-title">
-              <h2 id="timeline-title">Context per call</h2>
-              {detail.lanes.length > 1 && (
-                <fieldset className="lanes">
-                  <legend>Lane</legend>
-                  {[...detail.lanes]
-                    .sort((a, b) => b.calls - a.calls)
-                    .map((l) => (
-                      <button
-                        key={l.lane}
-                        type="button"
-                        aria-pressed={l.lane === chosen}
-                        onClick={() => setLane(l.lane)}
-                        data-tip="A lane is the calls that build on each other's context: one model, one purpose. Side queries run in their own lane."
-                      >
-                        {l.model ? shortModel(l.model) : "Unknown model"} <span className="num">({l.calls})</span>
-                      </button>
-                    ))}
-                </fieldset>
-              )}
-            </div>
-            <div className="legends">
-              <Legend />
-              <BillingLegend />
-            </div>
-          </div>
-          <TimelineChart view={view} selected={place} onSelect={select} onBreak={showDiff} />
-        </section>
-      ) : (
-        <p className="muted">This session has no calls yet.</p>
+      {detail.subagents.length > 0 && <Subagents parent={key} items={detail.subagents} />}
+      <SessionTabs route={route} />
+      {route.view === "tools" && <ToolCalls route={route} session={s} subagents={detail.subagents} version={version} />}
+      {!route.view && (
+        <>
+          {view && view.calls.length > 0 ? (
+            <section className="card timeline-card" aria-labelledby="timeline-title">
+              <div className="card-head">
+                <div className="card-title">
+                  <h2 id="timeline-title">Context per call</h2>
+                  {detail.lanes.length > 1 && (
+                    <fieldset className="lanes">
+                      <legend>Lane</legend>
+                      {[...detail.lanes]
+                        .sort((a, b) => b.calls - a.calls)
+                        .map((l) => (
+                          <button
+                            key={l.lane}
+                            type="button"
+                            aria-pressed={l.lane === chosen}
+                            onClick={() => setLane(l.lane)}
+                            data-tip="A lane is the calls that build on each other's context: one model, one purpose. Side queries run in their own lane."
+                          >
+                            {l.model ? shortModel(l.model) : "Unknown model"} <span className="num">({l.calls})</span>
+                          </button>
+                        ))}
+                    </fieldset>
+                  )}
+                </div>
+                <div className="legends">
+                  <Legend />
+                  <BillingLegend />
+                </div>
+              </div>
+              <TimelineChart view={view} selected={place} onSelect={select} onBreak={showDiff} />
+            </section>
+          ) : (
+            <p className="muted">This session has no calls yet.</p>
+          )}
+          {callIndex !== undefined && view && (
+            <DiffCard
+              sessionKey={key}
+              ctx={call.ctx.value}
+              diff={call.diff}
+              prev={call.prev.value}
+              breaks={view.breaks}
+              onGoTo={goTo}
+            />
+          )}
+          {callIndex !== undefined && (
+            <ContextAt sessionKey={key} call={callIndex} ctx={call.ctx} openHash={route.block} onOpened={clearBlock} />
+          )}
+          {view && view.calls.length > 0 && (
+            <Scrubber place={place} last={last} index={callIndex ?? 0} onChange={select} />
+          )}
+        </>
       )}
-      {callIndex !== undefined && view && (
-        <DiffCard
-          sessionKey={key}
-          ctx={call.ctx.value}
-          diff={call.diff}
-          prev={call.prev.value}
-          breaks={view.breaks}
-          onGoTo={goTo}
-        />
-      )}
-      {callIndex !== undefined && <ContextAt sessionKey={key} call={callIndex} ctx={call.ctx} />}
-      {view && view.calls.length > 0 && <Scrubber place={place} last={last} index={callIndex ?? 0} onChange={select} />}
     </article>
+  );
+}
+
+const TABS: { view: SessionRoute["view"]; label: string }[] = [
+  { view: undefined, label: "Context" },
+  { view: "tools", label: "Tool calls" },
+];
+
+/** The views of a Session, as links: each is its own URL. */
+function SessionTabs({ route }: { route: SessionRoute }) {
+  return (
+    <nav className="tabs" aria-label="Views of this session">
+      {TABS.map((t) => (
+        <Link
+          key={t.label}
+          to={{ page: "session", key: route.key, ...(t.view ? { view: t.view } : {}) }}
+          aria-current={route.view === t.view ? "page" : undefined}
+        >
+          {t.label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
+/** The subagent Sessions this Session started: each ran in its own context. */
+function Subagents({ parent, items }: { parent: SessionKey; items: readonly SessionSummary[] }) {
+  return (
+    <p className="subagents" data-testid="subagents">
+      <span
+        className="tip-anchor-label"
+        data-tip="A subagent runs in its own context: its own system prompt, tools and task. Only its final answer comes back into this session."
+      >
+        {items.length === 1 ? "Subagent" : `${items.length} subagents`}:
+      </span>{" "}
+      {items.map((a, i) => (
+        <span key={a.id}>
+          {i > 0 && ", "}
+          <Link to={{ page: "session", key: { log: parent.log, id: a.id } }}>
+            {a.agentName ?? a.title ?? a.id.split(":").at(-1)}
+          </Link>{" "}
+          <span className="muted num">
+            ({a.calls} calls, {usd(a.cost.totalUsd)})
+          </span>
+        </span>
+      ))}
+    </p>
   );
 }
 
@@ -311,8 +374,9 @@ function Scrubber({
 }
 
 /** Arrow keys anywhere on the page (not while typing or on the slider, which has its own) move the selected Call. */
-function usePlaceKeys(place: number, last: number, select: (p: number) => void) {
+function usePlaceKeys(place: number, last: number, select: (p: number) => void, on: boolean) {
   useEffect(() => {
+    if (!on) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.closest("input, select, textarea, [contenteditable]") || e.metaKey || e.ctrlKey || e.altKey)) return;
@@ -333,5 +397,5 @@ function usePlaceKeys(place: number, last: number, select: (p: number) => void) 
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);
-  }, [place, last, select]);
+  }, [place, last, select, on]);
 }
