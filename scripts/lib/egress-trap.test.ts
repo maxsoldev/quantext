@@ -46,6 +46,7 @@ test("the trap lets loopback through", () => {
     "await new Promise((r) => server.once('listening', r));",
     "const { port } = server.address();",
     "await new Promise((r) => get({ host: '127.0.0.1', port, path: '/' }, (res) => res.resume().on('end', r)));",
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the probe is source code with a template literal.
     "await (await fetch(`http://127.0.0.1:${port}/`)).text();",
     "server.close();",
   ].join("\n");

@@ -43,9 +43,10 @@ Node and Bun, and names the target.
 
 ## Consequences
 
-- A new outbound call, CDN asset or command fails CI until it is on the allowlist with a reason. The viewer's
-  `fetch` calls must use relative URLs that the guard can follow (literals, templates, `"/api/" + x`). Vite's
-  modulepreload polyfill calls `fetch(link.href)`: turn it off (`build.modulePreload.polyfill: false`).
+- A new outbound call, CDN asset or command fails CI until it is on the allowlist with a reason.
+- In the viewer's files the guard trusts the browser: the engine serves them with `default-src 'self'` and
+  `connect-src 'self'`, and the guard checks that CSP, so a `fetch` URL it cannot follow (Vite's preload helper,
+  an injected `fetch`) passes there; a URL known to be external fails. Checked on the viewer's current build.
 - Dependency review and Scorecard need a public repo (or GitHub Code Security); while the repo is private they
   are skipped, and the other checks still run.
 - The guard cannot see native code, and the tripwire does not reach Bun's worker threads; there is no native

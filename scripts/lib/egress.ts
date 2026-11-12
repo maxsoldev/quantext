@@ -32,6 +32,11 @@ export interface EgressPolicy {
   /** URLs that appear in shipped files only as text for people (never fetched), each with the reason. */
   documentationUrls: { prefix: string; reason: string }[];
   commands: CommandRule[];
+  /**
+   * Path prefix of the files the browser runs (the viewer). The engine serves them with a CSP whose
+   * connect-src is 'self', so there a URL the guard cannot follow passes; one known to be external does not.
+   */
+  browserFiles?: string;
 }
 
 const CODE = /\.[mc]?[jt]sx?$/;
@@ -51,6 +56,10 @@ const PROTOCOL_RELATIVE_IN_MARKUP =
 const PROTOCOL_RELATIVE = /^\/\/[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[/:?#]|$)/i;
 const LOOPBACK = /^(?:https?|wss?):\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?:[:/?#]|$)/i;
 const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+/** CSP directives that name where a page may load from or send to, and the sources that are not a host. */
+const CSP_DIRECTIVE =
+  /^(?:default|connect|script|style|img|font|media|worker|frame|child|manifest|object|prefetch)-src\s|^(?:form-action|base-uri|frame-ancestors)\s/;
+const CSP_LOCAL_SOURCES = new Set(["'self'", "'none'", "data:", "blob:"]);
 /** Calls and constructors that send a request to their first argument, and those that are never allowed. */
 const URL_CALLS = new Set(["fetch", "importScripts"]);
 const URL_CONSTRUCTORS = new Set(["EventSource", "WebSocket", "WebSocketStream"]);
@@ -69,7 +78,18 @@ export function findEgress(files: ShippedFile[], policy: EgressPolicy): Finding[
     else parsed.push({ path: file.path, text: file.text, program, add });
   }
   const ctx = index(parsed);
-  for (const p of parsed) checkCode(p, ctx, policy);
+  const browser = files.filter((f) => policy.browserFiles !== undefined && f.path.startsWith(policy.browserFiles));
+  const cspOk = checkCsp(parsed);
+  const first = [...browser].sort((a, b) => (a.path < b.path ? -1 : 1))[0];
+  if (first !== undefined && !cspOk) {
+    findings.push({
+      file: first.path,
+      line: 1,
+      rule: "csp",
+      detail: "the viewer is served without a CSP that limits default-src and connect-src to 'self'",
+    });
+  }
+  for (const p of parsed) checkCode(p, ctx, policy, cspOk && browser.some((f) => f.path === p.path));
   return findings
     .map((f, order) => ({ f, order }))
     .sort((a, b) => (a.f.file < b.f.file ? -1 : a.f.file > b.f.file ? 1 : a.f.line - b.f.line || a.order - b.order))
@@ -91,7 +111,32 @@ function isExternal(url: string, policy: EgressPolicy): boolean {
   return !policy.documentationUrls.some((d) => url.startsWith(d.prefix));
 }
 
-function checkCode(p: Parsed, ctx: ReturnType<typeof index>, policy: EgressPolicy): void {
+/**
+ * Report each CSP directive (a string such as "connect-src 'self'") that allows a host or scheme; true when
+ * both default-src and connect-src are exactly 'self' or 'none', so the browser itself refuses other origins.
+ */
+function checkCsp(parsed: Parsed[]): boolean {
+  const strict = new Set<string>();
+  for (const p of parsed) {
+    const visit = (node: Node) => {
+      for (const child of children(node)) visit(child);
+      if (node.type !== "Literal" || typeof node.value !== "string") return;
+      for (const directive of node.value.split(";").map((d: string) => d.trim())) {
+        if (!CSP_DIRECTIVE.test(`${directive} `)) continue;
+        const [name = "", ...sources] = directive.split(/\s+/);
+        const hosts = sources.filter(
+          (s) => !CSP_LOCAL_SOURCES.has(s) && !/^'[a-z0-9-]+(?:-[A-Za-z0-9+/=]+)?'$/.test(s),
+        );
+        if (hosts.length > 0) p.add(node.start, "csp", `CSP ${name} allows ${hosts.join(" ")}`);
+        else if (sources.length > 0 && sources.every((s) => s === "'self'" || s === "'none'")) strict.add(name);
+      }
+    };
+    visit(p.program);
+  }
+  return strict.has("default-src") && strict.has("connect-src");
+}
+
+function checkCode(p: Parsed, ctx: ReturnType<typeof index>, policy: EgressPolicy, inBrowser: boolean): void {
   const imports = importsOf(p.program);
   const servers = new Set<string>();
   const visit = (node: Node) => {
@@ -99,7 +144,7 @@ function checkCode(p: Parsed, ctx: ReturnType<typeof index>, policy: EgressPolic
     for (const child of children(node)) visit(child); // children first: a URL argument before its call
     if (node.type === "Literal" && typeof node.value === "string") checkString(node.value, node.start, p, policy);
     if (node.type === "TemplateElement") checkString(String(node.value.cooked ?? ""), node.start, p, policy);
-    if (node.type === "CallExpression" || node.type === "NewExpression") checkCall(node, p, ctx);
+    if (node.type === "CallExpression" || node.type === "NewExpression") checkCall(node, p, ctx, inBrowser);
   };
   visit(p.program);
 }
@@ -111,7 +156,7 @@ function checkString(text: string, offset: number, p: Parsed, policy: EgressPoli
   if (PROTOCOL_RELATIVE.test(text)) p.add(offset, "url", `protocol-relative URL ${text.slice(0, 80)}`);
 }
 
-function checkCall(node: Node, p: Parsed, ctx: ReturnType<typeof index>): void {
+function checkCall(node: Node, p: Parsed, ctx: ReturnType<typeof index>, inBrowser: boolean): void {
   const name = calleeName(node);
   if (name === undefined) return;
   if (node.type === "NewExpression" && name === "XMLHttpRequest") {
@@ -121,13 +166,23 @@ function checkCall(node: Node, p: Parsed, ctx: ReturnType<typeof index>): void {
   } else if ((node.type === "CallExpression" ? URL_CALLS : URL_CONSTRUCTORS).has(name)) {
     const arg = (node.arguments as Node[])[0];
     const vals = arg === undefined ? undefined : resolve(arg, p, ctx);
-    if (!allLocal(vals)) p.add(node.start, "fetch", `${name} to a URL not shown to be local: ${show(vals)}`);
+    if (inBrowser ? knownExternal(vals) : !allLocal(vals)) {
+      p.add(node.start, "fetch", `${name} to a URL not shown to be local: ${show(vals)}`);
+    }
   }
 }
 
 /** True when every possible value is a relative URL or a loopback one. `undefined` (a throw, no request) is fine. */
 export function allLocal(vals: Vals): boolean {
   return vals?.every((v) => v === "undefined" || (typeof v === "object" && "s" in v && isLocal(v))) === true;
+}
+
+/** True when some value is surely not local: a full URL to another host, or one whose scheme or `//` is known. */
+function knownExternal(vals: Vals): boolean {
+  return (vals ?? []).some((v) => {
+    if (typeof v !== "object" || !("s" in v) || isLocal(v)) return false;
+    return v.exact || SCHEME.test(v.s) || v.s.startsWith("//");
+  });
 }
 
 function isLocal({ s, exact }: { s: string; exact: boolean }): boolean {

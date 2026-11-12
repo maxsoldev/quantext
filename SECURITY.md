@@ -27,6 +27,11 @@ on its syntax tree (`rolldown/parseAst`), so comments do not count. It fails on:
   the URL is followed through constants, templates, `+`, conditionals, helper functions and their call sites,
   and a URL that cannot be followed is a finding;
 - any `XMLHttpRequest` or `navigator.sendBeacon`;
+- a Content-Security-Policy directive in the engine that allows a host or scheme (only `'self'`, `'none'`,
+  `data:`, `blob:`), or viewer files without a CSP whose `default-src` and `connect-src` are `'self'`. With that
+  CSP the browser itself refuses other origins, so in the viewer's files (`engine/web/`) a `fetch` URL that
+  cannot be followed passes (Vite's preload helper, a client that takes `fetch` as a parameter); one that is
+  known to be external still fails;
 - `node:net`, `tls`, `dgram`, `dns`, `https`, `http2`, `cluster`, `inspector`, `module`, loaded in any way;
   a package import (shipped code is bundled); a module name that is not a literal;
 - `node:http` requests to a host that is not loopback, and a server that does not listen on `127.0.0.1`;
@@ -43,6 +48,8 @@ The allowlist is `scripts/lib/egress-policy.ts`, with a reason per entry:
 |---|---|
 | `https://platform.claude.com/docs/en/about-claude/pricing` | Cited as the source of the price table; never fetched |
 | `https://nodejs.org`, `https://bun.sh` | Shown in the install hint when no runtime is found; never fetched |
+| `https://react.dev/errors/` | React's minified error messages link to its docs (the viewer); never fetched |
+| `engine/web/` as browser files | Served with the engine's CSP (see above) |
 | `open <url>`, `xdg-open <url>`, `rundll32 url.dll,FileProtocolHandler <url>` | Open the viewer in the browser |
 | `node --version`, `bun --version`, `uname -s` | The mod finds a runtime and the opener |
 | `sh -c <start script> node\|bun …` | The mod starts the engine detached; the script text is repeated in the policy, so a change to it fails the guard until it is reviewed |
