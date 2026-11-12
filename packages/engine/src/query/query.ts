@@ -92,6 +92,10 @@ export interface Query {
   /** Sessions whose id is `id` or starts with it, newest first. */
   findSessions(id: string): SessionKey[];
   getSession(key: SessionKey): SessionDetail | undefined;
+  /** Whether the Session exists and is visible (demo mode): one indexed lookup, for a 404 before a list. */
+  hasSession(key: SessionKey): boolean;
+  /** The store's change cursor now, as `Page.cursor` gives it. */
+  changeCursor(): number;
   /** The Session's Calls in order, a page at a time. */
   listCalls(key: SessionKey, options?: CallListOptions): Page<CallSummary>;
   /** One Call, with the provider's own parameters (not stable) in `raw`. */
@@ -589,10 +593,14 @@ export function createQuery(options: QueryOptions): Query {
     return out;
   };
 
+  const changeCursor = () => Number(q("SELECT seq FROM change_cursor").get()?.seq ?? 0);
+
   return {
+    changeCursor,
+    hasSession: (key) => sessionProject(key) !== undefined,
     listSessions(filter = {}) {
       // The cursor before the page: a write between them shows up again in the next changedSince, never lost.
-      const cursor = Number(q("SELECT seq FROM change_cursor").get()?.seq ?? 0);
+      const cursor = changeCursor();
       const params: SqlValue[] = [];
       const where = [
         "(parent_id IS NULL OR NOT EXISTS (SELECT 1 FROM sessions p WHERE p.log = v.log AND p.id = v.parent_id))",
