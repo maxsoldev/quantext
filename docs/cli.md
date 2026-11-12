@@ -33,8 +33,9 @@ Every reading command opens the store read-only (no writer lock), so it also wor
 ## JSON output
 
 With `--json`, stdout is one JSON value (two-space indented), the query layer's response type from
-`packages/shared/src/query.ts`. Fields are added over time, never renamed or removed without a new major version;
-an optional field is left out, not `null`.
+`packages/shared/src/query.ts`. Each response object has `apiVersion` (now 1): fields are added over time, and
+renamed or removed only with a new `apiVersion`. An optional field is left out, not `null`. A field named `raw`
+(`BlockDetail.raw.content`, `CallDetail.raw.params`) holds the provider's own data and is **not stable**.
 
 | Command | JSON |
 |---|---|

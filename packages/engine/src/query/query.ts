@@ -6,27 +6,41 @@
 import type {
   BlockDetail,
   BlockKind,
+  BlockLifetime,
+  CacheBreak,
+  CacheBreakReason,
   CallContext,
+  CallDetail,
   CallIssue,
+  CallListOptions,
+  CallParams,
   CallSummary,
   CompactionDetail,
   ContextBlock,
+  ContextCategory,
   ContextDiff,
   DemoOptions,
+  Items,
   JsonValue,
   LaneSummary,
+  Lifetime,
+  LifetimeOptions,
   MemoryDocumentView,
   Meta,
   Page,
   QueryReport,
   RequestLog,
+  RequestSection,
   SessionDetail,
   SessionFilter,
   SessionKey,
   SessionSummary,
+  StableCallParams,
   StoreCodec,
+  TimelineCall,
   TokenGroup,
   ToolCallSummary,
+  ToolOutput,
 } from "@quantext/shared";
 import { blockCosts } from "../core/pricing.ts";
 import type { SqlDriver, SqlRow, SqlValue } from "../store/index.ts";
@@ -38,11 +52,20 @@ import {
   runFromRow,
   toolCallFromRow,
 } from "../store/index.ts";
-import { categoryOf, emptyCategories } from "./categories.ts";
+import { categoryOf, emptyCategories, isDeferred } from "./categories.ts";
 import type { Redactor } from "./redact.ts";
 import { createRedactor, lastFolder, projectAllowed, trimSeparators } from "./redact.ts";
 import { API_VERSION } from "./sql.ts";
-import { installViews } from "./views.ts";
+import { cacheBreaksSql, installViews, lifetimeSql, toolOutputsSql } from "./views.ts";
+
+const LIFETIME_SORTS: Record<NonNullable<LifetimeOptions["sort"]>, string> = {
+  cost: "lifetime_cost_usd",
+  tokens: "lifetime_tokens",
+  calls: "calls",
+};
+/** One Session's lifetime rows: the filter is inside, so only its runs are read. */
+const SESSION_LIFETIME = lifetimeSql(true);
+const SESSION_BREAKS = cacheBreaksSql(true);
 
 export interface QueryOptions {
   /** A connection to the store (read-only is enough); the views are made on it when missing. */
@@ -65,7 +88,12 @@ export interface Query {
   /** Sessions whose id is `id` or starts with it, newest first. */
   findSessions(id: string): SessionKey[];
   getSession(key: SessionKey): SessionDetail | undefined;
-  listCalls(key: SessionKey, lane?: string): CallSummary[];
+  /** The Session's Calls in order, a page at a time. */
+  listCalls(key: SessionKey, options?: CallListOptions): Page<CallSummary>;
+  /** One Call, with the provider's own parameters (not stable) in `raw`. */
+  getCall(key: SessionKey, index: number): CallDetail | undefined;
+  /** Every Call of the Session with its numbers and context-bar totals, without its Blocks: one grouped read. */
+  callTimeline(key: SessionKey): Items<TimelineCall>;
   /** The input of Call `index` (its position in the Session), in order, with framing as the last entry. */
   contextAt(key: SessionKey, index: number): CallContext | undefined;
   /** What changed at Call `index` against the previous Call of its lane. */
@@ -73,10 +101,17 @@ export interface Query {
   getBlock(hash: string, log: number): BlockDetail | undefined;
   /** The bytes of an image or document that Block `block` of log `log` names (`BlockDetail.media`). */
   getMedia(block: string, log: number, hash: string): { mediaType: string; bytes: Uint8Array } | undefined;
-  toolCalls(key: SessionKey): ToolCallSummary[];
-  compactions(key: SessionKey): CompactionDetail[];
+  toolCalls(key: SessionKey): Items<ToolCallSummary>;
+  /** The compactions, with what was removed and kept (two contexts each, so only here, not in `getSession`). */
+  compactions(key: SessionKey): Items<CompactionDetail>;
+  /** The Calls whose cache read dropped, with the reason (`v_cache_breaks`). */
+  cacheBreaks(key: SessionKey): Items<CacheBreak>;
+  /** The Session's Blocks by their lifetime cost in its own Calls. */
+  blockLifetimes(key: SessionKey, options?: LifetimeOptions): Items<BlockLifetime>;
+  /** The Session's tool uses by their result's lifetime cost. */
+  toolOutputs(key: SessionKey, options?: LifetimeOptions): Items<ToolOutput>;
   /** The memory documents of a project (by its path, or its last folder name), by path. */
-  projectMemory(project: string): MemoryDocumentView[];
+  projectMemory(project: string): Items<MemoryDocumentView>;
   ingestReport(): QueryReport;
 }
 
@@ -272,7 +307,7 @@ export function createQuery(options: QueryOptions): Query {
       lane: c.lane,
       ts: c.ts,
       model: c.model,
-      params: c.params,
+      params: stableParams(c.params),
       cacheBreakpoints: c.cacheBreakpoints,
       framingTokens: c.framingTokens,
       issues: c.issues,
@@ -311,7 +346,7 @@ export function createQuery(options: QueryOptions): Query {
         section: run.section,
         hash: run.blockHash,
         kind: String(r.kind) as BlockKind,
-        category: categoryOf(String(r.kind) as BlockKind, source),
+        category: categoryOf(String(r.kind) as BlockKind, run.section, source),
         source,
         inCachedPrefix: run.position < boundary,
         preview: flat.length > previewChars ? `${flat.slice(0, previewChars - 1)}…` : flat,
@@ -322,6 +357,7 @@ export function createQuery(options: QueryOptions): Query {
             ? { firstCall: run.firstCall }
             : { firstCall: run.firstCall, lastCall: run.lastCall },
       };
+      if (isDeferred(b.kind, b.section)) b.deferred = true;
       if (run.message !== undefined) b.message = run.message;
       if (run.tokens !== undefined) b.tokens = run.tokens;
       if (run.basis !== undefined) b.basis = run.basis;
@@ -377,14 +413,104 @@ export function createQuery(options: QueryOptions): Query {
     };
     return { ...hide(result, found.project), ...meta };
   };
-  const previousInLane = (key: SessionKey, lane: string, index: number): number | undefined => {
-    const r = q("SELECT max(idx) AS idx FROM calls WHERE log = ? AND session_id = ? AND lane = ? AND idx < ?").get(
+  /**
+   * The Call to compare Call `index` with: the previous Call of its lane, or the previous Call in time when that one
+   * ran on another model (the cache is per model). `modelSwitch` says which.
+   */
+  const previousOf = (key: SessionKey, call: CallSummary): { index: number; modelSwitch: boolean } | undefined => {
+    const inLane = q("SELECT max(idx) AS idx FROM calls WHERE log = ? AND session_id = ? AND lane = ? AND idx < ?").get(
       key.log,
       key.id,
-      lane,
-      index,
-    );
-    return r?.idx === null || r === undefined ? undefined : Number(r.idx);
+      call.lane,
+      call.index,
+    )?.idx;
+    const before = q(
+      "SELECT idx, model FROM calls WHERE log = ? AND session_id = ? AND idx < ? AND usage_basis IS NOT NULL ORDER BY idx DESC LIMIT 1",
+    ).get(key.log, key.id, call.index);
+    const lane = inLane === null || inLane === undefined ? undefined : Number(inLane);
+    if (before !== undefined && before.model !== call.model && (lane === undefined || Number(before.idx) > lane)) {
+      return { index: Number(before.idx), modelSwitch: true };
+    }
+    return lane === undefined ? undefined : { index: lane, modelSwitch: false };
+  };
+
+  /**
+   * The timeline: the Session's runs grouped by lane, Call range, section and group (one read), then summed per Call
+   * by a sweep over each lane's Calls: a run adds its tokens at its first Call and takes them off after its last.
+   */
+  const timeline = (key: SessionKey): TimelineCall[] => {
+    const groups = q(
+      `SELECT r.lane, r.first_call, r.last_call, r.section, b.kind, b.tool IS NOT NULL AS by_tool,
+         sum(r.tokens) AS tokens
+       FROM call_blocks r JOIN log_blocks b ON b.log = r.log AND b.hash = r.block_hash
+       WHERE r.log = ? AND r.session_id = ? GROUP BY r.lane, r.first_call, r.last_call, r.section, b.kind, by_tool`,
+    ).all(key.log, key.id);
+    type Change = { at: number; section: RequestSection; category: ContextCategory; tokens: number };
+    const starts = new Map<string, Change[]>();
+    const ends = new Map<string, Change[]>();
+    for (const g of groups) {
+      const section = String(g.section) as RequestSection;
+      const kind = String(g.kind) as BlockKind;
+      const category = categoryOf(kind, section, Number(g.by_tool) === 1 ? { tool: "" } : {});
+      const change = { section, category, tokens: Number(g.tokens ?? 0) };
+      const lane = String(g.lane);
+      const s = starts.get(lane) ?? [];
+      const e = ends.get(lane) ?? [];
+      starts.set(lane, s);
+      ends.set(lane, e);
+      s.push({ ...change, at: Number(g.first_call) });
+      if (g.last_call !== null) e.push({ ...change, at: Number(g.last_call) });
+    }
+    for (const list of [...starts.values(), ...ends.values()]) list.sort((a, b) => a.at - b.at);
+    const marks = new Map<number, "summary" | "after">();
+    for (const c of compactionsOf(key, false)) {
+      if (c.summaryCallIndex !== undefined) marks.set(c.summaryCallIndex, "summary");
+      if (c.afterCallIndex !== undefined) marks.set(c.afterCallIndex, "after");
+    }
+    type Totals = {
+      sections: TimelineCall["sections"];
+      categories: TimelineCall["categories"];
+      start: number;
+      end: number;
+    };
+    const lanes = new Map<string, Totals>();
+    const zero = () => ({ tools: 0, system: 0, messages: 0, framing: 0 });
+    const calls = q("SELECT * FROM calls WHERE log = ? AND session_id = ? ORDER BY idx").all(key.log, key.id);
+    return calls.map((row) => {
+      const c = callFromRow(row);
+      const t = lanes.get(c.lane) ?? { sections: zero(), categories: emptyCategories(), start: 0, end: 0 };
+      lanes.set(c.lane, t);
+      const add = (x: Change | undefined, sign: number) => {
+        if (x === undefined) return;
+        t.sections[x.section] += sign * x.tokens;
+        t.categories[x.category] += sign * x.tokens;
+      };
+      const ending = ends.get(c.lane) ?? [];
+      while (t.end < ending.length && (ending[t.end]?.at ?? 0) < c.index) add(ending[t.end++], -1);
+      const starting = starts.get(c.lane) ?? [];
+      while (t.start < starting.length && (starting[t.start]?.at ?? 0) <= c.index) add(starting[t.start++], 1);
+      const rebuilt = c.blockCount !== undefined;
+      const framing = rebuilt && c.usage !== undefined ? c.framingTokens : 0;
+      const item: TimelineCall = {
+        index: c.index,
+        lane: c.lane,
+        ts: c.ts,
+        model: c.model,
+        rebuilt,
+        sections: rebuilt ? { ...t.sections, framing } : zero(),
+        categories: rebuilt ? { ...t.categories, other: t.categories.other + framing } : emptyCategories(),
+        issues: c.issues.map((i) => i.kind),
+      };
+      if (c.usage !== undefined) item.usage = c.usage;
+      if (c.cost !== undefined) {
+        const { inputUsd, cacheReadUsd, cacheWriteUsd, outputUsd, totalUsd } = c.cost;
+        item.cost = { inputUsd, cacheReadUsd, cacheWriteUsd, outputUsd, totalUsd };
+      }
+      if (c.cacheBoundary !== undefined) item.cacheBoundary = c.cacheBoundary;
+      const mark = marks.get(c.index);
+      if (mark !== undefined) item.compaction = mark;
+      return item;
+    });
   };
 
   // ---- compactions ----
@@ -403,7 +529,8 @@ export function createQuery(options: QueryOptions): Query {
     const r = q("SELECT idx FROM calls WHERE log = ? AND id = ?").get(key.log, callId);
     return r === undefined ? undefined : Number(r.idx);
   };
-  const compactionsOf = (key: SessionKey): CompactionDetail[] => {
+  /** The Session's compactions; `contexts`: also what was removed and kept, from the contexts before and after. */
+  const compactionsOf = (key: SessionKey, contexts: boolean): CompactionDetail[] => {
     const found = sessionProject(key);
     if (found === undefined) return [];
     const rows = q("SELECT * FROM compactions WHERE log = ? AND session_id = ? ORDER BY ts, id").all(key.log, key.id);
@@ -424,6 +551,7 @@ export function createQuery(options: QueryOptions): Query {
             ).get(key.log, key.id, String(lane), Math.max(before, summaryIndex ?? before))?.idx;
       if (after !== undefined && after !== null) {
         detail.afterCallIndex = Number(after);
+        if (!contexts) return detail;
         const was = before === undefined ? undefined : context(key, before);
         const now = context(key, Number(after));
         if (was !== undefined && now !== undefined) {
@@ -463,6 +591,12 @@ export function createQuery(options: QueryOptions): Query {
         params.push(...allowed.map(trimSeparators));
       }
       if (filter.project !== undefined) where.push(projectFilter([filter.project], params));
+      if (filter.changedSince !== undefined) {
+        // A main Session changed when it or one of its subagents did.
+        where.push(`(changed_seq > ? OR EXISTS (SELECT 1 FROM sessions a WHERE a.log = v.log AND a.parent_id = v.id
+          AND a.changed_seq > ?))`);
+        params.push(filter.changedSince, filter.changedSince);
+      }
       if (filter.search !== undefined && filter.search !== "") {
         where.push("(instr(lower(coalesce(title, '')), lower(?)) > 0 OR instr(id, ?) > 0)");
         params.push(filter.search, filter.search);
@@ -486,7 +620,8 @@ export function createQuery(options: QueryOptions): Query {
       const issues = issuesOf([...new Set(rows.map((r) => Number(r.log)))]);
       const items = rows.map((r) => summary(r, issues));
       nest(items, subagentsOf(items));
-      return { ...meta, total, offset, items };
+      const cursor = Number(q("SELECT seq FROM change_cursor").get()?.seq ?? 0);
+      return { ...meta, total, offset, items, cursor };
     },
     findSessions(id) {
       return q(
@@ -526,28 +661,44 @@ export function createQuery(options: QueryOptions): Query {
         session: summary(row, issues),
         lanes,
         events: hide(events, project),
-        compactions: compactionsOf(key),
+        compactions: compactionsOf(key, false),
         subagents,
       };
     },
-    listCalls(key, lane) {
-      if (sessionProject(key) === undefined) return [];
+    listCalls(key, options = {}) {
+      if (sessionProject(key) === undefined) return { ...meta, total: 0, offset: 0, items: [] };
       const tools = toolUsesOf(key);
-      const rows =
-        lane === undefined
-          ? q("SELECT * FROM calls WHERE log = ? AND session_id = ? ORDER BY idx").all(key.log, key.id)
-          : q("SELECT * FROM calls WHERE log = ? AND session_id = ? AND lane = ? ORDER BY idx").all(
-              key.log,
-              key.id,
-              lane,
-            );
-      return rows.map((r) => callSummary(r, tools.get(String(r.id)) ?? []));
+      const lane = options.lane ?? null;
+      const after = options.afterIndex ?? -1;
+      const counts = q(
+        `SELECT count(*) AS total, count(CASE WHEN idx <= ? THEN 1 END) AS before FROM calls
+         WHERE log = ? AND session_id = ? AND (? IS NULL OR lane = ?)`,
+      ).get(after, key.log, key.id, lane, lane);
+      const rows = q(
+        `SELECT * FROM calls WHERE log = ? AND session_id = ? AND (? IS NULL OR lane = ?) AND idx > ?
+         ORDER BY idx LIMIT ?`,
+      ).all(key.log, key.id, lane, lane, after, options.limit ?? 1000);
+      const items = rows.map((r) => callSummary(r, tools.get(String(r.id)) ?? []));
+      return { ...meta, total: Number(counts?.total), offset: Number(counts?.before), items };
+    },
+    getCall(key, index) {
+      const found = sessionProject(key);
+      const row = callRow(key, index);
+      if (found === undefined || row === undefined) return undefined;
+      const call = callSummary(row, toolUsesOf(key).get(String(row.id)) ?? []);
+      return { ...meta, ...hide({ call, raw: { params: callFromRow(row).params } }, found.project) };
+    },
+    callTimeline(key) {
+      const found = sessionProject(key);
+      if (found === undefined) return { ...meta, items: [] };
+      return { ...meta, items: hide(timeline(key), found.project) };
     },
     contextAt: context,
     contextDiff(key, index) {
       const now = context(key, index);
       if (now === undefined) return undefined;
-      const previous = previousInLane(key, now.lane, index);
+      const prev = previousOf(key, now.call);
+      const previous = prev?.index;
       const was = previous === undefined ? undefined : context(key, previous);
       // The same content at the same position: what the provider could read from the cache.
       const runKey = (b: ContextBlock) => `${b.position}:${b.hash ?? ""}`;
@@ -566,6 +717,7 @@ export function createQuery(options: QueryOptions): Query {
         cacheReadDrop: Math.max(0, (was?.call.usage?.cacheReadTokens ?? 0) - (now.call.usage?.cacheReadTokens ?? 0)),
       };
       if (previous !== undefined) diff.previous = previous;
+      if (prev?.modelSwitch === true) diff.modelSwitch = true;
       if (changed.length > 0) diff.firstChange = Math.min(...changed);
       return diff;
     },
@@ -590,8 +742,8 @@ export function createQuery(options: QueryOptions): Query {
         kind: String(r.kind) as BlockKind,
         source: sourceOf(r),
         text: textOf(r.content),
-        content,
         media: mediaRows,
+        raw: { content },
       };
       return hide(detail, project === null || project === undefined ? undefined : String(project));
     },
@@ -608,7 +760,7 @@ export function createQuery(options: QueryOptions): Query {
     },
     toolCalls(key) {
       const found = sessionProject(key);
-      if (found === undefined) return [];
+      if (found === undefined) return { ...meta, items: [] };
       const content = (hash: string) => jsonColumn(q("SELECT content FROM blocks WHERE hash = ?").get(hash)?.content);
       const rows = q(
         `SELECT t.*, c.idx AS call_idx,
@@ -635,9 +787,80 @@ export function createQuery(options: QueryOptions): Query {
         if (r.result_tokens !== null) s.resultTokens = Number(r.result_tokens);
         return s;
       });
-      return hide(out, found.project);
+      return { ...meta, items: hide(out, found.project) };
     },
-    compactions: compactionsOf,
+    compactions: (key) => ({ ...meta, items: compactionsOf(key, true) }),
+    cacheBreaks(key) {
+      const found = sessionProject(key);
+      if (found === undefined) return { ...meta, items: [] };
+      const rows = q(`${SESSION_BREAKS} ORDER BY idx`).all(key.log, key.id);
+      const items = rows.map((r) => {
+        const b: CacheBreak = {
+          index: Number(r.idx),
+          lane: String(r.lane),
+          ts: String(r.ts),
+          model: String(r.model),
+          previous: {
+            index: Number(r.prev_idx),
+            ts: String(r.prev_ts),
+            model: String(r.prev_model),
+            cacheReadTokens: Number(r.prev_cache_read_tokens),
+          },
+          gapSeconds: Number(r.gap_seconds),
+          cacheReadTokens: Number(r.cache_read_tokens),
+          dropTokens: Number(r.drop_tokens),
+          cacheWriteTokens: Number(r.cache_write_tokens),
+          reason: String(r.reason) as CacheBreakReason,
+        };
+        if (r.break_position !== null) b.breakPosition = Number(r.break_position);
+        if (r.break_block_hash !== null) {
+          b.breakBlock = { hash: String(r.break_block_hash), kind: String(r.break_kind) as BlockKind };
+          if (r.break_tool !== null) b.breakBlock.tool = String(r.break_tool);
+        }
+        return b;
+      });
+      return { ...meta, items: hide(items, found.project) };
+    },
+    blockLifetimes(key, options = {}) {
+      const found = sessionProject(key);
+      if (found === undefined) return { ...meta, items: [] };
+      const rows = db
+        .prepare(`${SESSION_LIFETIME} ORDER BY ${LIFETIME_SORTS[options.sort ?? "cost"]} DESC, block_hash LIMIT ?`)
+        .all(key.log, key.id, options.limit ?? 50);
+      const items = rows.map(
+        (r): BlockLifetime => ({
+          hash: String(r.block_hash),
+          kind: String(r.kind) as BlockKind,
+          source: sourceOf(r),
+          ...lifetimeOf(r),
+        }),
+      );
+      return { ...meta, items: hide(items, found.project) };
+    },
+    toolOutputs(key, options = {}) {
+      const found = sessionProject(key);
+      if (found === undefined) return { ...meta, items: [] };
+      const sql = toolOutputsSql(`(${SESSION_LIFETIME})`, "WHERE t.log = ? AND t.session_id = ?");
+      const rows = db
+        .prepare(`${sql} ORDER BY coalesce(${LIFETIME_SORTS[options.sort ?? "cost"]}, 0) DESC, tool_use_id LIMIT ?`)
+        .all(key.log, key.id, key.log, key.id, options.limit ?? 50);
+      const items = rows.map((r) => {
+        const o: ToolOutput = {
+          toolUseId: String(r.tool_use_id),
+          tool: String(r.tool),
+          source: sourceOf(r),
+          isError: Number(r.is_error) === 1,
+          ...lifetimeOf(r),
+        };
+        if (r.call_idx !== null) o.callIndex = Number(r.call_idx);
+        if (r.input_summary !== null) o.inputSummary = String(r.input_summary);
+        if (r.result_block_hash !== null) o.resultBlockHash = String(r.result_block_hash);
+        if (r.first_call !== null) o.firstCall = Number(r.first_call);
+        if (r.last_call !== null) o.lastCall = Number(r.last_call);
+        return o;
+      });
+      return { ...meta, items: hide(items, found.project) };
+    },
     projectMemory(project) {
       const logs = q("SELECT DISTINCT l.path, s.project FROM sessions s JOIN logs l ON l.id = s.log")
         .all()
@@ -647,7 +870,7 @@ export function createQuery(options: QueryOptions): Query {
         });
       const dirs = [...new Set(logs.map((r) => parentOf(String(r.path))))];
       const root = logs[0]?.project;
-      if (dirs.length === 0) return [];
+      if (dirs.length === 0) return { ...meta, items: [] };
       const docs = db
         .prepare(
           `SELECT path, content, mtime_ms, size FROM project_memory
@@ -660,7 +883,7 @@ export function createQuery(options: QueryOptions): Query {
           mtimeMs: Number(r.mtime_ms),
           size: Number(r.size),
         }));
-      return hide(docs, root === null || root === undefined ? undefined : String(root));
+      return { ...meta, items: hide(docs, root === null || root === undefined ? undefined : String(root)) };
     },
     ingestReport() {
       const visible = visibleLogs();
@@ -727,6 +950,31 @@ export function createQuery(options: QueryOptions): Query {
       return { ...hide(report), ...meta };
     },
   };
+}
+
+/** The lifetime columns of a view row. */
+function lifetimeOf(r: SqlRow): Lifetime {
+  const n = (v: SqlValue | undefined) => Number(v ?? 0);
+  const l: Lifetime = {
+    calls: n(r.calls),
+    runs: n(r.runs),
+    lifetimeTokens: n(r.lifetime_tokens),
+    tokensByPart: { cacheRead: n(r.cache_read_tokens), cacheWrite: n(r.cache_write_tokens), input: n(r.input_tokens) },
+    costUsd: {
+      cacheRead: n(r.cost_cache_read_usd),
+      cacheWrite: n(r.cost_cache_write_usd),
+      input: n(r.cost_input_usd),
+      total: n(r.lifetime_cost_usd),
+    },
+  };
+  if (r.tokens !== null && r.tokens !== undefined) l.tokens = Number(r.tokens);
+  return l;
+}
+
+/** The parameters every provider has: the provider's own stay out of the stable types. */
+function stableParams(params: CallParams): StableCallParams {
+  const { provider: _, ...rest } = params;
+  return rest;
 }
 
 function sourceOf(r: SqlRow): ContextBlock["source"] {

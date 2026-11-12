@@ -166,9 +166,9 @@ const COMMANDS: Record<string, (c: Context) => number> = {
     const n = integer(args[1], "<n>") ?? 0;
     let index = n;
     if (values.lane !== undefined) {
-      const calls = query.listCalls(key, values.lane);
-      const call = calls[n];
-      if (call === undefined) throw new NotFoundError(`lane ${values.lane} has ${calls.length} calls, no call ${n}`);
+      const calls = query.listCalls(key, { lane: values.lane });
+      const call = calls.items[n];
+      if (call === undefined) throw new NotFoundError(`lane ${values.lane} has ${calls.total} calls, no call ${n}`);
       index = call.index;
     }
     const context = query.contextAt(key, index);

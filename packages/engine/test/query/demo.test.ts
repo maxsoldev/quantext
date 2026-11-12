@@ -64,10 +64,11 @@ async function demo(projects?: string[]): Promise<Query> {
 function everything(q: Query): string {
   const out: unknown[] = [q.listSessions(), q.ingestReport(), q.projectMemory("shop")];
   for (const s of q.listSessions().items) {
-    out.push(q.getSession(s), q.toolCalls(s), q.compactions(s));
-    for (const c of q.listCalls(s)) {
+    out.push(q.getSession(s), q.toolCalls(s), q.compactions(s), q.callTimeline(s), q.cacheBreaks(s));
+    out.push(q.blockLifetimes(s), q.toolOutputs(s));
+    for (const c of q.listCalls(s).items) {
       const ctx = q.contextAt(s, c.index);
-      out.push(c, ctx, q.contextDiff(s, c.index));
+      out.push(c, ctx, q.contextDiff(s, c.index), q.getCall(s, c.index));
       for (const b of ctx?.blocks ?? []) if (b.hash !== undefined) out.push(q.getBlock(b.hash, s.log));
     }
   }
@@ -105,13 +106,13 @@ describe("demo mode", () => {
     });
     expect(q.findSessions(hidden.id)).toEqual([]);
     expect(q.getSession(hidden)).toBeUndefined();
-    expect(q.listCalls(hidden)).toEqual([]);
+    expect(q.listCalls(hidden).items).toEqual([]);
     expect(q.contextAt(hidden, 0)).toBeUndefined();
     expect(q.contextDiff(hidden, 1)).toBeUndefined();
-    expect(q.toolCalls(hidden)).toEqual([]);
-    expect(q.compactions(hidden)).toEqual([]);
+    expect(q.toolCalls(hidden).items).toEqual([]);
+    expect(q.compactions(hidden).items).toEqual([]);
     expect(q.getBlock(blockHash, hidden.log)).toBeUndefined();
-    expect(q.projectMemory("secret")).toEqual([]);
+    expect(q.projectMemory("secret").items).toEqual([]);
     const image = all.findSessions("00000000-0000-4000-8000-000000000003")[0];
     const media = image === undefined ? undefined : imageMedia(all, image);
     expect(media && all.getMedia(media.block, media.log, media.hash)).toBeDefined();
@@ -154,12 +155,12 @@ describe("demo mode", () => {
     const q = await demo([PROJECTS["basic-tools"]]);
     const [s] = q.listSessions().items;
     if (s === undefined) throw new Error("no session");
-    const reads = q.toolCalls(s).filter((t) => t.name === "Read");
+    const reads = q.toolCalls(s).items.filter((t) => t.name === "Read");
     expect(reads.map((t) => t.source.filePath)).toContain("src/big.txt");
     expect(reads.map((t) => (t.input as { file_path: string }).file_path)).toContain("missing.txt");
     const ctx = q.contextAt(s, 7);
     expect(ctx?.blocks.some((b) => b.preview.includes('"file_path":"src/math.ts"'))).toBe(true);
-    expect(q.projectMemory("shop")).toMatchObject([
+    expect(q.projectMemory("shop").items).toMatchObject([
       { path: "MEMORY.md", content: "See NOTES.md\n" },
       { path: "other.md", content: 'Like "<hidden project>" and the <hidden project> repo\n' },
     ]);

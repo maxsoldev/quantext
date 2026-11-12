@@ -101,6 +101,8 @@ export interface SessionFilter {
   search?: string;
   sort?: "ended" | "started" | "cost" | "calls";
   order?: "asc" | "desc";
+  /** Only Sessions changed after this change cursor (`Page.cursor`, or a "calls added" event's). */
+  changedSince?: number;
   limit?: number;
   offset?: number;
 }
@@ -108,8 +110,11 @@ export interface SessionFilter {
 export interface Page<T> extends Meta {
   /** Items over all pages. */
   total: number;
+  /** Items before this page. */
   offset: number;
   items: T[];
+  /** `listSessions`: the store's change cursor when the page was read; pass it as `changedSince` to get what changed. */
+  cursor?: number;
 }
 
 export interface LaneSummary {
@@ -128,13 +133,16 @@ export interface SessionDetail extends Meta {
   subagents: SessionSummary[];
 }
 
+/** The parameters of a Call that every provider has; the provider's own are in `CallDetail.raw`. */
+export type StableCallParams = Omit<CallParams, "provider">;
+
 export interface CallSummary {
   id: string;
   index: number;
   lane: string;
   ts: string;
   model: string;
-  params: CallParams;
+  params: StableCallParams;
   usage?: Usage;
   cost?: Cost;
   cacheBoundary?: { tokens: number; position: number };
@@ -168,6 +176,8 @@ export interface ContextBlock {
   hash?: string;
   kind: BlockKind | "framing";
   category: ContextCategory;
+  /** A tool schema sent in the messages, not with the request's tools: a deferred tool that a tool search loaded. */
+  deferred?: true;
   source: BlockSource;
   message?: number;
   /** Absent for a Call with no Usage. */
@@ -201,7 +211,10 @@ export interface CallContext extends Meta {
   totalTokens: number;
 }
 
-/** What changed at Call N against the previous Call of its lane: Blocks by content and position. */
+/**
+ * What changed at Call N against the previous Call of its lane, or the previous Call in time when that one ran on
+ * another model: Blocks by content and position.
+ */
 export interface ContextDiff extends Meta {
   call: number;
   /** The previous Call of the lane; absent for the lane's first Call. */
@@ -210,6 +223,8 @@ export interface ContextDiff extends Meta {
   removed: ContextBlock[];
   /** Entries kept from the previous Call that are not in this Call's Cached prefix: written to the cache again. */
   uncached: ContextBlock[];
+  /** The previous Call ran on another model (in another lane): nothing of its cache could be read. */
+  modelSwitch?: true;
   /** The first position that differs from the previous Call. */
   firstChange?: number;
   /** Cache read tokens lost against the previous Call (0 when it did not drop). */
@@ -223,9 +238,45 @@ export interface BlockDetail extends Meta {
   source: BlockSource;
   /** The whole display text. */
   text: string;
-  /** The content as sent, with each image or document as `{"$media": hash}`; `getMedia` gives its bytes. */
-  content: JsonValue;
   media: { hash: string; mediaType: string; bytes: number }[];
+  /**
+   * Not stable: the content as the provider takes it, with each image or document as `{"$media": hash}` (its bytes
+   * from `getMedia`). Its shape is the provider's and changes with it.
+   */
+  raw: { content: JsonValue };
+}
+
+export interface CallDetail extends Meta {
+  call: CallSummary;
+  /** Not stable: the parameters as the provider names them (for Anthropic: `thinking`, `betas`). */
+  raw: { params: CallParams };
+}
+
+export interface CallListOptions {
+  lane?: string;
+  /** Only Calls with a larger index. */
+  afterIndex?: number;
+  /** At most this many (default 1000). */
+  limit?: number;
+}
+
+/** One Call on a Session's timeline: its numbers and what its context holds, by group, without its Blocks. */
+export interface TimelineCall {
+  index: number;
+  lane: string;
+  ts: string;
+  model: string;
+  usage?: Usage;
+  cost?: CostParts;
+  cacheBoundary?: { tokens: number; position: number };
+  /** False for a Call whose context cannot be rebuilt (no request, not split). */
+  rebuilt: boolean;
+  sections: Record<RequestSection | "framing", number>;
+  categories: Record<ContextCategory, number>;
+  /** The kinds of its issues, in order. */
+  issues: CallIssue["kind"][];
+  /** `summary`: the Call that wrote a compaction's summary; `after`: the first Call of the lane after it. */
+  compaction?: "summary" | "after";
 }
 
 export interface ToolCallSummary {
@@ -290,4 +341,68 @@ export interface SqlResult extends Meta {
   rows: { [column: string]: JsonValue }[];
   /** More rows were left out after the limit. */
   truncated: boolean;
+}
+
+/** A list response. */
+export interface Items<T> extends Meta {
+  items: T[];
+}
+
+/** How to sort and cap a lifetime list: by cost (default), lifetime tokens, or Calls; most first. */
+export interface LifetimeOptions {
+  sort?: "cost" | "tokens" | "calls";
+  limit?: number;
+}
+
+/** Token counts and cost of a Block over the Calls it was sent in, by price part. */
+export interface Lifetime {
+  /** Calls it was sent in, and the runs (positions over Calls) it had. */
+  calls: number;
+  runs: number;
+  /** Its tokens in one Call (the largest, when they changed). */
+  tokens?: number;
+  lifetimeTokens: number;
+  tokensByPart: { cacheRead: number; cacheWrite: number; input: number };
+  costUsd: { cacheRead: number; cacheWrite: number; input: number; total: number };
+}
+
+export interface BlockLifetime extends Lifetime {
+  hash: string;
+  kind: BlockKind;
+  source: BlockSource;
+}
+
+/** A tool use with its result Block's lifetime in the Session. */
+export interface ToolOutput extends Lifetime {
+  toolUseId: string;
+  tool: string;
+  source: BlockSource;
+  isError: boolean;
+  callIndex?: number;
+  /** The first 200 characters of the input, as JSON. */
+  inputSummary?: string;
+  resultBlockHash?: string;
+  /** The Calls (by index) its result stayed in. */
+  firstCall?: number;
+  lastCall?: number;
+}
+
+/** Why the cache read dropped: the first that fits, in this order. */
+export type CacheBreakReason = "compaction" | "model-switch" | "ttl" | "prefix-change";
+
+/** A Call whose cache read dropped against the previous Call (`ContextDiff` tells what changed). */
+export interface CacheBreak {
+  index: number;
+  lane: string;
+  ts: string;
+  model: string;
+  previous: { index: number; ts: string; model: string; cacheReadTokens: number };
+  gapSeconds: number;
+  cacheReadTokens: number;
+  dropTokens: number;
+  cacheWriteTokens: number;
+  /** Where the Cached prefix ended, and the Block there. */
+  breakPosition?: number;
+  breakBlock?: { hash: string; kind: BlockKind; tool?: string };
+  reason: CacheBreakReason;
 }

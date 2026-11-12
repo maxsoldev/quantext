@@ -52,6 +52,24 @@ describe("ingest of project memory", () => {
     expect(docs(store)).toEqual([{ project_dir: project, path: "a.md", content: "two, longer" }]);
   });
 
+  test("removes only the documents of its own root's projects", async () => {
+    const dataDir = tempDir("qx-data-");
+    const store = await openStore({ dataDir });
+    onCleanup(() => store.close());
+    const [a, b] = [tempDir("qx-root-"), tempDir("qx-root-")];
+    writeText(join(a, "projects", "-x", "memory", "a.md"), "a");
+    writeText(join(b, "projects", "-y", "memory", "b.md"), "b");
+    await createIngest({ store, root: a }).ingestAll();
+    await createIngest({ store, root: b }).ingestAll();
+    await createIngest({ store, root: a }).ingestAll();
+    expect(
+      store.memory
+        .marks()
+        .map((m) => m.path)
+        .sort(),
+    ).toEqual(["a.md", "b.md"]);
+  });
+
   test.skipIf(process.getuid?.() === 0)("reports an unreadable memory file and keeps the others", async () => {
     const { store, project, ingest } = await setup();
     writeText(join(project, "memory", "a.md"), "a");

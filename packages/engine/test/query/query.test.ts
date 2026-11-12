@@ -5,7 +5,7 @@
 import { describe, expect, test } from "vitest";
 import { claudeCodeCodec } from "../../src/adapters/claude-code/index.ts";
 import type { Query } from "../../src/query/index.ts";
-import { createQuery } from "../../src/query/index.ts";
+import { createQuery, runSql } from "../../src/query/index.ts";
 import { mainRows } from "../fixtures.ts";
 import { ingested } from "./corpus.ts";
 
@@ -100,7 +100,7 @@ describe("contextAt", () => {
     const q = await query();
     let checked = 0;
     for (const s of q.listSessions().items.flatMap((m) => [m, ...(m.subagents ?? [])])) {
-      for (const call of q.listCalls(s)) {
+      for (const call of q.listCalls(s).items) {
         const ctx = q.contextAt(s, call.index);
         if (ctx === undefined || !ctx.rebuilt || call.usage === undefined) continue;
         const u = call.usage;
@@ -152,6 +152,27 @@ describe("contextAt", () => {
     expect(image).toMatchObject({ kind: "tool-result", category: "tool-outputs", preview: "[image 96x64]" });
   });
 
+  test("counts a system text in the messages as injected context, not as the base instructions", async () => {
+    const q = await query(["compaction"]);
+    const ctx = q.contextAt(key(q, 5), 4);
+    const injected = ctx?.blocks.find((b) => b.position === 20);
+    expect(injected).toMatchObject({ kind: "system", section: "messages", category: "injected-context" });
+    expect(ctx?.blocks.filter((b) => b.category === "base-instructions").every((b) => b.section === "system")).toBe(
+      true,
+    );
+  });
+
+  test("marks a tool schema sent in the messages (loaded by a tool search) as deferred", async () => {
+    const q = await query(["mcp-deferred"]);
+    const s = key(q, 6);
+    const blocks = q.listCalls(s).items.flatMap((c) => q.contextAt(s, c.index)?.blocks ?? []);
+    const deferred = blocks.filter((b) => b.deferred === true);
+    expect(deferred.length).toBeGreaterThan(0);
+    expect(deferred.every((b) => b.kind === "tool-schema" && b.section === "messages")).toBe(true);
+    expect(deferred.every((b) => b.category === "tool-definitions")).toBe(true);
+    expect(blocks.filter((b) => b.section === "tools").every((b) => b.deferred === undefined)).toBe(true);
+  });
+
   test("is undefined for a Call or Session that does not exist", async () => {
     const q = await query(["image"]);
     expect(q.contextAt(key(q, 3), 99)).toBeUndefined();
@@ -176,7 +197,7 @@ describe("contextDiff", () => {
   test("shows where the cache broke: the first change, the cache read lost, the Blocks after it", async () => {
     const q = await query(["compaction"]);
     const s = key(q, 5);
-    const calls = q.listCalls(s).filter((c) => c.lane === q.listCalls(s)[0]?.lane);
+    const calls = q.listCalls(s).items.filter((c) => c.lane === q.listCalls(s).items[0]?.lane);
     const breaks = calls.filter(
       (c, i) => (c.usage?.cacheReadTokens ?? 0) < (calls[i - 1]?.usage?.cacheReadTokens ?? 0),
     );
@@ -200,7 +221,7 @@ describe("a Session's detail", () => {
     const detail = q.getSession(key(q, 2));
     expect(detail?.subagents.map((s) => s.agentName ?? s.id)).toHaveLength(1);
     expect(detail?.lanes.map((l) => l.calls)).toEqual([2]);
-    const tools = q.toolCalls(key(q, 1));
+    const tools = q.toolCalls(key(q, 1)).items;
     // The steps of the scenario, and a Read of the file before its Edit.
     expect(tools.map((t) => t.name).sort()).toEqual([
       "Bash",
@@ -217,13 +238,15 @@ describe("a Session's detail", () => {
       { file_path: "/fixture-0000000000000000/repo/missing.txt" },
     ]);
     expect(tools.every((t) => t.resultTokens !== undefined && t.callIndex !== undefined)).toBe(true);
-    const parallel = q.listCalls(key(q, 1)).filter((c) => c.toolCalls.filter((t) => t.name === "Read").length === 2);
+    const parallel = q
+      .listCalls(key(q, 1))
+      .items.filter((c) => c.toolCalls.filter((t) => t.name === "Read").length === 2);
     expect(parallel).toHaveLength(1);
   });
 
   test("has its compaction with the sizes the harness logged, and what was removed and kept", async () => {
     const q = await query(["compaction"]);
-    const [c] = q.compactions(key(q, 5));
+    const [c] = q.compactions(key(q, 5)).items;
     expect(c).toMatchObject({ trigger: "manual", beforeTokens: 16778, afterTokens: 2865 });
     expect(c?.afterCallIndex).toBeGreaterThan(c?.beforeCallIndex ?? 99);
     const before = q.contextAt(key(q, 5), c?.beforeCallIndex ?? -1);
@@ -234,7 +257,9 @@ describe("a Session's detail", () => {
     expect(c?.kept?.categories["tool-definitions"]).toBeGreaterThan(0);
     expect(c?.removed?.categories["tool-outputs"]).toBeGreaterThan(0);
     expect(c?.summaryTokens).toBeGreaterThan(0);
-    expect(q.getSession(key(q, 5))?.compactions).toEqual([c]);
+    // The Session's detail has the compaction without the contexts (they cost two reads each).
+    const { removed: _r, kept: _k, summaryTokens: _s, ...plain } = c ?? { removed: 0, kept: 0, summaryTokens: 0 };
+    expect(q.getSession(key(q, 5))?.compactions).toEqual([plain]);
   });
 
   test("gives a Block's whole text and content, and an image's media", async () => {
@@ -263,5 +288,109 @@ describe("the report", () => {
     expect(report.issues["unresolved-request"]).toBe(1);
     expect(report.pendingBytes).toBe(0);
     expect(report.requestLogs).toEqual([{ requestLog: "present", sessions: 8 }]);
+  });
+});
+
+describe("for the live viewer", () => {
+  test("the timeline has every Call with its usage, cost and the context-bar totals of its context", async () => {
+    const q = await query(["compaction", "basic-tools"]);
+    for (const n of [1, 5]) {
+      const s = key(q, n);
+      const timeline = q.callTimeline(s);
+      expect(timeline.apiVersion).toBe(1);
+      const calls = q.listCalls(s).items;
+      expect(timeline.items.map((t) => t.index)).toEqual(calls.map((c) => c.index));
+      for (const t of timeline.items) {
+        const ctx = q.contextAt(s, t.index);
+        expect(t).toMatchObject({
+          lane: ctx?.lane,
+          rebuilt: ctx?.rebuilt,
+          categories: ctx?.categories,
+          sections: ctx?.sections,
+        });
+        const call = calls.find((c) => c.index === t.index);
+        expect(t.usage).toEqual(call?.usage);
+        expect(t.issues).toEqual(call?.issues.map((i) => i.kind));
+      }
+    }
+    const marks = q.callTimeline(key(q, 5)).items.filter((t) => t.compaction !== undefined);
+    expect(marks.map((t) => t.compaction)).toEqual(["summary", "after"]);
+  });
+
+  test("lists Calls page by page after an index", async () => {
+    const q = await query(["basic-tools"]);
+    const s = key(q, 1);
+    const first = q.listCalls(s, { limit: 3 });
+    expect(first).toMatchObject({ total: 8, offset: 0 });
+    expect(first.items.map((c) => c.index)).toEqual([0, 1, 2]);
+    const next = q.listCalls(s, { afterIndex: 2, limit: 3 });
+    expect(next).toMatchObject({ total: 8, offset: 3 });
+    expect(next.items.map((c) => c.index)).toEqual([3, 4, 5]);
+  });
+
+  test("lists only the Sessions changed after a cursor, and gives the cursor to go on from", async () => {
+    const q = await query(["basic-tools", "image"]);
+    const all = q.listSessions();
+    expect(all.cursor).toBeGreaterThan(0);
+    expect(q.listSessions({ changedSince: all.cursor ?? 0 }).items).toEqual([]);
+    const image = q.listSessions({ changedSince: (all.cursor ?? 0) - 1 }).items.map((s) => s.id);
+    expect(image).toEqual([ID(3)]); // ingested last
+  });
+
+  test("keeps the provider's own data out of the stable types, behind raw", async () => {
+    const q = await query(["effort"]);
+    const s = key(q, 7);
+    const calls = q.listCalls(s).items;
+    expect(calls.every((c) => !("provider" in c.params))).toBe(true);
+    const detail = q.getCall(s, 0);
+    expect(detail?.call.index).toBe(0);
+    expect(detail?.raw.params.provider).toBeDefined();
+    const block = q.contextAt(s, 0)?.blocks[0];
+    const full = q.getBlock(block?.hash ?? "", s.log);
+    expect(full && "content" in full).toBe(false);
+    expect(full?.raw.content).toBeDefined();
+  });
+});
+
+describe("cache breaks", () => {
+  test("after a compaction, and when the model changes (compared with the previous Call in time)", async () => {
+    const q = await query(["compaction", "effort"]);
+    expect(q.cacheBreaks(key(q, 5)).items.map((b) => [b.index, b.previous.index, b.reason])).toEqual([
+      [4, 2, "compaction"],
+    ]);
+    const effort = key(q, 7);
+    const calls = q.listCalls(effort).items;
+    const switched = calls.find((c, i) => i > 0 && c.model !== calls[i - 1]?.model);
+    const breaks = q.cacheBreaks(effort).items;
+    expect(breaks.map((b) => b.reason)).toContain("model-switch");
+    const b = breaks.find((x) => x.reason === "model-switch");
+    expect(b).toMatchObject({ index: switched?.index, previous: { index: (switched?.index ?? 0) - 1 } });
+    const diff = q.contextDiff(effort, switched?.index ?? -1);
+    expect(diff).toMatchObject({ previous: (switched?.index ?? 0) - 1, modelSwitch: true });
+    // Nothing was read from the cache: what the new model got of the old request is written again.
+    expect(diff?.uncached.length).toBeGreaterThan(0);
+    expect(diff?.uncached.every((x) => !x.inCachedPrefix)).toBe(true);
+  });
+
+  test("names a long pause (the cache's time to live) and a changed prefix", async () => {
+    const at = (s: number) => new Date(Date.parse("2026-11-12T00:26:10Z") + s * 1000).toISOString();
+    const { db } = await ingested(["basic-tools"], undefined, (w) => {
+      const set = w.prepare("UPDATE calls SET cache_read_tokens = ?, ts = ? WHERE idx = ?");
+      set.run(100, at(400), 3); // 400 s after call 2: the 5-minute cache ran out
+      set.run(50, at(410), 4); // 10 s later: something early in the request changed
+      w.prepare("UPDATE calls SET ts = ? WHERE idx = 2").run(at(0));
+      w.prepare("UPDATE calls SET ts = ? WHERE idx IN (5, 6, 7)").run(at(420));
+    });
+    const q = createQuery({ db, codec: claudeCodeCodec });
+    const breaks = q.cacheBreaks(key(q, 1)).items;
+    expect(breaks.map((b) => [b.index, b.reason, b.gapSeconds])).toEqual([
+      [3, "ttl", 400],
+      [4, "prefix-change", 10],
+    ]);
+    const view = runSql(db, "SELECT idx, reason FROM v_cache_breaks ORDER BY idx").rows;
+    expect(view).toEqual([
+      { idx: 3, reason: "ttl" },
+      { idx: 4, reason: "prefix-change" },
+    ]);
   });
 });

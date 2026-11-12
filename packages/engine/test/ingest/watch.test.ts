@@ -48,6 +48,11 @@ function recordingIngest() {
       await held;
       return EMPTY;
     },
+    ingestMemory: async () => {
+      asked.push(["memory"]);
+      await held;
+      return [];
+    },
     onCalls: () => () => undefined,
   };
   return {
@@ -114,6 +119,30 @@ describe("the watcher", () => {
     changes.fire("/r/projects/p/a/image.png");
     await watcher.flush();
     expect(fake.asked).toEqual([]);
+  });
+
+  test("reads the projects' memory again after a change to a memory document, once per window", async () => {
+    const fake = recordingIngest();
+    const changes = manualChanges();
+    const watcher = watchTranscripts({ ingest: fake.ingest, root: "/r", changes, debounceMs: 60_000 });
+    onCleanup(() => watcher.stop());
+    changes.fire("/r/projects/p/memory/MEMORY.md");
+    changes.fire("/r/projects/p/memory/notes.md");
+    changes.fire("/r/projects/p/a.jsonl");
+    await watcher.flush();
+    expect(fake.asked).toEqual([["/r/projects/p/a.jsonl"], ["memory"]]);
+  });
+
+  test("brings a changed memory document into the store", async () => {
+    const { root, store, ingest } = await realSetup();
+    const changes = manualChanges();
+    const watcher = watchTranscripts({ ingest, root, changes, debounceMs: 1 });
+    onCleanup(() => watcher.stop());
+    const doc = join(root, "projects", "-p", "memory", "MEMORY.md");
+    writeText(doc, "remember this\n");
+    changes.fire(doc);
+    await watcher.flush();
+    expect(store.memory.marks().map((m) => m.path)).toEqual(["MEMORY.md"]);
   });
 
   test("reads everything again for a change it cannot place (a folder, or no file name)", async () => {

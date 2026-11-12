@@ -120,7 +120,7 @@ export function printCall(ctx: CallContext, diff: ContextDiff | undefined): stri
   const body = table(ctx.blocks, [
     { title: "POS", value: (b) => String(b.position), right: true },
     { title: "SECTION", value: (b) => b.section },
-    { title: "KIND", value: (b) => b.kind },
+    { title: "KIND", value: (b) => (b.deferred === true ? `${b.kind} (deferred)` : b.kind) },
     {
       title: "SOURCE",
       value: (b) =>

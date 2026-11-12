@@ -37,9 +37,11 @@ test(`on a ${CALLS}-call session: the context of its last Call, the session list
   const q = createQuery({ db, codec: claudeCodeCodec });
   const list = timed(() => q.listSessions());
   const key = list.result.items[0] ?? { log: 0, id: "" };
-  const last = q.listCalls(key).at(-1)?.index ?? -1;
+  const last = q.listCalls(key, { limit: CALLS + 1 }).items.at(-1)?.index ?? -1;
   const context = timed(() => q.contextAt(key, last));
   const diff = timed(() => q.contextDiff(key, last));
+  const timeline = timed(() => q.callTimeline(key));
+  const lifetimes = timed(() => q.blockLifetimes(key));
   const lifetime = timed(() =>
     runSql(
       db,
@@ -48,7 +50,8 @@ test(`on a ${CALLS}-call session: the context of its last Call, the session list
   );
   console.log(
     `${CALLS}-call session, ${context.result?.blocks.length} entries at its last Call: listSessions ${list.ms.toFixed(0)} ms,` +
-      ` contextAt ${context.ms.toFixed(0)} ms, contextDiff ${diff.ms.toFixed(0)} ms, lifetime top 10 ${lifetime.ms.toFixed(0)} ms`,
+      ` contextAt ${context.ms.toFixed(0)} ms, contextDiff ${diff.ms.toFixed(0)} ms, callTimeline ${timeline.ms.toFixed(0)} ms,` +
+      ` blockLifetimes ${lifetimes.ms.toFixed(0)} ms, lifetime view top 10 ${lifetime.ms.toFixed(0)} ms`,
   );
   expect(context.result?.blocks.length).toBeGreaterThan(2 * CALLS);
   expect(lifetime.result.rows).toHaveLength(10);
@@ -56,4 +59,7 @@ test(`on a ${CALLS}-call session: the context of its last Call, the session list
   expect(context.ms).toBeLessThan(500);
   expect(diff.ms).toBeLessThan(1000);
   expect(lifetime.ms).toBeLessThan(10_000);
+  expect(timeline.result.items).toHaveLength(CALLS);
+  expect(timeline.ms).toBeLessThan(1500);
+  expect(lifetimes.ms).toBeLessThan(5000);
 });

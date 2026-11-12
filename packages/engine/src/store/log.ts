@@ -70,7 +70,11 @@ export interface LogBatch {
 
 /** The Calls a write added and updated, by Session, in the order the deltas named them. */
 export interface WriteResult {
-  calls: { sessionId: string; added: string[]; updated: string[] }[];
+  /** The log's id in the store (`SessionKey.log`). */
+  log: number;
+  /** The store's change cursor after the write: it grew when the write changed a Session. */
+  cursor: number;
+  calls: { sessionId: string; added: string[]; addedIndexes: number[]; updated: string[] }[];
 }
 
 export interface LogStore {
@@ -98,6 +102,19 @@ const UPSERT_MESSAGE = upsertSql("messages", ["key", "role", "blocks"], ["key"])
 const UPSERT_SHAPE = upsertSql("shapes", ["key", "tools", "system"], ["key"]);
 const UPSERT_RECORD = upsertSql("records", ["key", "value"], ["key"]);
 const UPSERT_LOG_BLOCK = upsertSql("log_blocks", LOG_BLOCK_COLUMNS, ["hash"]);
+/**
+ * What the store derives for a Call when it writes it: its tokens before the cache boundary (the Blocks wholly inside
+ * the Cached prefix; NULL when not split), its price per cache-read token, and per other input token (cache write,
+ * or plain input when it wrote none). The lifetime cost reads them from the lane index.
+ */
+const SET_DERIVED = `UPDATE calls SET cache_boundary_offset = CASE WHEN cache_boundary_position IS NULL THEN NULL
+  ELSE (SELECT coalesce(sum(r.tokens), 0) FROM call_blocks r
+    WHERE r.log = calls.log AND r.session_id = calls.session_id AND r.lane = calls.lane AND r.first_call <= calls.idx
+      AND (r.last_call IS NULL OR r.last_call >= calls.idx) AND r.position < calls.cache_boundary_position) END,
+  unit_read_usd = CASE WHEN cache_read_tokens > 0 THEN cost_cache_read_usd / cache_read_tokens END,
+  unit_rest_usd = CASE WHEN cache_write_tokens > 0 THEN cost_cache_write_usd / cache_write_tokens
+    WHEN input_tokens > 0 THEN cost_input_usd / input_tokens END
+  WHERE log = ? AND id = ?`;
 const UPSERT_FILE = `INSERT INTO ingest_files
   (path, log, transcript, kind, file_id, size, mtime_ms, byte_offset, fingerprint, error)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -188,7 +205,16 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
     return JSON.stringify(list.map((p) => p.hash));
   };
 
-  const apply = (delta: SessionDelta, result: Map<string, { added: string[]; updated: string[] }>) => {
+  type Changed = Map<string, { added: string[]; addedIndexes: number[]; updated: string[] }>;
+  const apply = (delta: SessionDelta, result: Changed, touched: Set<string>, calls: Set<string>) => {
+    for (const s of delta.sessions) touched.add(s.id);
+    for (const c of delta.calls) {
+      touched.add(c.sessionId);
+      calls.add(c.id);
+    }
+    for (const x of [...delta.callBlocks, ...delta.toolCalls, ...delta.compactions, ...delta.events]) {
+      touched.add(x.sessionId);
+    }
     for (const record of delta.records) {
       const stored = codec.pack(record);
       if (stored.kind === "message") {
@@ -207,10 +233,12 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
     for (const c of delta.calls) {
       const isNew = one("SELECT 1 FROM calls WHERE log = ? AND id = ?", c.id) === undefined;
       sql.get(UPSERT_CALL).run(id, ...callRow(c));
-      const entry = result.get(c.sessionId) ?? { added: [], updated: [] };
+      const entry = result.get(c.sessionId) ?? { added: [], addedIndexes: [], updated: [] };
       result.set(c.sessionId, entry);
-      if (isNew) entry.added.push(c.id);
-      else if (!entry.added.includes(c.id) && !entry.updated.includes(c.id)) entry.updated.push(c.id);
+      if (isNew) {
+        entry.added.push(c.id);
+        entry.addedIndexes.push(c.index);
+      } else if (!entry.added.includes(c.id) && !entry.updated.includes(c.id)) entry.updated.push(c.id);
     }
     for (const r of delta.callBlocks) sql.get(UPSERT_RUN).run(id, ...runRow(r));
     for (const t of delta.toolCalls) {
@@ -256,8 +284,20 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
     files: () => all("SELECT * FROM ingest_files WHERE log = ? ORDER BY path").map(fileMark),
     write(batch) {
       return db.transaction(() => {
-        const result = new Map<string, { added: string[]; updated: string[] }>();
-        for (const delta of batch.deltas) apply(delta, result);
+        const result: Changed = new Map();
+        const touched = new Set<string>();
+        const calls = new Set<string>();
+        for (const delta of batch.deltas) apply(delta, result, touched, calls);
+        // After every run of the batch is in: what the store derives for each written Call.
+        for (const callId of calls) sql.get(SET_DERIVED).run(id, callId);
+        let cursor = Number(sql.get("SELECT seq FROM change_cursor").get()?.seq ?? 0);
+        if (touched.size > 0) {
+          cursor++;
+          sql.get("UPDATE change_cursor SET seq = ?").run(cursor);
+          for (const sessionId of touched) {
+            sql.get("UPDATE sessions SET changed_seq = ? WHERE log = ? AND id = ?").run(cursor, id, sessionId);
+          }
+        }
         if (batch.snapshot !== undefined) {
           sql.get("UPDATE logs SET snapshot = ? WHERE id = ?").run(JSON.stringify(batch.snapshot), id);
         }
@@ -277,7 +317,7 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
               f.error ?? null,
             );
         }
-        return { calls: [...result].map(([sessionId, calls]) => ({ sessionId, ...calls })) };
+        return { log: id, cursor, calls: [...result].map(([sessionId, c]) => ({ sessionId, ...c })) };
       });
     },
     reset,

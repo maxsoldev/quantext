@@ -57,6 +57,8 @@ export interface Store {
   setScanIssues(issues: readonly { path: string; issue: string }[]): void;
   /** The project memory documents ingest has read, by project folder and path. */
   readonly memory: MemoryStore;
+  /** The change cursor: it grows with each write that changes a Session (`WriteResult.cursor`). */
+  changeCursor(): number;
   /** The paths of every log in the store, oldest first. */
   logs(): string[];
   close(): void;
@@ -151,6 +153,7 @@ export async function openStore(options: OpenStoreOptions): Promise<Store> {
             }
           }),
       },
+      changeCursor: () => Number(sql.get("SELECT seq FROM change_cursor").get()?.seq ?? 0),
       logs: () =>
         sql
           .get("SELECT path FROM logs ORDER BY id")
