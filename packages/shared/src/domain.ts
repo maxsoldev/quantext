@@ -91,10 +91,11 @@ export interface Call {
 /**
  * A flag on a Call. `unresolved-request`: part of the request is not in the log, so the rebuilt input is
  * incomplete. `no-usage`: the log holds no Usage, so the Call has no exact total. `unreconciled-tokens`: the exact
- * change from the previous Call does not fit the new Blocks, so the whole total is split by estimate.
+ * change from the previous Call does not fit the new Blocks, so the whole total is split by estimate. `no-price`:
+ * there is no list price for the model, so the Call has no cost.
  */
 export interface CallIssue {
-  kind: "unresolved-request" | "no-usage" | "unreconciled-tokens";
+  kind: "unresolved-request" | "no-usage" | "unreconciled-tokens" | "no-price";
   detail: string;
 }
 
@@ -155,12 +156,49 @@ export interface CallBlock {
   basis?: TokenBasis;
   /** Inside the Cached prefix: the part of the input the provider read from its cache. */
   inCachedPrefix: boolean;
+  /** The Block's share of the Call's input cost in US dollars, by the cache part its tokens are in. */
+  costUsd?: number;
+}
+
+/** One use of a tool by the model. */
+export interface ToolCall {
+  /** The tool use id the model gave it. */
+  id: string;
+  sessionId: string;
+  /** The Call whose response holds the tool use. */
+  callId: string;
+  name: string;
+  input: JsonValue;
+  source: BlockSource;
+  /** The Block that holds the result, once a later Call sends it. */
+  resultBlockHash?: string;
+  isError: boolean;
+  /** From the tool use to its result, by the log's timestamps. */
+  durationMs?: number;
+  /** The number of tool uses in the same response (1 when the tool ran alone). */
+  parallel: number;
+  /** The Session the tool started, for a tool that runs a subagent. */
+  childSessionId?: string;
+}
+
+/** An event where the harness replaced most of a Session's context with a shorter summary. */
+export interface Compaction {
+  id: string;
+  sessionId: string;
+  ts: string;
+  /** What started it, in the harness's words (for example `manual` or `auto`). */
+  trigger: string;
+  /** The context size before and after, as the harness reports it. */
+  beforeTokens?: number;
+  afterTokens?: number;
+  /** The Call that wrote the summary, when its usage could be derived. */
+  summaryCallId?: string;
 }
 
 /** Input that the adapter could not map, counted so that nothing is dropped in silence. */
 export interface IngestReport {
-  /** Unknown record kinds, by the harness's own name, with their counts. */
-  unknownRecords: Record<string, number>;
+  /** Unknown record kinds, by the harness's own name, with their counts, in the order first seen. */
+  unknownRecords: { kind: string; count: number }[];
   /** Records that could not be read (bad JSON, missing fields): where (transcript and line) and why. */
   unreadable: { at: string; reason: string }[];
 }
@@ -171,5 +209,7 @@ export interface SessionGraph {
   calls: Call[];
   blocks: Block[];
   callBlocks: CallBlock[];
+  toolCalls: ToolCall[];
+  compactions: Compaction[];
   report: IngestReport;
 }

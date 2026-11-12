@@ -14,7 +14,8 @@ const sum = (cbs: readonly CallBlock[]) => cbs.reduce((total, cb) => total + (cb
 describe.each(scenarios())("attribution of $version/$name", ({ name }) => {
   const graph = parseClaudeCodeSession(transcriptsOf(name));
 
-  test.each(graph.calls.map((call) => [call.index, call] as const))(
+  const logged = graph.calls.filter((call) => call.usage?.basis === "exact");
+  test.each(logged.map((call) => [call.index, call] as const))(
     "call %i: its blocks and framing add up to the exact input total",
     (_, call) => {
       expect(call.issues).toEqual([]);

@@ -76,3 +76,25 @@ export function priceUsage(usage: Usage, model: string): Cost | undefined {
     price: ref,
   };
 }
+
+/**
+ * Each Block's share of a Call's input cost, from its tokens in order. The provider reads the cache first, then
+ * writes the cache up to the last breakpoint, then reads the rest as plain input: a Block is priced by the parts
+ * of that range it covers (the cache write at its average price over both times to live).
+ */
+export function blockCosts(tokens: readonly number[], usage: Usage, cost: Cost): number[] {
+  const perToken = (usd: number, n: number) => (n > 0 ? usd / n : 0);
+  const readEnd = usage.cacheReadTokens;
+  const writeEnd = readEnd + usage.cacheWriteTokens;
+  const prices = [
+    { from: 0, to: readEnd, price: perToken(cost.cacheReadUsd, usage.cacheReadTokens) },
+    { from: readEnd, to: writeEnd, price: perToken(cost.cacheWriteUsd, usage.cacheWriteTokens) },
+    { from: writeEnd, to: Number.POSITIVE_INFINITY, price: perToken(cost.inputUsd, usage.inputTokens) },
+  ];
+  let start = 0;
+  return tokens.map((t) => {
+    const [a, b] = [start, start + t];
+    start = b;
+    return prices.reduce((usd, r) => usd + Math.max(0, Math.min(b, r.to) - Math.max(a, r.from)) * r.price, 0);
+  });
+}

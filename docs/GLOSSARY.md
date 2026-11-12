@@ -29,7 +29,8 @@ Shape; it is stored once (in Claude Code logs: the `api-request-shape` row).
 _Avoid_: signature, config, header
 
 **Compaction**:
-An event where the harness replaces most of a Session's context with a shorter summary, to free room.
+An event where the harness replaces most of a Session's context with a shorter summary, to free room. The Call
+that writes the summary is the **summarising Call**; when the harness does not log it, its Usage is derived.
 _Avoid_: summarisation, truncation, reset
 
 ## Context

@@ -4,6 +4,7 @@ import type { AttributionCall } from "../../core/attribute.ts";
 import { attributeCalls } from "../../core/attribute.ts";
 import type { Estimator } from "../../core/estimate.ts";
 import { estimateRequest } from "../../core/estimate.ts";
+import { blockCosts } from "../../core/pricing.ts";
 import type { RequestBlock } from "./blocks.ts";
 import type { WireRequest } from "./rebuild.ts";
 
@@ -22,9 +23,9 @@ export function attributeSession(calls: readonly SplitCall[], estimator?: Estima
   const inputs: AttributionCall[] = [];
   const lastByModel = new Map<string, string>();
   for (const { call, request, entries } of calls) {
-    const previousId = request?.baseId ?? lastByModel.get(call.model);
-    lastByModel.set(call.model, call.id);
     if (request === undefined || request.missing.length > 0) continue;
+    const previousId = request.baseId ?? lastByModel.get(call.model);
+    lastByModel.set(call.model, call.id);
     const estimates = estimateRequest(
       entries.map((e) => e.block),
       estimator,
@@ -49,6 +50,8 @@ export function attributeSession(calls: readonly SplitCall[], estimator?: Estima
       call.framingTokens = result.framingTokens;
       call.issues.push(...result.issues);
     }
+    const tokens = result?.blocks?.map((b) => b.tokens);
+    const costs = tokens && call.usage && call.cost ? blockCosts(tokens, call.usage, call.cost) : undefined;
     return entries.map((entry, position) => {
       const callBlock: CallBlock = {
         callId: call.id,
@@ -59,8 +62,10 @@ export function attributeSession(calls: readonly SplitCall[], estimator?: Estima
         inCachedPrefix: result?.blocks?.[position]?.inCachedPrefix ?? false,
       };
       if (entry.message !== undefined) callBlock.message = entry.message;
-      const tokens = result?.blocks?.[position];
-      if (tokens !== undefined) Object.assign(callBlock, { tokens: tokens.tokens, basis: tokens.basis });
+      const share = result?.blocks?.[position];
+      if (share !== undefined) Object.assign(callBlock, { tokens: share.tokens, basis: share.basis });
+      const cost = costs?.[position];
+      if (cost !== undefined) callBlock.costUsd = cost;
       return callBlock;
     });
   });

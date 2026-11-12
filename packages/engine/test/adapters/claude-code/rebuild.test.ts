@@ -6,7 +6,7 @@ import { readRows } from "../../../src/adapters/claude-code/rows.ts";
 import { scenarios, transcriptsOf } from "../../fixtures.ts";
 
 function requestsOf(transcripts: ClaudeCodeTranscripts) {
-  const report = { unknownRecords: {}, unreadable: [] };
+  const report = { unknownRecords: [], unreadable: [] };
   const all = [
     readRows("main", transcripts.main, report),
     ...transcripts.subagents.map((s, i) => readRows(`subagent-${i}`, s.text, report)),
@@ -29,9 +29,11 @@ describe.each(scenarios())("rebuild of $version/$name", ({ name }) => {
     },
   );
 
-  test("no Call has an issue", () => {
+  test("no logged Call has an issue", () => {
     const graph = parseClaudeCodeSession(transcriptsOf(name));
-    expect(graph.calls.filter((call) => call.issues.length > 0)).toEqual([]);
+    const logged = graph.calls.filter((call) => call.usage?.basis === "exact");
+    expect(logged).toHaveLength(graph.calls.length - graph.compactions.length);
+    expect(logged.filter((call) => call.issues.length > 0)).toEqual([]);
   });
 });
 

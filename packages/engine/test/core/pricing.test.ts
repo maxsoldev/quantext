@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { canonicalModel, priceUsage } from "../../src/core/pricing.ts";
+import { blockCosts, canonicalModel, priceUsage } from "../../src/core/pricing.ts";
 
 describe("canonicalModel", () => {
   test.each([
@@ -56,5 +56,38 @@ describe("priceUsage", () => {
 
   test("has no price for an unknown model", () => {
     expect(priceUsage(usage, "claude-unknown-9")).toBeUndefined();
+  });
+});
+
+describe("blockCosts", () => {
+  test("prices each block by the part of the input it is in: cache read, then cache write, then plain input", () => {
+    const usage = {
+      basis: "exact" as const,
+      inputTokens: 2,
+      cacheReadTokens: 100,
+      cacheWriteTokens: 40,
+      outputTokens: 0,
+    };
+    const cost = priceUsage(usage, "claude-opus-5-5");
+    if (cost === undefined) throw new Error("no price");
+    // Opus 5.5 per million: cache read $0.20, cache write (5 minutes) $5, input $4.
+    const costs = blockCosts([50, 60, 30], usage, cost);
+    expect(costs[0]).toBeCloseTo(50 * 0.2e-6, 15);
+    expect(costs[1]).toBeCloseTo(50 * 0.2e-6 + 10 * 5e-6, 15);
+    expect(costs[2]).toBeCloseTo(30 * 5e-6, 15);
+  });
+
+  test("leaves the framing after the last block at the plain input price", () => {
+    const usage = {
+      basis: "exact" as const,
+      inputTokens: 2,
+      cacheReadTokens: 100,
+      cacheWriteTokens: 40,
+      outputTokens: 7,
+    };
+    const cost = priceUsage(usage, "claude-opus-5-5");
+    if (cost === undefined) throw new Error("no price");
+    const total = blockCosts([50, 60, 30], usage, cost).reduce((a, b) => a + b, 0);
+    expect(cost.inputUsd + cost.cacheReadUsd + cost.cacheWriteUsd - total).toBeCloseTo(2 * 4e-6, 15);
   });
 });
