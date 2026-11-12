@@ -119,7 +119,10 @@ const SHOTS: Shot[] = [
       engine.writeMemory("basic-tools", "tests.md", "---\nname: tests\n---\nRun the unit tests before a commit.\n");
       await page.goto(await engine.sessionUrl("basic-tools"));
       await page.getByRole("link", { name: "Project memory" }).click();
-      await expect(page.getByTestId("memory-file")).toHaveCount(3);
+      // The engine is shared per worker and all fixtures share one memory folder, so wait for these three files
+      // rather than an exact count (memory.e2e.ts adds its own).
+      for (const name of ["MEMORY.md", "style.md", "tests.md"])
+        await expect(page.getByTestId("memory-file").filter({ hasText: name })).toHaveCount(1);
     },
   },
   {
