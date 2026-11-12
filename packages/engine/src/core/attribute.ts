@@ -1,187 +1,166 @@
 /**
- * Token attribution (ADR 6): split each Call's exact input total over its Blocks. Exact numbers first: Blocks kept
- * from the previous Call keep their tokens, so the change of the total is exactly the tokens of the new Blocks.
- * Only a part that holds several new Blocks is split by estimate, and that split is scaled to add up to the part.
+ * Token attribution (ADR 6): split one Call's exact input total over its Blocks. Exact numbers first: Blocks kept
+ * from the previous Call keep their tokens, so the change of the total is the tokens of the new Blocks. A part with
+ * several new Blocks is split by estimate and scaled to add up to it: those Blocks form a group whose sum is exact.
+ * A subtraction is exact only when every group it subtracts is whole; otherwise the rest is an estimate too.
  */
 import type { CallIssue, TokenBasis, Usage } from "@quantext/shared";
 import type { Estimate } from "./estimate.ts";
 
-export interface AttributionBlock {
-  /** Content hash: Blocks with the same hash carry tokens from the previous Call. */
-  hash: string;
-  estimate: Estimate;
-  cacheBreakpoint: boolean;
-}
-
-export interface AttributionCall {
-  id: string;
-  /** The Call whose Blocks this Call may keep (the base of its request, or the Call before it). */
-  previousId?: string;
-  /** Tokens are carried only between Calls of the same model: tokenizers differ. */
-  model: string;
-  usage?: Usage;
-  /** In the order the provider reads them. */
-  blocks: AttributionBlock[];
-}
-
-export interface BlockTokens {
+/** A Block's tokens, how they were found, and the group whose sum is exact (absent for an exact Block). */
+export interface Share {
   tokens: number;
   basis: TokenBasis;
-  /** Inside the part of the input that the provider read from its cache. */
-  inCachedPrefix: boolean;
+  group?: string;
 }
 
-export interface Attribution {
-  /** One per input Block; absent when the Call has no Usage. */
-  blocks?: BlockTokens[];
+/** The leading Blocks that the Call keeps from the previous Call, unchanged. */
+export interface KeptPrefix {
+  count: number;
+  tokens: number;
+  /** Every group in the prefix is whole and no Block in it is a lone estimate: its sum is exact. */
+  exact: boolean;
+  /** The estimates of the kept Blocks; read only when the kept tokens do not fit the total. */
+  estimates: () => readonly Estimate[];
+}
+
+/** A Block after the kept prefix. `carried`: the same content was in the previous Call, with these tokens. */
+export interface FreshBlock {
+  estimate: Estimate;
+  carried?: Share;
+}
+
+export interface CallAttributionInput {
+  /** The Call's id, the prefix of its new group ids. */
+  id: string;
+  usage: Usage;
+  kept: KeptPrefix;
+  fresh: readonly FreshBlock[];
+  /** Position of the last Block that carries a cache breakpoint. */
+  lastBreakpoint?: number;
+  /** The size of a group, so that a group carried whole by content counts as exact. */
+  groupSize?: (group: string) => number;
+}
+
+export interface CallAttribution {
+  fresh: Share[];
+  /** New shares of the kept Blocks, when the kept tokens did not fit and the whole total was split again. */
+  kept?: Share[];
   /** Input tokens after the last Block (the end of the request), known from the cache split; else 0. */
   framingTokens: number;
   issues: CallIssue[];
+  /** The new groups and their sizes. */
+  groups: { id: string; size: number }[];
 }
 
-/** A cache read within this share of a breakpoint's estimated position is taken as an exact split there. */
-const CACHE_READ_TOLERANCE = 0.15;
-
-/** Attribute every Call, in order; a Call can carry tokens only from a Call before it. */
-export function attributeCalls(calls: readonly AttributionCall[]): Map<string, Attribution> {
-  const done = new Map<string, { call: AttributionCall; result: Attribution }>();
-  for (const call of calls) {
-    const previous = call.previousId === undefined ? undefined : done.get(call.previousId);
-    const carry = previous?.call.model === call.model ? previous : undefined;
-    done.set(call.id, { call, result: attributeOne(call, carry?.call, carry?.result) });
-  }
-  return new Map([...done].map(([id, { result }]) => [id, result]));
-}
-
-function attributeOne(call: AttributionCall, previous?: AttributionCall, before?: Attribution): Attribution {
-  const { usage, blocks } = call;
-  if (usage === undefined) {
-    return {
-      framingTokens: 0,
-      issues: [{ kind: "no-usage", detail: "the log has no response with usage for this call" }],
-    };
-  }
+/** Attribute one Call's input total to its kept and new Blocks. */
+export function attributeCall(input: CallAttributionInput): CallAttribution {
+  const { usage, kept, fresh } = input;
   const total = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
   const cached = usage.cacheReadTokens + usage.cacheWriteTokens;
-  const last = blocks.length - 1;
-  const lastBreakpoint = blocks.findLastIndex((b) => b.cacheBreakpoint);
-  const framingTokens = cached > 0 && lastBreakpoint === last && last >= 0 ? usage.inputTokens : 0;
-  const anchors: Anchor[] = [{ end: blocks.length, sum: total - framingTokens }];
-  if (cached > 0 && lastBreakpoint >= 0 && lastBreakpoint < last)
-    anchors.push({ end: lastBreakpoint + 1, sum: cached });
-
-  const issues: CallIssue[] = [];
-  const kept = previous && before?.blocks ? carried(blocks, previous, before.blocks) : blocks.map(() => undefined);
-  let split = splitByAnchors(blocks, kept, withCacheRead(anchors, blocks, kept, usage), usage.basis);
-  if (typeof split === "string") {
-    issues.push({ kind: "unreconciled-tokens", detail: split });
-    const fresh = blocks.map(() => undefined);
-    const retry = splitByAnchors(blocks, fresh, withCacheRead(anchors, blocks, fresh, usage), usage.basis);
-    split = typeof retry === "string" ? splitByAnchors(blocks, fresh, [anchors[0] as Anchor], usage.basis) : retry;
+  const count = kept.count + fresh.length;
+  const lastBp = input.lastBreakpoint;
+  const framingTokens = cached > 0 && lastBp === count - 1 && count > 0 ? usage.inputTokens : 0;
+  const anchors: Anchor[] = [{ end: count, sum: total - framingTokens }];
+  if (cached > 0 && lastBp !== undefined && lastBp >= kept.count && lastBp < count - 1) {
+    anchors.unshift({ end: lastBp + 1, sum: cached });
   }
-  const tokens = typeof split === "string" ? blocks.map(() => ({ tokens: 0, basis: "estimate" as const })) : split;
-  const prefix = cachedPrefixLength(
-    tokens.map((t) => t.tokens),
-    usage.cacheReadTokens,
-  );
+  const split = splitFresh(input, anchors);
+  if (typeof split !== "string") return { ...split, framingTokens, issues: [] };
+  // The kept tokens do not fit: split the whole total again, over every Block, by estimate.
+  const all = [...kept.estimates(), ...fresh.map((f) => f.estimate)].map((estimate) => ({ estimate }));
+  const again = splitFresh({ ...input, kept: { ...kept, count: 0, tokens: 0, exact: true }, fresh: all }, [
+    { end: count, sum: total - framingTokens },
+  ]);
+  const shares = typeof again === "string" ? all.map(() => ({ tokens: 0, basis: "estimate" as const })) : again.fresh;
   return {
-    blocks: tokens.map((t, i) => ({ ...t, inCachedPrefix: i < prefix })),
+    kept: shares.slice(0, kept.count),
+    fresh: shares.slice(kept.count),
     framingTokens,
-    issues,
+    issues: [{ kind: "unreconciled-tokens", detail: split }],
+    groups: typeof again === "string" ? [] : again.groups,
   };
 }
 
-/** An exact cumulative token count at the end of a Block range: Blocks [0, end) hold `sum` tokens. */
+/** Blocks [0, end) hold `sum` tokens, exactly. */
 interface Anchor {
   end: number;
   sum: number;
 }
 
-type Kept = { tokens: number; basis: TokenBasis } | undefined;
-
-/** The tokens each Block keeps from the previous Call, matched by content hash (each previous Block once). */
-function carried(
-  blocks: readonly AttributionBlock[],
-  previous: AttributionCall,
-  tokens: readonly BlockTokens[],
-): Kept[] {
-  const pool = new Map<string, BlockTokens[]>();
-  previous.blocks.forEach((b, i) => {
-    const t = tokens[i];
-    if (t !== undefined) pool.set(b.hash, [...(pool.get(b.hash) ?? []), t]);
-  });
-  return blocks.map((b) => {
-    const t = pool.get(b.hash)?.shift();
-    return t === undefined ? undefined : { tokens: t.tokens, basis: t.basis };
-  });
-}
-
-/**
- * Add the cache read as an anchor when nothing is kept (a first call): the provider read its cache up to an earlier
- * breakpoint, so when the estimate puts one of this call's breakpoints near the cache read, the split is there.
- */
-function withCacheRead(anchors: Anchor[], blocks: readonly AttributionBlock[], kept: readonly Kept[], usage: Usage) {
-  const read = usage.cacheReadTokens;
-  if (read === 0 || kept.some((k) => k !== undefined)) return anchors;
-  let cumulative = 0;
-  let best: { end: number; distance: number } | undefined;
-  blocks.forEach((b, i) => {
-    cumulative += b.estimate.tokens;
-    const distance = Math.abs(cumulative - read);
-    if (b.cacheBreakpoint && (best === undefined || distance < best.distance)) best = { end: i + 1, distance };
-  });
-  if (best === undefined || best.distance > read * CACHE_READ_TOLERANCE) return anchors;
-  if (anchors.some((a) => a.end === best?.end)) return anchors;
-  return [...anchors, { end: best.end, sum: read }];
-}
-
-/** Split each range between anchors over its new Blocks; a reason string when the numbers do not fit. */
-function splitByAnchors(
-  blocks: readonly AttributionBlock[],
-  kept: readonly Kept[],
+/** Split each range between anchors over its new Blocks; a reason when the kept tokens do not fit. */
+function splitFresh(
+  input: CallAttributionInput,
   anchors: readonly Anchor[],
-  basis: TokenBasis,
-): { tokens: number; basis: TokenBasis }[] | string {
-  const out: { tokens: number; basis: TokenBasis }[] = [];
-  let start = 0;
-  let sumBefore = 0;
-  for (const anchor of [...anchors].sort((a, b) => a.end - b.end)) {
-    const range = blocks.slice(start, anchor.end).map((block, i) => ({ block, kept: kept[start + i] }));
-    const keptSum = range.reduce((sum, r) => sum + (r.kept?.tokens ?? 0), 0);
-    const rest = anchor.sum - sumBefore - keptSum;
-    const fresh = range.filter((r) => r.kept === undefined);
+): Omit<CallAttribution, "framingTokens" | "issues"> | string {
+  const { kept, fresh, usage, id } = input;
+  const out: Share[] = [];
+  const groups: { id: string; size: number }[] = [];
+  let start = kept.count;
+  let sumBefore = kept.tokens;
+  let exactBefore = kept.exact;
+  for (const [rangeIndex, anchor] of anchors.entries()) {
+    const range = fresh.slice(start - kept.count, anchor.end - kept.count);
+    const carriedSum = range.reduce((sum, f) => sum + (f.carried?.tokens ?? 0), 0);
+    const carriedPerGroup = new Map<string, number>();
+    for (const f of range) {
+      const g = f.carried?.group;
+      if (g !== undefined) carriedPerGroup.set(g, (carriedPerGroup.get(g) ?? 0) + 1);
+    }
+    const whole = (g: string | undefined) => g !== undefined && carriedPerGroup.get(g) === input.groupSize?.(g);
+    const exact =
+      exactBefore &&
+      range.every((f) => f.carried === undefined || f.carried.basis !== "estimate" || whole(f.carried.group));
+    const rest = anchor.sum - sumBefore - carriedSum;
+    const fresher = range.filter((f) => f.carried === undefined);
     if (rest < 0)
-      return `blocks kept from the previous call have ${keptSum} tokens, more than ${anchor.sum - sumBefore}`;
-    if (fresh.length === 0 && rest !== 0) return `${rest} tokens more than the previous call, but no new block`;
+      return `blocks kept from the previous call have ${sumBefore + carriedSum} tokens, more than ${anchor.sum}`;
+    if (fresher.length === 0 && rest !== 0) return `${rest} tokens more than the previous call, but no new block`;
     const shares = reconcile(
-      fresh.map((r) => r.block.estimate),
+      fresher.map((f) => f.estimate),
       rest,
     );
-    const freshBasis: TokenBasis = fresh.length === 1 ? basis : "estimate";
+    const group = exact && fresher.length > 1 ? `${id}#${rangeIndex}` : undefined;
+    if (group !== undefined) groups.push({ id: group, size: fresher.length });
     let next = 0;
-    for (const r of range) out.push(r.kept ?? { tokens: shares[next++] ?? 0, basis: freshBasis });
+    for (const f of range) {
+      if (f.carried !== undefined) {
+        out.push(f.carried);
+        continue;
+      }
+      const tokens = shares[next++] ?? 0;
+      if (fresher.length === 1 && exact) out.push({ tokens, basis: usage.basis });
+      else out.push(group === undefined ? { tokens, basis: "estimate" } : { tokens, basis: "estimate", group });
+    }
     start = anchor.end;
     sumBefore = anchor.sum;
+    exactBefore = true; // an anchor is an exact edge
   }
-  return out;
+  return { fresh: out, groups };
 }
 
 /**
  * Integer shares of `total` in proportion to the estimates, adding up to `total` exactly (largest remainder).
- * Blocks with an unknown estimate share what the known estimates leave; with no weight at all, shares are equal.
+ * `rest` and `unknown` Blocks share what the known estimates leave (`rest` by tokens, `unknown` equally); with no
+ * weight at all, shares are equal.
  */
 export function reconcile(estimates: readonly Estimate[], total: number): number[] {
-  const known = estimates.reduce((sum, e) => sum + (e.method === "unknown" ? 0 : e.tokens), 0);
-  const unknownCount = estimates.filter((e) => e.method === "unknown").length;
-  let weights = estimates.map((e) => (e.method === "unknown" ? 0 : e.tokens));
-  if (unknownCount > 0 && known < total) {
-    const each = (total - known) / unknownCount;
-    weights = estimates.map((e) => (e.method === "unknown" ? each : e.tokens));
+  const leftover = (e: Estimate) => e.method === "unknown" || e.method === "rest";
+  const known = estimates.reduce((sum, e) => sum + (leftover(e) ? 0 : e.tokens), 0);
+  let weights = estimates.map((e) => (leftover(e) ? 0 : e.tokens));
+  if (estimates.some(leftover) && known < total) {
+    const rest = estimates.filter((e) => e.method === "rest");
+    const restWeight = rest.reduce((sum, e) => sum + e.tokens, 0);
+    const unknownWeight = Math.max(1, rest.length === 0 ? 1 : restWeight / rest.length);
+    const parts = estimates.map((e) => (e.method === "rest" ? e.tokens : e.method === "unknown" ? unknownWeight : 0));
+    const partSum = parts.reduce((a, b) => a + b, 0);
+    const share = (part: number) =>
+      partSum === 0 ? (total - known) / estimates.filter(leftover).length : ((total - known) * part) / partSum;
+    weights = estimates.map((e, i) => (leftover(e) ? share(parts[i] ?? 0) : e.tokens));
   }
-  const weightSum = weights.reduce((a, b) => a + b, 0);
-  if (weightSum === 0) weights = estimates.map(() => 1);
-  const sum = weightSum === 0 ? estimates.length : weightSum;
-  const exact = weights.map((w) => (w * total) / sum);
+  if (weights.reduce((a, b) => a + b, 0) === 0) weights = estimates.map(() => 1);
+  const sum = weights.reduce((a, b) => a + b, 0);
+  const exact = weights.map((w) => (sum === 0 ? 0 : (w * total) / sum));
   const shares = exact.map(Math.floor);
   const left = total - shares.reduce((a, b) => a + b, 0);
   const order = exact.map((x, i) => ({ i, frac: x - Math.floor(x) })).sort((a, b) => b.frac - a.frac || a.i - b.i);
@@ -192,16 +171,17 @@ export function reconcile(estimates: readonly Estimate[], total: number): number
   return shares;
 }
 
-/** The number of leading Blocks in the cached prefix: up to the Block boundary nearest the cache read. */
-function cachedPrefixLength(tokens: readonly number[], cacheRead: number): number {
-  if (cacheRead === 0) return 0;
-  let best = 0;
-  let bestDistance = cacheRead;
-  let cumulative = 0;
-  tokens.forEach((t, i) => {
-    cumulative += t;
-    const distance = Math.abs(cumulative - cacheRead);
-    if (distance < bestDistance) [best, bestDistance] = [i + 1, distance];
-  });
-  return best;
+/**
+ * The number of leading Blocks that end inside the cache read, from the prefix sums of their tokens
+ * (`prefix(i)` is the tokens of Blocks [0, i)). A Block the cache read ends inside is not counted.
+ */
+export function cachedPrefixLength(prefix: (i: number) => number, count: number, cacheRead: number): number {
+  let lo = 0;
+  let hi = count;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (prefix(mid) <= cacheRead) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
 }

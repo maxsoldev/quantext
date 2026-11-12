@@ -1,10 +1,10 @@
 import type { Block } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
+import { replaysThinking } from "../../../src/providers/anthropic/content.ts";
 import {
   BLOCK_OVERHEAD_TOKENS,
   CHARS_PER_TOKEN,
   estimateBlock,
-  estimateRequest,
   imageSize,
 } from "../../../src/providers/anthropic/estimate.ts";
 
@@ -106,19 +106,17 @@ describe("estimateBlock", () => {
   });
 });
 
-describe("estimateRequest", () => {
-  const deferred = block("tool-schema", { name: "mcp__x__y", description: "d".repeat(300), defer_loading: true });
-  const reference = block("tool-result", {
-    type: "tool_result",
-    tool_use_id: "t",
-    content: [{ type: "tool_reference", tool_name: "mcp__x__y" }],
-  });
-
-  test("gives a deferred tool schema no tokens while no tool reference loads it", () => {
-    expect(estimateRequest([deferred])[0]?.tokens).toBe(0);
-  });
-
-  test("estimates a deferred tool schema once a tool reference loads it", () => {
-    expect(estimateRequest([deferred, reference])[0]?.tokens).toBeGreaterThan(0);
+describe("replaysThinking", () => {
+  test.each([
+    ["claude-opus-5-5", true],
+    ["claude-opus-4-5", true],
+    ["claude-opus-4-1", false],
+    ["claude-sonnet-4-5", false],
+    ["claude-sonnet-5-5", true],
+    ["claude-haiku-4-5", false],
+    ["claude-haiku-5-5", true],
+    ["claude-fable-5-2", true],
+  ])("%s keeps earlier thinking: %s", (model, keeps) => {
+    expect(replaysThinking(model)).toBe(keeps);
   });
 });

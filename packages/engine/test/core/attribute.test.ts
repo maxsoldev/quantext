@@ -1,7 +1,7 @@
 import type { Usage } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
-import type { AttributionCall } from "../../src/core/attribute.ts";
-import { attributeCalls } from "../../src/core/attribute.ts";
+import type { CallAttributionInput, Share } from "../../src/core/attribute.ts";
+import { attributeCall, cachedPrefixLength } from "../../src/core/attribute.ts";
 
 /** Usage with everything as plain input, unless cache numbers are given. */
 function usage(total: number, cache: { read?: number; write?: number } = {}): Usage {
@@ -16,157 +16,158 @@ function usage(total: number, cache: { read?: number; write?: number } = {}): Us
   };
 }
 
-function block(hash: string, tokens: number, cacheBreakpoint = false) {
-  return { hash, estimate: { tokens, method: "chars" as const }, cacheBreakpoint };
+const est = (tokens: number) => ({ estimate: { tokens, method: "chars" as const } });
+const carried = (share: Share) => ({ ...est(1), carried: share });
+const nothingKept = { count: 0, tokens: 0, exact: true, estimates: () => [] };
+const kept = (tokens: number[], exact = true) => ({
+  count: tokens.length,
+  tokens: tokens.reduce((a, b) => a + b, 0),
+  exact,
+  estimates: () => tokens.map((t) => ({ tokens: t, method: "chars" as const })),
+});
+
+function run(input: Partial<CallAttributionInput> & Pick<CallAttributionInput, "usage" | "fresh">) {
+  return attributeCall({ id: "c", kept: nothingKept, ...input });
 }
 
-function call(
-  id: string,
-  blocks: AttributionCall["blocks"],
-  u: Usage | undefined,
-  previousId?: string,
-): AttributionCall {
-  const c: AttributionCall = { id, model: "m", blocks };
-  if (u !== undefined) c.usage = u;
-  if (previousId !== undefined) c.previousId = previousId;
-  return c;
-}
-
-const tokensOf = (result: ReturnType<typeof attributeCalls>, id: string) =>
-  result.get(id)?.blocks?.map((b) => [b.tokens, b.basis]);
-
-describe("attributeCalls", () => {
-  test("splits a first call's total over its blocks by estimate, reconciled to the exact total", () => {
-    const result = attributeCalls([call("a", [block("x", 30), block("y", 10)], usage(100))]);
-    expect(tokensOf(result, "a")).toEqual([
-      [75, "estimate"],
-      [25, "estimate"],
+describe("attributeCall", () => {
+  test("splits a first call's total over its blocks by estimate, as one group that adds up exactly", () => {
+    const result = run({ usage: usage(100), fresh: [est(30), est(10)] });
+    expect(result.fresh).toEqual([
+      { tokens: 75, basis: "estimate", group: "c#0" },
+      { tokens: 25, basis: "estimate", group: "c#0" },
     ]);
-    expect(result.get("a")).toMatchObject({ framingTokens: 0, issues: [] });
+    expect(result).toMatchObject({ framingTokens: 0, issues: [], groups: [{ id: "c#0", size: 2 }] });
   });
 
-  test("keeps the tokens of blocks carried from the previous call; one new block takes the exact rest", () => {
-    const result = attributeCalls([
-      call("a", [block("x", 30), block("y", 10)], usage(100)),
-      call("b", [block("x", 30), block("y", 10), block("z", 99)], usage(140), "a"),
-    ]);
-    expect(tokensOf(result, "b")).toEqual([
-      [75, "estimate"],
-      [25, "estimate"],
-      [40, "exact"],
+  test("gives one new block after an exact kept prefix the exact rest", () => {
+    const result = run({ usage: usage(140), kept: kept([75, 25]), fresh: [est(99)] });
+    expect(result.fresh).toEqual([{ tokens: 40, basis: "exact" }]);
+    expect(result.groups).toEqual([]);
+  });
+
+  test("splits the exact rest over several new blocks by estimate, as a new group", () => {
+    const result = run({ usage: usage(131), kept: kept([100]), fresh: [est(1), est(2)] });
+    expect(result.fresh).toEqual([
+      { tokens: 10, basis: "estimate", group: "c#0" },
+      { tokens: 21, basis: "estimate", group: "c#0" },
     ]);
   });
 
-  test("splits the exact rest over several new blocks by estimate, so they add up to it", () => {
-    const result = attributeCalls([
-      call("a", [block("x", 10)], usage(100)),
-      call("b", [block("x", 10), block("y", 1), block("z", 2)], usage(131), "a"),
-    ]);
-    expect(tokensOf(result, "b")).toEqual([
-      [100, "exact"],
-      [10, "estimate"],
-      [21, "estimate"],
+  test("does not call the rest exact when the kept prefix holds part of a group", () => {
+    // A = [x, y] (one group, 100), B = [x, z]: y was dropped, so x alone is only an estimate.
+    const result = run({ usage: usage(90), kept: kept([75], false), fresh: [est(10)] });
+    expect(result.fresh).toEqual([{ tokens: 15, basis: "estimate" }]);
+    expect(result.groups).toEqual([]);
+  });
+
+  test("does not call the rest exact when a block carried by content is an estimate", () => {
+    // A = [x, y] (one group, 100), B = [y, z]: y is found again by content, but its 25 are an estimate.
+    const result = run({
+      usage: usage(90),
+      fresh: [carried({ tokens: 25, basis: "estimate", group: "a#0" }), est(10)],
+    });
+    expect(result.fresh).toEqual([
+      { tokens: 25, basis: "estimate", group: "a#0" },
+      { tokens: 65, basis: "estimate" },
     ]);
   });
 
-  test("carries blocks by content, also when the request changes order or drops blocks", () => {
-    const result = attributeCalls([
-      call("a", [block("x", 10), block("y", 10), block("z", 10)], usage(90)),
-      call("b", [block("z", 10), block("x", 10), block("new", 10)], usage(70), "a"),
-    ]);
-    expect(tokensOf(result, "b")).toEqual([
-      [30, "estimate"],
-      [30, "estimate"],
-      [10, "exact"],
-    ]);
+  test("a whole group carried by content keeps the rest exact", () => {
+    const g = { basis: "estimate" as const, group: "a#0" };
+    const result = run({
+      usage: usage(90),
+      fresh: [carried({ tokens: 25, ...g }), carried({ tokens: 35, ...g }), est(10)],
+      groupSize: (group) => (group === "a#0" ? 2 : 0),
+    });
+    expect(result.fresh[2]).toEqual({ tokens: 30, basis: "exact" });
   });
 
-  test("does not carry tokens across a model change: the tokenizer may differ", () => {
-    const first = call("a", [block("x", 10)], usage(100));
-    const second = { ...call("b", [block("x", 10), block("y", 10)], usage(150), "a"), model: "other" };
-    expect(tokensOf(attributeCalls([first, second]), "b")).toEqual([
-      [75, "estimate"],
-      [75, "estimate"],
-    ]);
+  test("a block carried by content with an exact count keeps the rest exact", () => {
+    const result = run({ usage: usage(90), fresh: [carried({ tokens: 25, basis: "exact" }), est(10)] });
+    expect(result.fresh[1]).toEqual({ tokens: 65, basis: "exact" });
   });
 
   test("counts the input after the last block as framing, when the last block carries the last breakpoint", () => {
-    // The cache read and write cover the request up to the last breakpoint; the plain input is what follows it.
-    const result = attributeCalls([
-      call("a", [block("x", 50), block("y", 50, true)], usage(100, { write: 98 })),
-      call("b", [block("x", 50), block("y", 50), block("z", 5, true)], usage(142, { read: 98, write: 40 }), "a"),
-    ]);
-    expect(result.get("a")?.framingTokens).toBe(2);
-    expect(tokensOf(result, "b")?.[2]).toEqual([40, "exact"]);
-    expect(result.get("b")?.framingTokens).toBe(4);
+    const result = run({
+      usage: usage(142, { read: 98, write: 40 }),
+      kept: kept([49, 49]),
+      fresh: [est(5)],
+      lastBreakpoint: 2,
+    });
+    expect(result.framingTokens).toBe(4);
+    expect(result.fresh).toEqual([{ tokens: 40, basis: "exact" }]);
   });
 
-  test("uses the cache read of a first call as an exact split at a breakpoint near it", () => {
-    // Blocks 0-1 end at a breakpoint whose estimate (100) is near the cache read (110).
-    const blocks = [block("t", 40), block("s", 60, true), block("m", 100, true)];
-    const result = attributeCalls([call("a", blocks, usage(200, { read: 110, write: 88 }))]);
-    expect(tokensOf(result, "a")).toEqual([
-      [44, "estimate"],
-      [66, "estimate"],
-      [88, "exact"],
+  test("splits at a breakpoint before the last block: the cache covers up to it, plain input after it", () => {
+    const input = { usage: usage(150, { write: 120 }), fresh: [est(10), est(10), est(10)], lastBreakpoint: 1 };
+    expect(run(input).fresh).toEqual([
+      { tokens: 60, basis: "estimate", group: "c#0" },
+      { tokens: 60, basis: "estimate", group: "c#0" },
+      { tokens: 30, basis: "exact" },
     ]);
   });
 
-  test("does not use a cache read far from every breakpoint as a split", () => {
-    const blocks = [block("t", 40), block("s", 60, true), block("m", 100, true)];
-    const result = attributeCalls([call("a", blocks, usage(200, { read: 150, write: 48 }))]);
-    expect(tokensOf(result, "a")?.map(([tokens]) => tokens)).toEqual([40, 59, 99]);
+  test("never takes a cache read as a split: it may end anywhere", () => {
+    const result = run({
+      usage: usage(200, { read: 110, write: 88 }),
+      fresh: [est(40), est(60), est(100)],
+      lastBreakpoint: 2,
+    });
+    expect(result.fresh.map((s) => [s.tokens, s.basis])).toEqual([
+      [40, "estimate"],
+      [59, "estimate"],
+      [99, "estimate"],
+    ]);
   });
 
-  test("marks the blocks inside the cache read as the cached prefix", () => {
-    const result = attributeCalls([
-      call("a", [block("x", 50), block("y", 50, true)], usage(100, { write: 98 })),
-      call("b", [block("x", 50), block("y", 50), block("z", 5, true)], usage(142, { read: 96, write: 42 }), "a"),
-    ]);
-    expect(result.get("b")?.blocks?.map((b) => b.inCachedPrefix)).toEqual([true, true, false]);
-  });
-
-  test("flags a call whose carried blocks exceed its total, and splits the whole total by estimate", () => {
-    const result = attributeCalls([
-      call("a", [block("x", 10), block("y", 10)], usage(100)),
-      call("b", [block("x", 10), block("y", 10), block("z", 20)], usage(90), "a"),
-    ]);
-    expect(result.get("b")?.issues).toEqual([
+  test("flags a call whose kept blocks exceed its total, and splits the whole total by estimate", () => {
+    const result = run({ usage: usage(90), kept: kept([50, 50]), fresh: [est(20)] });
+    expect(result.issues).toEqual([
       { kind: "unreconciled-tokens", detail: "blocks kept from the previous call have 100 tokens, more than 90" },
     ]);
-    expect(tokensOf(result, "b")?.map(([tokens]) => tokens)).toEqual([23, 22, 45]);
+    expect(result.kept?.map((s) => s.tokens)).toEqual([38, 37]);
+    expect(result.fresh.map((s) => s.tokens)).toEqual([15]);
   });
 
   test("flags a call whose total changed with no new block", () => {
-    const result = attributeCalls([
-      call("a", [block("x", 10)], usage(100)),
-      call("b", [block("x", 10)], usage(103), "a"),
-    ]);
-    expect(result.get("b")?.issues).toEqual([
+    const result = run({ usage: usage(103), kept: kept([100]), fresh: [] });
+    expect(result.issues).toEqual([
       { kind: "unreconciled-tokens", detail: "3 tokens more than the previous call, but no new block" },
     ]);
-    expect(tokensOf(result, "b")).toEqual([[103, "exact"]]);
+    expect(result.kept).toEqual([{ tokens: 103, basis: "exact" }]);
   });
 
   test("gives a block with an unknown estimate what the known estimates leave", () => {
-    const unknown = { hash: "pdf", estimate: { tokens: 0, method: "unknown" as const }, cacheBreakpoint: false };
-    const result = attributeCalls([call("a", [block("x", 30), unknown], usage(100))]);
-    expect(tokensOf(result, "a")).toEqual([
-      [30, "estimate"],
-      [70, "estimate"],
-    ]);
+    const unknown = { estimate: { tokens: 0, method: "unknown" as const } };
+    expect(run({ usage: usage(100), fresh: [est(30), unknown] }).fresh.map((s) => s.tokens)).toEqual([30, 70]);
   });
 
-  test("leaves a call with no usage unattributed, and flags it", () => {
-    const result = attributeCalls([call("a", [block("x", 30)], undefined)]);
-    expect(result.get("a")).toEqual({
-      framingTokens: 0,
-      issues: [{ kind: "no-usage", detail: "the log has no response with usage for this call" }],
-    });
+  test("gives blocks marked as the rest what the known weights leave, in proportion", () => {
+    const rest = (tokens: number) => ({ estimate: { tokens, method: "rest" as const } });
+    expect(run({ usage: usage(105), fresh: [est(86), rest(10), rest(30)] }).fresh.map((s) => s.tokens)).toEqual([
+      86, 5, 14,
+    ]);
+    expect(run({ usage: usage(50), fresh: [est(86), rest(10)] }).fresh.map((s) => s.tokens)).toEqual([50, 0]);
   });
 
   test("marks the single block of a derived total as derived", () => {
     const derived = { ...usage(100), basis: "derived" as const };
-    expect(tokensOf(attributeCalls([call("a", [block("x", 30)], derived)]), "a")).toEqual([[100, "derived"]]);
+    expect(run({ usage: derived, fresh: [est(30)] }).fresh).toEqual([{ tokens: 100, basis: "derived" }]);
+  });
+});
+
+describe("cachedPrefixLength", () => {
+  const prefix = [0, 50, 100, 140];
+  const at = (i: number) => prefix[i] ?? 0;
+
+  test("counts the blocks that end inside the cache read", () => {
+    expect(cachedPrefixLength(at, 3, 100)).toBe(2);
+    expect(cachedPrefixLength(at, 3, 140)).toBe(3);
+  });
+
+  test("does not round a block that the cache read ends inside into the cached prefix", () => {
+    expect(cachedPrefixLength(at, 3, 96)).toBe(1);
+    expect(cachedPrefixLength(at, 3, 0)).toBe(0);
   });
 });

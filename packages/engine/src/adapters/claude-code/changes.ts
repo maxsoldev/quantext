@@ -1,0 +1,36 @@
+/** Collect what one read adds or changes, and turn it into a SessionDelta. */
+import type { Block, CallBlock, IngestReport, SessionDelta } from "@quantext/shared";
+import { get } from "./records.ts";
+import type { ParserState } from "./state.ts";
+
+export class Changes {
+  readonly sessions = new Set<string>();
+  readonly calls = new Set<string>();
+  readonly toolCalls = new Set<string>();
+  readonly compactions = new Set<string>();
+  readonly blocks: Block[] = [];
+  readonly runs = new Map<string, CallBlock>();
+  readonly report: IngestReport = { unknownRecords: [], unreadable: [] };
+
+  run(run: CallBlock): void {
+    this.runs.set(run.id, run);
+  }
+
+  /** The delta, as copies: later reads must not change what the caller holds. */
+  delta(state: ParserState): SessionDelta {
+    const pick = <T>(record: Record<string, T>, ids: Set<string>) =>
+      [...ids].flatMap((id) => {
+        const item = get(record, id);
+        return item === undefined ? [] : [item];
+      });
+    return structuredClone({
+      sessions: pick(state.sessions, this.sessions),
+      calls: pick(state.calls, this.calls),
+      blocks: this.blocks,
+      callBlocks: [...this.runs.values()],
+      toolCalls: pick(state.toolCalls, this.toolCalls),
+      compactions: pick(state.compactions, this.compactions),
+      report: this.report,
+    });
+  }
+}
