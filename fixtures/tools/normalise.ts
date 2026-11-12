@@ -53,25 +53,15 @@ export function normaliseSession(input: Record<string, string>, replacements: re
       }
       if (row.type === "user" && isObject(row.message) && isObject(next.message)) {
         userRun.push({ before: asBlocks(row.message.content), after: asBlocks(next.message.content) });
-        // The API joins adjacent user rows into one message (a tool result and the skill text after it).
-        for (let start = 0; start < userRun.length - 1; start++) {
-          const part = userRun.slice(start);
-          remember([
-            wireHash(
-              "user",
-              part.flatMap((r) => r.before),
-            ),
-            wireHash(
-              "user",
-              part.flatMap((r) => r.after),
-            ),
-          ]);
-        }
+        // The API joins adjacent user rows into one message (a tool result and the skill text after it). Every
+        // run that ends here is registered on purpose: a hash that no tail uses is harmless, and only hashes
+        // whose content changed are remapped.
+        for (let start = 0; start < userRun.length - 1; start++) remember(joinedHashes("user", userRun.slice(start)));
       }
     }
     // Claude Code writes one assistant row per content block; the API message is all rows of one id, in order.
     for (const { before, after } of split.values()) {
-      remember([wireHash("assistant", before), wireHash("assistant", after)]);
+      remember(joinedHashes("assistant", [{ before, after }]));
     }
   }
 
@@ -159,6 +149,20 @@ function contentHashes(row: Row, next: Row, isChanged: boolean): [string, string
 /** The hash of a message as the API received it: role and content only. */
 function wireHash(role: Json, content: Json): string {
   return sha256Sorted({ role, content });
+}
+
+/** [hash before, hash after] of one message whose content is the given parts, joined in order. */
+function joinedHashes(role: string, parts: readonly { before: Json[]; after: Json[] }[]): [string, string] {
+  return [
+    wireHash(
+      role,
+      parts.flatMap((p) => p.before),
+    ),
+    wireHash(
+      role,
+      parts.flatMap((p) => p.after),
+    ),
+  ];
 }
 
 /** Message content as blocks: a string is one text block. */
