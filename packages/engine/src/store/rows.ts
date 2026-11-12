@@ -10,6 +10,7 @@ import type {
   CallBlock,
   Compaction,
   JsonValue,
+  RequestLog,
   RequestSection,
   Session,
   TokenBasis,
@@ -18,14 +19,24 @@ import type {
 } from "@quantext/shared";
 import type { SqlRow, SqlValue } from "./driver.ts";
 
-export const SESSION_COLUMNS = ["id", "parent_id", "harness", "harness_version", "project", "cwd", "started", "ended"];
+export const SESSION_COLUMNS = [
+  "id",
+  "parent_id",
+  "harness",
+  "harness_version",
+  "project",
+  "cwd",
+  "started",
+  "ended",
+  "request_log",
+];
 
 export function sessionRow(s: Session): SqlValue[] {
-  return [s.id, s.parentId, s.harness, s.harnessVersion, s.project, s.cwd, s.started, s.ended].map(nul);
+  return [s.id, s.parentId, s.harness, s.harnessVersion, s.project, s.cwd, s.started, s.ended, s.requestLog].map(nul);
 }
 
 export function session(r: SqlRow): Session {
-  const s: Session = { id: text(r.id), harness: text(r.harness) };
+  const s: Session = { id: text(r.id), harness: text(r.harness), requestLog: text(r.request_log) as RequestLog };
   put(s, "parentId", r.parent_id);
   put(s, "harnessVersion", r.harness_version);
   put(s, "project", r.project);

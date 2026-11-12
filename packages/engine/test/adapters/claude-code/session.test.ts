@@ -10,6 +10,7 @@ describe("parseClaudeCodeSession on basic-tools", () => {
       {
         id: "00000000-0000-4000-8000-000000000001",
         harness: "claude-code",
+        requestLog: "present",
         harnessVersion: "2.1.322",
         project: "/fixture-0000000000000000/repo",
         cwd: "/fixture-0000000000000000/repo",

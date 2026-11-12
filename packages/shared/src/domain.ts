@@ -24,7 +24,14 @@ export interface Session {
   /** ISO 8601 timestamps of the first and the last logged event. */
   started?: string;
   ended?: string;
+  /**
+   * Whether the log holds the Session's requests, so its context can be rebuilt. `present`: every Call's request
+   * is logged. `absent`: the harness version logs only usage (usage-only Calls, no Blocks). `partial`: both.
+   */
+  requestLog: RequestLog;
 }
+
+export type RequestLog = "present" | "partial" | "absent";
 
 /** The parameters of a Call that are not part of its Shape. The model is `Call.model`. */
 export interface CallParams {
@@ -111,7 +118,8 @@ export interface Call {
 }
 
 /**
- * A flag on a Call. `unresolved-request`: part of the request is not in the log, so the rebuilt input is
+ * A flag on a Call. `no-request`: the harness version logs no request, only the response's usage, so the Call has
+ * exact usage and cost but no Blocks. `unresolved-request`: part of the request is not in the log, so the rebuilt input is
  * incomplete. `no-usage`: the log holds no Usage, so the Call has no exact total. `unreconciled-tokens`: the exact
  * change from the previous Call does not fit the new Blocks, so the whole total is split by estimate. `no-price`:
  * there is no list price for the model, so the Call has no cost. `price-assumption`: the cost rests on an
@@ -120,6 +128,7 @@ export interface Call {
  */
 export interface CallIssue {
   kind:
+    | "no-request"
     | "unresolved-request"
     | "no-usage"
     | "unreconciled-tokens"

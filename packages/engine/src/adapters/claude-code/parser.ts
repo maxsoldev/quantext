@@ -266,7 +266,7 @@ class Rows {
     }
     const id = isAgent ? `${parent}:agent-${agent}` : parent;
     const existing = get(this.state.sessions, id);
-    const session = existing ?? put(this.state.sessions, id, { id, harness: HARNESS });
+    const session = existing ?? put(this.state.sessions, id, { id, harness: HARNESS, requestLog: "present" });
     const before = JSON.stringify(session);
     if (isAgent) session.parentId = parent;
     const version = str(row.data.version);
@@ -304,6 +304,7 @@ class Rows {
     this.store.putSpec(id, spec);
 
     const call = this.newCall(session.id, id, str(data.timestamp) ?? "", model, lane);
+    this.requestLog(session, "r");
     call.params = paramsOf(params);
     if (shapeHash !== undefined) call.shapeHash = shapeHash;
     const missing = this.missing(spec);
@@ -363,9 +364,15 @@ class Rows {
     const messageHash = addAssistantRow(this.store, this.t, message);
     const messageId = str(message.id) ?? "";
     const requestRef = str(row.data.requestRef);
-    if (session !== undefined) this.toolUses(row, message, messageId, requestRef ?? "", session.id);
     const raw = obj(message.usage);
-    const call = requestRef === undefined ? undefined : this.store.call(requestRef);
+    if (requestRef === undefined) {
+      const usageOnly =
+        session === undefined || raw === undefined ? undefined : this.usageOnly(row, message, raw, session);
+      if (session !== undefined) this.toolUses(row, message, messageId, usageOnly ?? "", session.id);
+      return;
+    }
+    if (session !== undefined) this.toolUses(row, message, messageId, requestRef, session.id);
+    const call = this.store.call(requestRef);
     if (call === undefined || raw === undefined) return;
     const usage = usageOf(raw);
     const known = get(this.state.responses, call.id);
@@ -388,6 +395,40 @@ class Rows {
       this.split(call, spec, usage);
     }
     this.changes().calls.add(call.id);
+  }
+
+  /**
+   * A response of a harness version that logs no requests: a usage-only Call, by message id, with exact usage
+   * and cost but no Blocks. A reply the harness made itself (model `<synthetic>`) is no model Call. Returns its id.
+   */
+  private usageOnly(row: Row, message: JsonObject, raw: JsonObject, session: Session): string | undefined {
+    const model = str(message.model) ?? "";
+    if (model === "<synthetic>") return undefined;
+    const id = str(message.id) ?? row.at;
+    const usage = usageOf(raw);
+    const known = this.store.call(id);
+    if (known !== undefined) {
+      this.usageChanged(known, usage, raw);
+      return id;
+    }
+    const call = this.newCall(session.id, id, str(row.data.timestamp) ?? "", model, `${model}|`);
+    call.issues.push({ kind: "no-request", detail: "the log holds no request for this call, only its usage" });
+    setUsage(call, usage, raw);
+    addUsage(this.t.usageSinceCost, call, usage);
+    if (this.t.openCompaction !== undefined) addUsage(this.t.openCompaction.logged, call, usage);
+    this.requestLog(session, "u");
+    this.t.lastCallId = id;
+    return id;
+  }
+
+  /** Note that a Session has a Call with a logged request (`r`) or a usage-only Call (`u`). */
+  private requestLog(session: Session, kind: "r" | "u"): void {
+    const seen = get(this.state.requestLogs, session.id) ?? put(this.state.requestLogs, session.id, {});
+    seen[kind] = 1;
+    const status = seen.u === undefined ? "present" : seen.r === undefined ? "absent" : "partial";
+    if (session.requestLog === status) return;
+    session.requestLog = status;
+    this.changes().sessions.add(session.id);
   }
 
   /**

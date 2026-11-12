@@ -1,7 +1,7 @@
 /** The store: one SQLite database in the data folder, written by one engine at a time. */
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { RecordCodec } from "@quantext/shared";
+import type { RecordCodec, RequestLog } from "@quantext/shared";
 import type { SqlDriver } from "./driver.ts";
 import { openDriver } from "./driver.ts";
 import { acquireLock } from "./lock.ts";
@@ -29,6 +29,8 @@ export interface StoreReport {
   errors: { path: string; error: string }[];
   /** Files whose last bytes are not a complete line yet: held back until the newline comes. */
   files: { path: string; pendingBytes: number }[];
+  /** Sessions by whether the log holds their requests (`absent`: usage only, the context cannot be rebuilt). */
+  requestLogs: { requestLog: RequestLog; sessions: number }[];
 }
 
 export interface Store {
@@ -84,6 +86,10 @@ export async function openStore(options: OpenStoreOptions): Promise<Store> {
           )
           .all()
           .map((r) => ({ path: String(r.path), pendingBytes: Number(r.pending) })),
+        requestLogs: sql
+          .get("SELECT request_log, count(*) AS n FROM sessions GROUP BY request_log ORDER BY request_log")
+          .all()
+          .map((r) => ({ requestLog: String(r.request_log) as RequestLog, sessions: Number(r.n) })),
       }),
       logs: () =>
         sql

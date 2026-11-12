@@ -57,6 +57,8 @@ export interface ParserState {
   metaToolUse: Record<string, string>;
   /** The response of each call: the hash of its message so far and its output tokens, for the next call's estimate. */
   responses: Record<string, { messageId: string; hash?: string; outputTokens: number; reasoningTokens?: number }>;
+  /** Per Session: whether it has Calls with a logged request (`r`), usage-only Calls (`u`), or both. */
+  requestLogs: Record<string, { r?: 1; u?: 1 }>;
   report: IngestReport;
 }
 
@@ -166,6 +168,7 @@ export function emptyState(): ParserState {
     transcriptAgent: {},
     metaToolUse: {},
     responses: {},
+    requestLogs: {},
     report: { unknownRecords: [], unreadable: [] },
   };
 }

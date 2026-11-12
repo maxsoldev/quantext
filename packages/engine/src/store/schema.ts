@@ -36,6 +36,7 @@ CREATE TABLE sessions (
   cwd TEXT,
   started TEXT,
   ended TEXT,
+  request_log TEXT NOT NULL CHECK (request_log IN ('present', 'partial', 'absent')),
   PRIMARY KEY (log, id)
 ) STRICT;
 

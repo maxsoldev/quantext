@@ -370,6 +370,30 @@ describe("the transcript folder", () => {
   );
 });
 
+test("the report counts sessions by whether their requests are in the log", async () => {
+  const s = await setup();
+  copyScenario(s.root, "subagent");
+  writeText(
+    join(s.root, "projects", "-old", "00000000-0000-4000-8000-0000000001d0.jsonl"),
+    `${JSON.stringify({
+      type: "assistant",
+      sessionId: "00000000-0000-4000-8000-0000000001d0",
+      message: {
+        id: "msg_1",
+        role: "assistant",
+        model: "claude-opus-5-5",
+        content: [],
+        usage: { input_tokens: 5, output_tokens: 1 },
+      },
+    })}\n`,
+  );
+  await s.ingest.ingestAll();
+  expect(s.store.report().requestLogs).toEqual([
+    { requestLog: "absent", sessions: 1 },
+    { requestLog: "present", sessions: 2 },
+  ]);
+});
+
 describe("Calls events", () => {
   test("a listener that throws is reported, and neither ingest nor the other listeners stop", async () => {
     const s = await setup();
