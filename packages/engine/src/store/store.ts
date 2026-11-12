@@ -1,10 +1,10 @@
 /** The store: one SQLite database in the data folder, written by one engine at a time. */
-import { chmodSync, existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { MemoryDocument, MemoryMark, RequestLog, StoreCodec } from "@quantext/shared";
 import type { SqlDriver } from "./driver.ts";
 import { openDriver, openReadOnlyDriver } from "./driver.ts";
-import { acquireLock } from "./lock.ts";
+import { acquireLock, privateFile } from "./lock.ts";
 import type { LogStore } from "./log.ts";
 import { openLog } from "./log.ts";
 import { migrate, SCHEMA_VERSION } from "./schema.ts";
@@ -77,9 +77,8 @@ export async function openStore(options: OpenStoreOptions): Promise<Store> {
   const path = join(options.dataDir, "quantext.db");
   let db: SqlDriver | undefined;
   try {
+    privateFile(path); // before SQLite opens it, so that its WAL files get its mode
     db = await openDriver(path);
-    // SQLite gives its WAL and shared-memory files the database file's mode.
-    if (process.platform !== "win32") chmodSync(path, 0o600);
     const schemaVersion = migrate(db);
     const opened = db;
     const sql = new Statements(opened);

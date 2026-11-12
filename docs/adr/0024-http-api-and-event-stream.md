@@ -28,12 +28,14 @@ reconnects after sleep or a network change and must not miss a Call.
   `Access-Control-*`. Pages get `default-src 'self'` with no inline script, `style-src 'self'` (the viewer uses CSS files, no
   injected styles), `img-src 'self' data: blob:` (images the viewer makes itself) and `frame-ancestors 'none'`; every
   other response `default-src 'none'; sandbox`. API: `no-store`. Files under `assets/`: immutable; others
-  `no-cache`. A Block and its media: `no-cache` with an ETag of its log and hash
+  `no-cache`. A Block and its media: `no-cache` with an ETag of its log, hash and the engine version
   (304 when it matches); in demo mode the tag also holds `demo` and the change cursor, so demo and normal answers
   never share a cache entry. Media: PNG, JPEG, GIF and WebP inline, anything else as an `attachment` download.
 - **Slow routes off the event loop.** `blocks` and `tool-outputs` price every Block over every Call of a Session
   (about 0.8 s at 2,000 Calls); they run in a worker thread with its own read-only connection and the same query
-  options, so `/health` and the stream keep answering (guarded: p95 under 200 ms, also during a catch-up, whose
+  options (now near-linear, ADR 26). One request runs at a time; identical ones share it; at most 5 wait or run
+  (else 503 `busy`); one over 30 s fails with 503 `timeout` and its computation is stopped; the socket's idle
+  limit is off while a request waits, so `/health` and the stream keep answering (guarded: p95 under 200 ms, also during a catch-up, whose
   batches are sized to about 40 ms).
 - **Static files** come from one folder: only regular files whose real path (symbolic links resolved) is inside
   it, no dot files, no listing; a path with no extension that is no file is a viewer page (`index.html`).

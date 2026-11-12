@@ -37,7 +37,7 @@ All are GET (or HEAD). `:log` and `:id` are a Session's key (`SessionKey`); `:n`
 **Errors** are JSON (`ApiError`): `{ apiVersion, error: { status, code, message } }`. 400 `bad-request`: an
 unknown, repeated, mistyped or out-of-range parameter; 404 `not-found`: no such route, Session (also one hidden by
 demo mode), Call, Block or media; 403 `forbidden-host`, `forbidden-origin`, `forbidden-site`; 405
-`method-not-allowed`; 413, 414, 431: a body, a long URL, large headers; 503 `too-many-streams`.
+`method-not-allowed`; 413, 414, 431: a body, a long URL, large headers; 503 `too-many-streams`, `busy` (too many slow queries wait), `timeout` (a query over 30 s), `stopping`.
 
 ## The event stream
 

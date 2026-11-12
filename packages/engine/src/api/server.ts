@@ -78,6 +78,7 @@ export function createApi(options: ApiOptions): Api {
   const now = options.now ?? Date.now;
   const onError = options.onError ?? ((error: unknown) => console.error("quantext: a request failed:", error));
   const maxConnections = options.maxConnections ?? 64;
+  const idleSocketMs = options.idleSocketMs ?? 15_000;
   const offload: Offload =
     options.offload ??
     (((method: "blockLifetimes" | "toolOutputs", key: SessionKey, o: LifetimeOptions) =>
@@ -111,10 +112,14 @@ export function createApi(options: ApiOptions): Api {
     streams: events.clients(),
   });
   /**
-   * A Block's content never changes under its hash; demo mode's redaction can, when the store's projects do. So
+   * A Block's content never changes under its hash and engine version; demo mode's redaction can, when the store's projects do. So
    * a demo tag also holds the change cursor, and a demo tag never equals a plain one: no cache entry is shared.
    */
-  const etagOf = (tag: string) => (info.demo ? `"${tag}.demo.${query.changeCursor()}"` : `"${tag}"`);
+  const etagOf = (tag: string) => {
+    // The engine's version too: another version may show the same content differently.
+    const base = `${tag}.${info.version.replace(/[^\w.-]/g, "_")}`;
+    return info.demo ? `"${base}.demo.${query.changeCursor()}"` : `"${base}"`;
+  };
   let port = 0;
   let lastActive = now();
   const sockets = new Set<Socket>();
@@ -157,7 +162,12 @@ export function createApi(options: ApiOptions): Api {
     }
     if (api) {
       if (!url.pathname.startsWith(API_PREFIX)) throw new HttpError(404, "not-found", "no such route");
-      const reply = await route(query, segments.slice(2), url.searchParams, offload);
+      // A route may wait for the query worker: the idle-socket limit must not cut it meanwhile.
+      const socket = req.socket;
+      socket.setTimeout(0);
+      const reply = await (async () => route(query, segments.slice(2), url.searchParams, offload))().finally(() => {
+        if (!socket.destroyed) socket.setTimeout(idleSocketMs);
+      });
       const etag = reply.tag === undefined ? undefined : etagOf(reply.tag);
       const cache: Record<string, string> = etag === undefined ? {} : { "Cache-Control": "no-cache", ETag: etag };
       if (etag !== undefined && matches(req.headers["if-none-match"], etag)) {
@@ -205,7 +215,7 @@ export function createApi(options: ApiOptions): Api {
     },
   );
   // A socket silent this long is destroyed (no "timeout" listener on the server): silent sockets cannot pile up.
-  server.timeout = options.idleSocketMs ?? 15_000;
+  server.timeout = idleSocketMs;
   server.on("connection", (socket: Socket) => {
     if (sockets.size >= maxConnections) {
       socket.destroy();

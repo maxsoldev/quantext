@@ -172,6 +172,18 @@ describe("slow and silent sockets", () => {
     expect(await lifetime(port, "GET /health HTTP/1.1\r\n", "X-a: b\r\n")).toBeLessThan(bound);
   });
 
+  test("keeps a request open past the idle limit while it waits for the query worker", async () => {
+    const { query, key } = await (async () => {
+      const e = await engine(["basic-tools"]);
+      return { query: e.query, key: e.query.listSessions().items[0] ?? { log: 0, id: "" } };
+    })();
+    const slow = ((method: "blockLifetimes" | "toolOutputs", k: typeof key, o: object) =>
+      new Promise((resolve) => setTimeout(() => resolve(query[method](k, o)), 500))) as never;
+    const { port } = await engine(["basic-tools"], { idleSocketMs: 100, offload: slow });
+    const reply = await get(port, `/api/v1/sessions/${key.log}/${key.id}/blocks?limit=2`);
+    expect(reply.status).toBe(200);
+  });
+
   test("keeps an event stream open past the idle limit", async () => {
     const { port } = await engine(["basic-tools"], { idleSocketMs: 200, events: { heartbeatMs: 1000 } });
     const socket = connect({ host: "127.0.0.1", port }, () =>
