@@ -1,4 +1,4 @@
-# Store schema (version 2)
+# Store schema (version 3)
 
 The engine keeps everything in one SQLite database, `~/.quantext/quantext.db` (WAL mode). Only the engine writes
 it, under the writer lock `~/.quantext/writer.lock` (an OS file lock, ADR 22). The decisions behind this schema
@@ -52,7 +52,7 @@ One row per file of a log that ingest has looked at.
 ### `sessions`
 
 `log`, `id`, `parent_id` (the Session that started a subagent), `harness`, `harness_version`, `project`, `cwd`,
-`started`, `ended` (ISO 8601), `request_log` (`present`: every Call's request is logged; `absent`: the harness
+`started`, `ended` (ISO 8601), `changed_seq` (the change cursor of the last write that changed the Session, its Calls, runs, tool calls, compactions or events), `request_log` (`present`: every Call's request is logged; `absent`: the harness
 version logs only usage, so its Calls are usage-only and have no Blocks; `partial`: both), `title` and
 `title_source` (`user`: the user's own title; `harness`: one the harness made), `agent_name`.
 
@@ -76,6 +76,7 @@ version logs only usage, so its Calls are usage-only and have no Blocks; `partia
 | `block_count` | Blocks in the input, once the request is split; NULL for a Call that was not split |
 | `cache_breakpoints` | JSON list of the positions that carry a cache breakpoint |
 | `cache_boundary_tokens`, `cache_boundary_position` | The Cached prefix: cache read tokens, and the number of leading Blocks wholly inside it |
+| `cache_boundary_offset` | The tokens of those leading Blocks, set by the store when it writes the Call: the Block at the boundary has `cache_read_tokens - cache_boundary_offset` of its tokens in the cache read |
 | `framing_tokens` | Input tokens after the last Block; the Call's runs plus these add up to its input total |
 | `issues` | JSON list of `{kind, detail}`, sorted by kind and detail: `no-request` (a usage-only Call), `missing-message` (a gap Block stands for a message, or the message came after the Call was split), `derived-usage-invalid` (a summarising Call whose derived input is 0 or less: it has no usage), `unresolved-request`, `no-usage`, `unreconciled-tokens`, `no-price`, `price-assumption`, `estimate-clamped` |
 | `turn_duration_ms` | On the last Call of a turn: how long the turn took |
@@ -159,6 +160,11 @@ the latest row before it), `kind`, `value` and `detail` (JSON):
 | `pr` | the pull request's URL | `number`, `repository` |
 | `continued-in` | the Session it went on in | |
 | `forked-from` | the Session whose context it started from | `contextLength`, `parentLastUuid` |
+
+### `change_cursor`
+
+One row: `seq`, which grows by one with each write that changes a Session. Live readers keep the last value they
+saw and ask for Sessions with a larger `changed_seq`; ingest's "Calls added" events carry the value after their write.
 
 ### `project_memory`
 
@@ -256,6 +262,7 @@ Options that are not needed yet, with what they would bring:
 
 - **1**: the tables above, except `project_memory`.
 - **2**: `project_memory`; the index `calls_lane`.
+- **3**: `calls.cache_boundary_offset` (in `calls_lane`), `sessions.changed_seq`, `change_cursor`.
 
 ## Changing the schema
 

@@ -28,6 +28,7 @@ describe("opening the store", () => {
       "blocks",
       "call_blocks",
       "calls",
+      "change_cursor",
       "compactions",
       "ingest_files",
       "log_blocks",
@@ -178,7 +179,9 @@ test("migrates a database of schema version 1 to the current version and keeps i
   const store = await openStore({ dataDir });
   const db = store.db;
   // Back to version 1: drop what version 2 added.
-  db.exec("DROP TABLE project_memory; DROP INDEX calls_lane; UPDATE schema_version SET version = 1");
+  db.exec(`DROP TABLE change_cursor; DROP INDEX sessions_changed; ALTER TABLE sessions DROP COLUMN changed_seq;
+    DROP INDEX calls_lane; ALTER TABLE calls DROP COLUMN cache_boundary_offset;
+    DROP TABLE project_memory; UPDATE schema_version SET version = 1`);
   db.exec("INSERT INTO logs (path, harness, adapter_version) VALUES ('/l.jsonl', 'claude-code', 1)");
   store.close();
   const again = await openStore({ dataDir });

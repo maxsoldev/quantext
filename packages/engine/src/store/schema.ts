@@ -239,8 +239,30 @@ CREATE INDEX calls_lane ON calls (log, session_id, lane, idx, usage_basis, cache
   cache_read_tokens, cache_write_tokens, input_tokens, cost_cache_read_usd, cost_cache_write_usd, cost_input_usd);
 `;
 
+/**
+ * The tokens before each Call's cache boundary, so that the lifetime cost splits the Block at the boundary without
+ * summing the Blocks before it; a change cursor and each Session's last change, for live readers.
+ */
+const V3 = `
+ALTER TABLE calls ADD COLUMN cache_boundary_offset INTEGER;
+UPDATE calls SET cache_boundary_offset = (
+  SELECT coalesce(sum(r.tokens), 0) FROM call_blocks r
+  WHERE r.log = calls.log AND r.session_id = calls.session_id AND r.lane = calls.lane AND r.first_call <= calls.idx
+    AND (r.last_call IS NULL OR r.last_call >= calls.idx) AND r.position < calls.cache_boundary_position)
+WHERE cache_boundary_position IS NOT NULL;
+DROP INDEX calls_lane;
+CREATE INDEX calls_lane ON calls (log, session_id, lane, idx, usage_basis, cache_boundary_position,
+  cache_boundary_offset, cache_read_tokens, cache_write_tokens, input_tokens, cost_cache_read_usd,
+  cost_cache_write_usd, cost_input_usd);
+
+ALTER TABLE sessions ADD COLUMN changed_seq INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX sessions_changed ON sessions (changed_seq);
+CREATE TABLE change_cursor (seq INTEGER NOT NULL) STRICT;
+INSERT INTO change_cursor (seq) VALUES (0);
+`;
+
 /** Migration i (0-based) takes the schema from version i to version i + 1. */
-const MIGRATIONS: readonly string[] = [V1, V2];
+const MIGRATIONS: readonly string[] = [V1, V2, V3];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
 

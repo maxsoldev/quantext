@@ -78,10 +78,10 @@ describe("writing to a log", () => {
     const first = log.write({ deltas: [parser.push(`${lines.slice(0, request + 1).join("\n")}\n`)] });
     const session = "00000000-0000-4000-8000-000000000001";
     const id = first.calls[0]?.added[0];
-    expect(first.calls).toEqual([{ sessionId: session, added: [id], updated: [] }]);
+    expect(first.calls).toEqual([{ sessionId: session, added: [id], addedIndexes: [0], updated: [] }]);
     const response = lines.findIndex((l, i) => i > request && l.includes('"type":"assistant"'));
     const second = log.write({ deltas: [parser.push(`${lines.slice(request + 1, response + 1).join("\n")}\n`)] });
-    expect(second.calls).toEqual([{ sessionId: session, added: [], updated: [id] }]);
+    expect(second.calls).toEqual([{ sessionId: session, added: [], addedIndexes: [], updated: [id] }]);
   });
 
   test("is idempotent: the same deltas again change no row", async () => {

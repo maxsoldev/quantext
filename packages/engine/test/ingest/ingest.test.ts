@@ -586,4 +586,15 @@ describe("Calls events", () => {
     expect(s.events.every((e) => e.log === files.main)).toBe(true);
     expect(new Set(s.events.flatMap((e) => e.added))).toEqual(new Set(graph.calls.map((c) => c.id)));
   });
+
+  test("carry the store's log id, the Calls' indexes and the change cursor after their write", async () => {
+    const s = await setup();
+    copyScenario(s.root, "basic-tools");
+    await s.ingest.ingestAll();
+    const cursors = s.events.map((e) => e.cursor);
+    expect(cursors).toEqual([...cursors].sort((a, b) => a - b));
+    expect(cursors.at(-1)).toBeLessThanOrEqual(s.store.changeCursor());
+    expect(s.events.flatMap((e) => e.addedIndexes)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(new Set(s.events.map((e) => e.logId))).toEqual(new Set([1]));
+  });
 });

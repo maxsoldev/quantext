@@ -58,8 +58,14 @@ export interface IngestOptions {
 /** Calls that one write added or updated in one Session of a log (the main transcript's path). */
 export interface CallsEvent {
   log: string;
+  /** The log's id in the store: with `sessionId`, the Session's key in the query layer. */
+  logId: number;
+  /** The store's change cursor after this write: `listSessions({ changedSince })` goes on from it. */
+  cursor: number;
   sessionId: string;
   added: string[];
+  /** The index of each added Call, in the order of `added`. */
+  addedIndexes: number[];
   updated: string[];
 }
 
@@ -112,9 +118,17 @@ export function createIngest(options: IngestOptions): Ingest {
   };
   /** Tell the listeners; one that throws is reported in the summary (once per pass), and the others still run. */
   const emit = (log: string, result: WriteResult, summary: IngestSummary) => {
-    for (const { sessionId, added, updated } of result.calls) {
+    for (const { sessionId, added, addedIndexes, updated } of result.calls) {
       if (added.length === 0 && updated.length === 0) continue;
-      const event = { log, sessionId, added, updated };
+      const event: CallsEvent = {
+        log,
+        logId: result.log,
+        cursor: result.cursor,
+        sessionId,
+        added,
+        addedIndexes,
+        updated,
+      };
       for (const listener of listeners) {
         try {
           listener(event);
