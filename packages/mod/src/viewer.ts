@@ -16,18 +16,21 @@ export const START_POLL_MS = 250;
 
 /**
  * Starts the engine detached, with every path passed as an argument (`$0` the runtime, `$1` the engine, `$2`
- * the log, `$3` the data folder) and none written into the script. umask 077: the folder, the log and the store
- * are the user's alone.
+ * the log, `$3` the data folder) and none written into the script. umask 077 and chmod 700: the folder, the log
+ * and the store are the user's alone. It runs from the data folder, so Bun loads no project bunfig.toml or .env.
  */
 export const START_SCRIPT =
-  'umask 077; mkdir -p "$3" && nohup "$0" "$1" serve --live while-viewer >>"$2" 2>&1 </dev/null &';
+  'umask 077; mkdir -p "$3" && chmod 700 "$3" && cd "$3" && nohup "$0" "$1" serve --live while-viewer >>"$2" 2>&1 </dev/null &';
 
 type Found = { kind: "same"; url: string } | { kind: "other"; version: string; pid: number } | { kind: "none" };
 
-/** What a command run gave, or undefined when it could not start (not on PATH). */
-async function tryRun($: EngineInterface, argv: string[]) {
+/**
+ * What a command run gave, or undefined when it could not start (not on PATH). It runs in `cwd`, never the
+ * session's folder: a cloned repo's bunfig.toml or .env must not reach `bun --version` or the engine.
+ */
+async function tryRun($: EngineInterface, argv: string[], cwd: string) {
   try {
-    return await $.process.run(argv, { timeoutMs: 5_000 });
+    return await $.process.run(argv, { cwd, timeoutMs: 5_000 });
   } catch (error) {
     $.ui.log(`quantext: ${argv[0]} did not run: ${String(error)}`, { to: "debug" });
     return undefined;
@@ -70,20 +73,20 @@ async function findEngine($: EngineInterface, dataDir: string, version: string):
 }
 
 /** `node` when it is 22.18 or later, else `bun` when it is 1.3.3 or later, else undefined. */
-async function findRuntime($: EngineInterface): Promise<string | undefined> {
-  const node = await tryRun($, ["node", "--version"]);
+async function findRuntime($: EngineInterface, cwd: string): Promise<string | undefined> {
+  const node = await tryRun($, ["node", "--version"], cwd);
   if (node?.exitCode === 0 && meetsVersion(node.stdout, MIN_NODE)) return "node";
-  const bun = await tryRun($, ["bun", "--version"]);
+  const bun = await tryRun($, ["bun", "--version"], cwd);
   if (bun?.exitCode === 0 && meetsVersion(bun.stdout, MIN_BUN)) return "bun";
   return undefined;
 }
 
 /** Opens `url` in the browser (`open` on macOS, `xdg-open` on Linux, by argv); false where it cannot. */
-async function openUrl($: EngineInterface, url: string): Promise<boolean> {
-  const os = (await tryRun($, ["uname", "-s"]))?.stdout.trim();
+async function openUrl($: EngineInterface, url: string, cwd: string): Promise<boolean> {
+  const os = (await tryRun($, ["uname", "-s"], cwd))?.stdout.trim();
   const opener = os === "Darwin" ? "open" : os === "Linux" ? "xdg-open" : undefined;
   if (opener === undefined) return false;
-  const r = await tryRun($, [opener, url]);
+  const r = await tryRun($, [opener, url], cwd);
   return r?.exitCode === 0;
 }
 
@@ -104,14 +107,15 @@ export async function openViewer($: EngineInterface): Promise<void> {
 
   let found = await findEngine($, dataDir, version);
   if (found.kind === "none") {
-    const runtime = await findRuntime($);
+    const runtime = await findRuntime($, engineDir);
     if (runtime === undefined) {
       $.ui.toast(INSTALL_HINT);
       return;
     }
     $.ui.toast("quantext: starting the engine…");
     const log = `${dataDir}/engine.log`;
-    const started = await tryRun($, ["sh", "-c", START_SCRIPT, runtime, `${engineDir}/engine.js`, log, dataDir]);
+    const argv = ["sh", "-c", START_SCRIPT, runtime, `${engineDir}/engine.js`, log, dataDir];
+    const started = await tryRun($, argv, engineDir);
     if (started?.exitCode !== 0) {
       $.ui.toast(`quantext: the engine could not be started (${started?.stderr.trim() || "sh did not run"}).`);
       return;
@@ -129,7 +133,7 @@ export async function openViewer($: EngineInterface): Promise<void> {
     );
     return;
   }
-  const opened = await openUrl($, found.url);
+  const opened = await openUrl($, found.url, engineDir);
   $.ui.toast(`quantext: the viewer is at ${found.url}${opened ? "" : " (open it in a browser)"}`);
 }
 
