@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import type { Store } from "../../src/store/index.ts";
@@ -193,6 +193,58 @@ describe("the writer lock", () => {
     child.kill("SIGKILL");
     await exited;
     await open(dir);
+  });
+});
+
+describe("a quantext.db that is not a Quantext store", () => {
+  /** A database another program made: its own tables, one with a name the store uses, no schema version. */
+  async function foreign(dataDir: string, sql: string): Promise<string> {
+    const path = join(dataDir, "quantext.db");
+    const db = await openDriver(path);
+    db.exec(sql);
+    db.exec("PRAGMA journal_mode = DELETE");
+    db.close();
+    chmodSync(path, 0o644);
+    return path;
+  }
+
+  test.each([
+    ["no schema version", "CREATE TABLE ingest_files (path TEXT); CREATE TABLE spans (id INTEGER)"],
+    [
+      "a schema version of its own",
+      "CREATE TABLE schema_version (version INTEGER); INSERT INTO schema_version VALUES (2); CREATE TABLE ingest_files (path TEXT)",
+    ],
+  ])("with %s is refused by name and left as it was", async (_, sql) => {
+    const dataDir = tempDir();
+    const path = await foreign(dataDir, sql);
+    const before = { bytes: readFileSync(path), mode: statSync(path).mode, mtime: statSync(path).mtimeMs };
+    const error = await openStore({ dataDir }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(String((error as Error).message)).toContain(path);
+    expect(String((error as Error).message)).toContain("move it aside");
+    expect({ bytes: readFileSync(path), mode: statSync(path).mode, mtime: statSync(path).mtimeMs }).toEqual(before);
+    expect(existsSync(`${path}-wal`)).toBe(false);
+    // The lock is free again: once the file is moved aside, the store opens.
+    renameSync(path, `${path}.old`);
+    await open(dataDir);
+  });
+
+  test("in WAL mode is read without making a -wal or -shm file next to it", async () => {
+    const dataDir = tempDir();
+    const path = join(dataDir, "quantext.db");
+    const db = await openDriver(path); // WAL mode
+    db.exec("CREATE TABLE ingest_files (path TEXT)");
+    db.close();
+    const sidecars = () => [existsSync(`${path}-wal`), existsSync(`${path}-shm`)];
+    const before = sidecars(); // Bun's SQLite on macOS keeps them after close
+    await expect(openStore({ dataDir })).rejects.toThrow("move it aside");
+    expect(sidecars()).toEqual(before);
+  });
+
+  test("an empty file is a new store", async () => {
+    const dataDir = tempDir();
+    writeFileSync(join(dataDir, "quantext.db"), "");
+    expect((await open(dataDir)).schemaVersion).toBe(SCHEMA_VERSION);
   });
 });
 

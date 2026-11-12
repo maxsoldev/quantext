@@ -24,7 +24,10 @@ are in ADR 19 and ADR 20; the domain terms are in `GLOSSARY.md`. This file is th
 
 ### `schema_version`
 
-One row: `version`, the schema version of the database.
+One row: `version`, the schema version of the database. Before it opens the file for writing, the engine reads it
+read-only: a file with tables but no such row, or without the store's own tables (`logs`, `ingest_files`, `calls`,
+`call_blocks`), is another program's database. The engine stops, names the file, and asks the user to move it
+aside; it never changes such a file, its mode neither.
 
 ### `logs`
 

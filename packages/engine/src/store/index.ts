@@ -3,6 +3,7 @@ export type { SqlDriver, SqlRow, SqlStatement, SqlValue } from "./driver.ts";
 export { openDriver, readsOnlyEnforced } from "./driver.ts";
 export { StoreLockedError } from "./lock.ts";
 export type { FileMark, LogBatch, LogStore, WriteResult } from "./log.ts";
+export { ForeignDatabaseError } from "./own.ts";
 export {
   call as callFromRow,
   compaction as compactionFromRow,

@@ -7,6 +7,7 @@ import { openDriver, openReadOnlyDriver } from "./driver.ts";
 import { acquireLock, privateFile } from "./lock.ts";
 import type { LogStore } from "./log.ts";
 import { openLog } from "./log.ts";
+import { refuseForeign } from "./own.ts";
 import { migrate, SCHEMA_VERSION } from "./schema.ts";
 import { Statements } from "./statements.ts";
 
@@ -77,6 +78,7 @@ export async function openStore(options: OpenStoreOptions): Promise<Store> {
   const path = join(options.dataDir, "quantext.db");
   let db: SqlDriver | undefined;
   try {
+    await refuseForeign(path); // before anything changes the file, its mode too
     privateFile(path); // before SQLite opens it, so that its WAL files get its mode
     db = await openDriver(path);
     const schemaVersion = migrate(db);
