@@ -76,3 +76,24 @@ test("small inputs, the last N calls and earlier stubs stay as they are", () => 
   expect(again.cleared).toBe(0);
   expect(again.messages[0]).toBe(once.messages[0]);
 });
+
+test("inputs over 300 chars get a stub; fields up to 80 chars stay in it", () => {
+  const short = call("1", "Bash", { command: `echo ${"s".repeat(240)}`, description: "short" });
+  const long = { command: `pnpm build ${"b".repeat(400)}`, description: "Build the plugin" };
+  const r = clearToolCalls([short, call("2", "Bash", long)]);
+  expect(r.messages[0]).toBe(short);
+  expect(inputOf(r.messages[1])).toEqual({
+    command: `[Old tool input cleared: Bash: pnpm build ${"b".repeat(49)} … (115 tokens)]`,
+    description: "Build the plugin",
+  });
+  expect(r.cleared).toBe(1);
+});
+
+test("an input the stub would not make clearly smaller stays as it is", () => {
+  const fields = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`field${i}`, "f".repeat(40)]));
+  const m = call("1", "mcp__x__y", fields);
+  const r = clearToolCalls([m]);
+  expect(r.messages[0]).toBe(m);
+  expect(r.cleared).toBe(0);
+  expect(r.chars).toBe(0);
+});

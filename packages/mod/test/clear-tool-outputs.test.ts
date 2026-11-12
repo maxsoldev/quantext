@@ -43,3 +43,16 @@ test("keep N leaves the last N outputs whole; earlier stubs do not count toward 
   expect(again.cleared).toBe(0);
   expect(again.messages[6]?.toolResults?.[0]?.text).toBe("z".repeat(40));
 });
+
+test("a ToolSearch result stays whole, so the deferred tools it loaded stay loaded", () => {
+  const search: SessionMessage = {
+    role: "assistant",
+    text: "",
+    toolUses: [{ tool_use_id: "s", tool: "ToolSearch", input: { query: "select:Monitor" } }],
+    handle: "as",
+  };
+  const r = clearToolOutputs([search, result("s", "Monitor"), use("1"), result("1", "x".repeat(500))]);
+  expect(r.messages[1]?.handle).toBe("rs");
+  expect(r.messages[3]?.toolResults?.[0]?.text).toBe(CLEARED);
+  expect(r.cleared).toBe(1);
+});

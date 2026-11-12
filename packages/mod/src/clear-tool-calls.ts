@@ -9,10 +9,12 @@ import { tokens } from "./format.ts";
 /** Starts every stub, so a second run sees which inputs are cleared already. */
 export const CLEARED_INPUT = "[Old tool input cleared";
 
-/** Inputs up to this size (~200 tokens) stay: a stub would save little. */
-const SMALL_INPUT_CHARS = 800;
+/** Inputs up to this size (~75 tokens) stay: a stub would save little. */
+const SMALL_INPUT_CHARS = 300;
 /** A field up to this size stays in the stub input (a path, a name, a short description). */
-const SMALL_FIELD_CHARS = 200;
+const SMALL_FIELD_CHARS = 80;
+/** A stub must save at least this many chars, or the input stays (one of many short fields grows). */
+const MIN_SAVED_CHARS = 100;
 const HEAD_CHARS = 60;
 
 const sizeOf = (v: unknown): number => JSON.stringify(v)?.length ?? 0;
@@ -72,7 +74,7 @@ const isStub = (u: ToolUseSummary): boolean =>
   Object.values(u.input).some((v) => typeof v === "string" && v.startsWith(CLEARED_INPUT));
 
 /**
- * Stubs the input of every tool call but the last `keep`; small inputs stay. A changed message loses its engine
+ * Stubs the input of every tool call but the last `keep`; small inputs, and those a stub would not shrink, stay. A changed message loses its engine
  * handle and is rebuilt from role, text and tool blocks. Calls stubbed already do not count toward `keep`.
  */
 export function clearToolCalls(messages: readonly SessionMessage[], keep = 0) {
@@ -95,6 +97,7 @@ export function clearToolCalls(messages: readonly SessionMessage[], keep = 0) {
           const size = sizeOf(u.input);
           if (size <= SMALL_INPUT_CHARS) return u;
           const input = stubInput(u.tool, u.input);
+          if (size - sizeOf(input) < MIN_SAVED_CHARS) return u;
           cleared++;
           chars += size - sizeOf(input);
           return { ...u, input };
