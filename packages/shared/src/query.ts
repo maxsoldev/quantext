@@ -23,26 +23,12 @@ export type ApiVersion = 1;
 /** On every response object. */
 export interface Meta {
   apiVersion: ApiVersion;
-  /** Demo mode: paths are hidden, and only the allowed projects are shown. */
-  redacted?: true;
-  /** Demo mode: show images blurred, they may show what the text hides. */
-  blurImages?: true;
 }
 
 /** A Session in the store: the same id can occur in two logs (a session that went on in another folder). */
 export interface SessionKey {
   log: number;
   id: string;
-}
-
-/**
- * Demo mode: only the allowed projects are visible (by exact path), and local paths are shown
- * relative to the project, or under `~`. The home folder and the user name never appear.
- */
-export interface DemoOptions {
-  /** The allowed projects, by exact path. */
-  projects?: string[];
-  redactPaths: boolean;
 }
 
 /** Token counts by Usage part, summed over Calls. */

@@ -1,7 +1,7 @@
 /**
- * Change events. Ingest gives `IngestEvent`s, which may name local paths; a reader (the API's SSE) passes each
- * through the query layer's `visibleEvent`, which gives a `VisibleEvent` or nothing (a hidden project in demo mode).
- * Each carries the store's change cursor after its write.
+ * Change events. Ingest gives `IngestEvent`s, which name the harness's folders; the API's SSE passes each through
+ * the query layer's `publicEvent`, which gives a `PublicEvent` (Session keys and projects, no log folders) or
+ * nothing. Each carries the store's change cursor after its write.
  */
 import type { SessionKey } from "./query.ts";
 
@@ -31,14 +31,12 @@ export interface LogRemovedEvent {
   kind: "log-removed";
   logId: number;
   cursor: number;
-  /** The projects of its Sessions before they were deleted. */
-  projects: string[];
 }
 
 export type IngestEvent = CallsEvent | MemoryEvent | LogRemovedEvent;
 
-/** A change event as a reader may see it: no local paths, nothing of a hidden project. */
-export type VisibleEvent =
+/** A change event as the API sends it: Session keys and projects, no log folders. */
+export type PublicEvent =
   /** Empty `added` and `updated`: the Session changed (its end, title, events) with no Call added or updated. */
   | {
       kind: "calls";
@@ -47,6 +45,6 @@ export type VisibleEvent =
       added: { id: string; index: number }[];
       updated: string[];
     }
-  /** `projects`: as `SessionSummary.project` shows them (folder names in demo mode). */
+  /** `projects`: as `SessionSummary.project` shows them. */
   | { kind: "memory"; cursor: number; projects: string[] }
   | { kind: "log-removed"; cursor: number; logId: number };

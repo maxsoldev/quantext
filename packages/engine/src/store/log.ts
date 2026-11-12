@@ -83,10 +83,8 @@ export interface LogStore {
   readonly path: string;
   /** The log's id in the store (`SessionKey.log`). */
   readonly id: number;
-  /** Set when opening the log emptied it (another adapter version wrote it): the cursor after, its projects before. */
-  readonly emptied?: { cursor: number; projects: string[] };
-  /** The projects of the log's Sessions. */
-  projects(): string[];
+  /** Set when opening the log emptied it (another adapter version wrote it): the cursor after. */
+  readonly emptied?: { cursor: number };
   /** What the parser may look up: everything written to this log so far. */
   readonly lookup: ContentLookup;
   snapshot(): JsonValue | undefined;
@@ -141,11 +139,6 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
   if (row === undefined) throw new Error(`log ${path} was not created`);
   if (row.harness !== harness) throw new Error(`log ${path} is a ${String(row.harness)} log, not ${harness}`);
   const id = Number(row.id);
-  const projects = (): string[] =>
-    sql
-      .get("SELECT DISTINCT project FROM sessions WHERE log = ? AND project IS NOT NULL ORDER BY project")
-      .all(id)
-      .map((r) => String(r.project));
   const reset = (): number =>
     db.transaction(() => {
       sql.get("DELETE FROM logs WHERE id = ?").run(id);
@@ -156,11 +149,8 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
       return Number(sql.get("SELECT seq FROM change_cursor").get()?.seq);
     });
   // Another adapter version read this log differently: empty it, so that ingest reads it again from the start.
-  let emptied: { cursor: number; projects: string[] } | undefined;
-  if (Number(row.adapter_version) !== codec.version) {
-    const before = projects();
-    emptied = { cursor: reset(), projects: before };
-  }
+  let emptied: { cursor: number } | undefined;
+  if (Number(row.adapter_version) !== codec.version) emptied = { cursor: reset() };
   const one = (query: string, ...params: SqlValue[]) => sql.get(query).get(id, ...params);
   const all = (query: string, ...params: SqlValue[]) => sql.get(query).all(id, ...params);
 
@@ -300,7 +290,6 @@ export function openLog(db: SqlDriver, sql: Statements, path: string, harness: s
     path,
     id,
     ...(emptied === undefined ? {} : { emptied }),
-    projects,
     lookup,
     snapshot() {
       const r = sql.get("SELECT snapshot FROM logs WHERE id = ?").get(id);

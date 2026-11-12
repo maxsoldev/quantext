@@ -300,6 +300,40 @@ describe("the report", () => {
 });
 
 describe("for the live viewer", () => {
+  test("gives change events as the API sends them: Session keys and projects, not the harness's folders", async () => {
+    const { db } = await ingested(["basic-tools"]);
+    const q = createQuery({ db, codec: claudeCodeCodec });
+    const s = key(q, 1);
+    const logDir = String(db.prepare("SELECT path FROM logs").get()?.path).replace(/[\\/][^\\/]+$/, "");
+    const calls = {
+      kind: "calls",
+      logId: s.log,
+      cursor: 5,
+      sessionId: s.id,
+      added: ["a"],
+      addedIndexes: [3],
+      updated: ["b"],
+    };
+    expect(q.publicEvent({ ...calls, kind: "calls" })).toEqual({
+      kind: "calls",
+      cursor: 5,
+      session: s,
+      added: [{ id: "a", index: 3 }],
+      updated: ["b"],
+    });
+    expect(q.publicEvent({ kind: "log-removed", logId: s.log, cursor: 6 })).toEqual({
+      kind: "log-removed",
+      cursor: 6,
+      logId: s.log,
+    });
+    expect(q.publicEvent({ kind: "memory", cursor: 7, projectDirs: [logDir] })).toEqual({
+      kind: "memory",
+      cursor: 7,
+      projects: ["/fixture-0000000000000000/repo"],
+    });
+    expect(q.publicEvent({ kind: "memory", cursor: 8, projectDirs: ["/no/such/folder"] })).toBeNull();
+  });
+
   test("the timeline has every Call with its usage, cost and the context-bar totals of its context", async () => {
     const q = await query(["compaction", "basic-tools"]);
     for (const n of [1, 5]) {

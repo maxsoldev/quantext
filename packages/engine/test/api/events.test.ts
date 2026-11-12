@@ -1,4 +1,4 @@
-/** The SSE stream over HTTP: ready, live events, replay from a cursor, resync, heartbeats, slow clients, demo mode. */
+/** The SSE stream over HTTP: ready, live events, replay from a cursor, resync, heartbeats, slow clients. */
 import type { ClientRequest } from "node:http";
 import { request } from "node:http";
 import { connect } from "node:net";
@@ -109,8 +109,8 @@ function open(port: number, path = "/api/v1/events", headers: Record<string, str
 const ready = (f: Frame) => f.event === "ready";
 const data = <T>(f: Frame) => JSON.parse(f.data ?? "null") as T;
 
-async function setup(options: Parameters<typeof engine>[1] = {}, queryOptions: Parameters<typeof engine>[2] = {}) {
-  const e = await engine(["basic-tools"], options, queryOptions);
+async function setup(options: Parameters<typeof engine>[1] = {}) {
+  const e = await engine(["basic-tools"], options);
   const key = e.query.findSessions(ID)[0] ?? { log: 1, id: ID };
   const cursor = e.query.changeCursor();
   return { ...e, key, cursor };
@@ -131,7 +131,7 @@ describe("the event stream", () => {
     api.publish(event);
     const calls = await stream.until((f) => f.event === "calls");
     expect(calls.id).toBe(`${cursor + 1}.0`);
-    expect(data(calls)).toEqual(query.visibleEvent(event));
+    expect(data(calls)).toEqual(query.publicEvent(event));
     expect(data(calls)).toMatchObject({ kind: "calls", session: key, added: [{ index: 8 }] });
     stream.close();
   });
@@ -275,22 +275,6 @@ describe("the event stream", () => {
     const two = await get(port, "/api/v1/events");
     expect([two.status, two.json<{ error: { code: string } }>().error.code]).toEqual([503, "too-many-streams"]);
     one.close();
-  });
-
-  test("passes on only what demo mode shows", async () => {
-    const { port, api, cursor } = await setup({}, { demo: { projects: ["/no/such/project"], redactPaths: true } });
-    const key = { log: 1, id: ID }; // the one log ingested; demo mode hides it
-    const stream = await open(port);
-    await stream.until(ready);
-    api.publish(callsEvent(key.log, key.id, cursor + 1));
-    api.publish({ kind: "log-removed", logId: key.log, cursor: cursor + 2, projects: ["/fixture/repo"] });
-    api.publish({ kind: "memory", cursor: cursor + 3, projectDirs: ["/anywhere"] });
-    // A frame after them proves they were not sent: the stream is in order.
-    const later = await open(port, `/api/v1/events?cursor=${cursor}`);
-    expect(data<SseReady>(await later.until(ready))).toMatchObject({ cursor: cursor + 3, replayed: 0 });
-    expect(stream.frames.filter((f) => f.event !== undefined && f.event !== "ready")).toEqual([]);
-    stream.close();
-    later.close();
   });
 
   test("closes a client's streams when an event cannot be shown, so that it resyncs", async () => {

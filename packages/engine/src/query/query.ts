@@ -1,7 +1,6 @@
 /**
  * The query layer: the one read API for the CLI, the HTTP API, the viewer and the mod. Each method is a few indexed
- * queries over the store; Block text is derived from content at read time (by the adapter's codec). Demo mode is
- * applied here, so every consumer gets it: only allowed projects, and no local paths.
+ * queries over the store; Block text is derived from content at read time (by the adapter's codec).
  */
 import type {
   BlockDetail,
@@ -19,10 +18,8 @@ import type {
   ContextBlock,
   ContextCategory,
   ContextDiff,
-  DemoOptions,
   IngestEvent,
   Items,
-  JsonValue,
   LaneSummary,
   Lifetime,
   LifetimeOptions,
@@ -30,6 +27,7 @@ import type {
   Meta,
   Page,
   ProjectSummary,
+  PublicEvent,
   QueryReport,
   RequestLog,
   RequestSection,
@@ -43,7 +41,6 @@ import type {
   TokenGroup,
   ToolCallSummary,
   ToolOutput,
-  VisibleEvent,
 } from "@quantext/shared";
 import { blockCosts } from "../core/pricing.ts";
 import type { SqlDriver, SqlRow, SqlValue } from "../store/index.ts";
@@ -59,8 +56,6 @@ import { categoryOf, emptyCategories, isDeferred } from "./categories.ts";
 import type { LifetimeRow } from "./lifetimes.ts";
 import { lifetimes, PRICED_CALLS, PRICED_RUNS, pricedCall, pricedRun } from "./lifetimes.ts";
 import { previewOf } from "./preview.ts";
-import type { Redactor } from "./redact.ts";
-import { createRedactor, lastFolder, projectAllowed, trimSeparators } from "./redact.ts";
 import { API_VERSION } from "./sql.ts";
 import { cacheBreaksSql, installViews, toolOutputsSql } from "./views.ts";
 
@@ -78,11 +73,6 @@ export interface QueryOptions {
   db: SqlDriver;
   /** The adapter's codec: Block text and media from stored content. */
   codec: StoreCodec;
-  demo?: DemoOptions;
-  /** The home folder, user name and machine name to hide in demo mode. */
-  home?: string;
-  user?: string;
-  host?: string;
   now?: () => number;
   /** A Session is live when its last event is at most this old. Default 5 minutes. */
   liveWindowMs?: number;
@@ -97,7 +87,7 @@ export interface Query {
   getSession(key: SessionKey): SessionDetail | undefined;
   /** The projects with main Sessions, latest first (`listSessions({ project })` takes the name it shows). */
   listProjects(): Items<ProjectSummary>;
-  /** Whether the Session exists and is visible (demo mode): one indexed lookup, for a 404 before a list. */
+  /** Whether the Session exists: one indexed lookup, for a 404 before a list. */
   hasSession(key: SessionKey): boolean;
   /** The store's change cursor now, as `Page.cursor` gives it. */
   changeCursor(): number;
@@ -126,8 +116,8 @@ export interface Query {
   /** The memory documents of a project (by its path, or its last folder name), by path. */
   projectMemory(project: string): Items<MemoryDocumentView>;
   ingestReport(): QueryReport;
-  /** A change event as this query's reader may see it: null for a hidden project, no local paths. */
-  visibleEvent(event: IngestEvent): VisibleEvent | null;
+  /** A change event as the API sends it, without the harness's folders: null for memory of no known project. */
+  publicEvent(event: IngestEvent): PublicEvent | null;
 }
 
 const SORTS: Record<NonNullable<SessionFilter["sort"]>, string> = {
@@ -138,16 +128,13 @@ const SORTS: Record<NonNullable<SessionFilter["sort"]>, string> = {
 };
 
 export function createQuery(options: QueryOptions): Query {
-  const { db, codec, demo } = options;
+  const { db, codec } = options;
   const exists = db.prepare("SELECT 1 FROM sqlite_temp_master WHERE type = 'view' AND name = 'v_sessions'").get();
   if (exists === undefined) installViews(db);
   const now = options.now ?? Date.now;
   const liveWindowMs = options.liveWindowMs ?? 5 * 60_000;
   const previewChars = options.previewChars ?? 240;
-  const allowed = demo?.projects;
-  const redacting = demo?.redactPaths === true;
-  const meta: Meta =
-    demo === undefined ? { apiVersion: API_VERSION } : { apiVersion: API_VERSION, redacted: true, blurImages: true };
+  const meta: Meta = { apiVersion: API_VERSION };
   const cache = new Map<string, ReturnType<SqlDriver["prepare"]>>();
   const q = (sql: string) => {
     let s = cache.get(sql);
@@ -160,37 +147,6 @@ export function createQuery(options: QueryOptions): Query {
   /** Each Block's lifetime in one Session's Calls (`lifetimes.ts`: linear in its Calls and runs). */
   const sessionLifetimes = (key: SessionKey) =>
     lifetimes(q(PRICED_CALLS).all(key.log, key.id).map(pricedCall), q(PRICED_RUNS).all(key.log, key.id).map(pricedRun));
-  /** The redactor, made again when the store has other projects: each project not allowed is a hidden one. */
-  let redactor: { projects: string; redact: Redactor } | undefined;
-  const redactorNow = (): Redactor => {
-    const rows = q(
-      "SELECT DISTINCT project FROM sessions WHERE project IS NOT NULL UNION SELECT DISTINCT cwd FROM sessions WHERE cwd IS NOT NULL",
-    ).all();
-    const all = rows.map((r) => String(r.project));
-    const key = all.join("\0");
-    if (redactor?.projects !== key) {
-      const hidden = allowed === undefined ? [] : all.filter((p) => !projectAllowed(p, allowed));
-      redactor = {
-        projects: key,
-        redact: createRedactor({
-          ...nonEmpty("home", options.home),
-          ...nonEmpty("user", options.user),
-          ...nonEmpty("host", options.host),
-          hidden,
-          paths: redacting,
-        }),
-      };
-    }
-    return redactor.redact;
-  };
-  /** Text as demo mode shows it (paths relative to `root`); as it is without demo mode. */
-  const redactText =
-    (root: string | undefined) =>
-    (text: string): string =>
-      demo === undefined ? text : redactorNow()(text, root);
-  /** The value with local paths and hidden projects hidden, in demo mode. */
-  const hide = <T>(value: T, root?: string): T =>
-    demo === undefined ? value : (redactorNow().json(value as unknown as JsonValue, root) as unknown as T);
   const media = (hash: string): Uint8Array => {
     const r = q("SELECT bytes FROM media WHERE hash = ?").get(hash);
     if (!(r?.bytes instanceof Uint8Array)) throw new Error(`the store has no media ${hash}`);
@@ -205,13 +161,8 @@ export function createQuery(options: QueryOptions): Query {
 
   // ---- sessions ----
 
-  /** The project of a visible Session (undefined: hidden by demo mode), and its key. */
-  const sessionProject = (key: SessionKey): { project: string | undefined } | undefined => {
-    const r = q("SELECT project FROM sessions WHERE log = ? AND id = ?").get(key.log, key.id);
-    if (r === undefined) return undefined;
-    const project = r.project === null ? undefined : String(r.project);
-    return projectAllowed(project, allowed) ? { project } : undefined;
-  };
+  const hasSession = (key: SessionKey): boolean =>
+    q("SELECT 1 FROM sessions WHERE log = ? AND id = ?").get(key.log, key.id) !== undefined;
   const issuesOf = (logs: readonly number[]): Map<string, SessionSummary["issues"]> => {
     const out = new Map<string, SessionSummary["issues"]>();
     if (logs.length === 0) return out;
@@ -269,11 +220,7 @@ export function createQuery(options: QueryOptions): Query {
     opt("started", r.started);
     opt("ended", r.ended);
     if (r.cache_hit_rate !== null) s.cacheHitRate = Number(r.cache_hit_rate);
-    if (demo === undefined) return s;
-    const root = s.project;
-    const shown = hide(s, root);
-    if (root !== undefined && redacting) shown.project = lastFolder(root);
-    return shown;
+    return s;
   };
   const projectFilter = (names: readonly string[], params: SqlValue[]): string => {
     const one = () => "(project = ? OR project LIKE ? ESCAPE '!' OR project LIKE ? ESCAPE '!')";
@@ -353,9 +300,8 @@ export function createQuery(options: QueryOptions): Query {
       AND (r.last_call IS NULL OR r.last_call >= ?)
     ORDER BY r.position`;
   const context = (key: SessionKey, index: number): CallContext | undefined => {
-    const found = sessionProject(key);
-    const row = callRow(key, index);
-    if (found === undefined || row === undefined) return undefined;
+    const row = hasSession(key) ? callRow(key, index) : undefined;
+    if (row === undefined) return undefined;
     const call = callSummary(row, toolUsesOf(key).get(String(row.id)) ?? []);
     const rebuilt = call.blockCount !== undefined;
     const runs = rebuilt ? q(RUNS_AT).all(key.log, key.id, call.lane, index, index) : [];
@@ -363,7 +309,7 @@ export function createQuery(options: QueryOptions): Query {
     const blocks: ContextBlock[] = runs.map((r) => {
       const run = runFromRow(r);
       const source = sourceOf(r);
-      const shown = previewOf(textOf(r.content), previewChars, redactText(found.project));
+      const shown = previewOf(textOf(r.content), previewChars);
       const b: ContextBlock = {
         position: run.position,
         section: run.section,
@@ -432,7 +378,7 @@ export function createQuery(options: QueryOptions): Query {
           ? blocks.reduce((n, b) => n + (b.tokens ?? 0), 0)
           : u.inputTokens + u.cacheReadTokens + u.cacheWriteTokens,
     };
-    return { ...hide(result, found.project), ...meta };
+    return result;
   };
   /**
    * The Call to compare Call `index` with: the previous Call of its lane, or the previous Call in time when that one
@@ -552,8 +498,7 @@ export function createQuery(options: QueryOptions): Query {
   };
   /** The Session's compactions; `contexts`: also what was removed and kept, from the contexts before and after. */
   const compactionsOf = (key: SessionKey, contexts: boolean): CompactionDetail[] => {
-    const found = sessionProject(key);
-    if (found === undefined) return [];
+    if (!hasSession(key)) return [];
     const rows = q("SELECT * FROM compactions WHERE log = ? AND session_id = ? ORDER BY ts, id").all(key.log, key.id);
     return rows.map((r) => {
       const c = compactionFromRow(r);
@@ -591,37 +536,21 @@ export function createQuery(options: QueryOptions): Query {
 
   // ---- the report ----
 
-  /** Logs with a visible Session; undefined: every log. */
-  const visibleLogs = (): Set<number> | undefined => {
-    if (allowed === undefined) return undefined;
-    const out = new Set<number>();
-    for (const r of q("SELECT DISTINCT log, project FROM sessions").all()) {
-      if (projectAllowed(r.project === null ? undefined : String(r.project), allowed)) out.add(Number(r.log));
-    }
-    return out;
-  };
-
   const changeCursor = () => Number(q("SELECT seq FROM change_cursor").get()?.seq ?? 0);
 
   return {
     changeCursor,
-    hasSession: (key) => sessionProject(key) !== undefined,
+    hasSession,
     listProjects() {
       const rows = q(
         `SELECT project, count(*) AS n, max(coalesce(ended, started)) AS last FROM sessions
          WHERE parent_id IS NULL AND project IS NOT NULL GROUP BY project ORDER BY last IS NULL, last DESC, project`,
       ).all();
-      const items = rows
-        .filter((r) => projectAllowed(String(r.project), allowed))
-        .map((r): ProjectSummary => {
-          const project = String(r.project);
-          const p: ProjectSummary = {
-            project: redacting ? lastFolder(project) : demo === undefined ? project : redactText(undefined)(project),
-            sessions: Number(r.n),
-          };
-          if (r.last !== null && r.last !== undefined) p.ended = String(r.last);
-          return p;
-        });
+      const items = rows.map((r): ProjectSummary => {
+        const p: ProjectSummary = { project: String(r.project), sessions: Number(r.n) };
+        if (r.last !== null && r.last !== undefined) p.ended = String(r.last);
+        return p;
+      });
       return { ...meta, items };
     },
     listSessions(filter = {}) {
@@ -631,10 +560,6 @@ export function createQuery(options: QueryOptions): Query {
       const where = [
         "(parent_id IS NULL OR NOT EXISTS (SELECT 1 FROM sessions p WHERE p.log = v.log AND p.id = v.parent_id))",
       ];
-      if (allowed !== undefined) {
-        where.push(`rtrim(project, '/\\') IN (${allowed.map(() => "?").join(",") || "NULL"})`);
-        params.push(...allowed.map(trimSeparators));
-      }
       if (filter.project !== undefined) where.push(projectFilter([filter.project], params));
       if (filter.changedSince !== undefined) {
         // A main Session changed when it or one of its subagents did.
@@ -669,15 +594,13 @@ export function createQuery(options: QueryOptions): Query {
     },
     findSessions(id) {
       return q(
-        `SELECT log, id, project FROM sessions WHERE id = ? OR substr(id, 1, length(?)) = ?
+        `SELECT log, id FROM sessions WHERE id = ? OR substr(id, 1, length(?)) = ?
          ORDER BY id = ? DESC, coalesce(ended, started) DESC, log DESC`,
       )
         .all(id, id, id, id)
-        .filter((r) => projectAllowed(r.project === null ? undefined : String(r.project), allowed))
         .map((r) => ({ log: Number(r.log), id: String(r.id) }));
     },
     getSession(key) {
-      if (sessionProject(key) === undefined) return undefined;
       const row = q("SELECT * FROM v_sessions WHERE log = ? AND id = ?").get(key.log, key.id);
       if (row === undefined) return undefined;
       const issues = issuesOf([key.log]);
@@ -693,7 +616,6 @@ export function createQuery(options: QueryOptions): Query {
           firstCall: Number(r.first),
           lastCall: Number(r.last),
         }));
-      const project = row.project === null ? undefined : String(row.project);
       const events = q("SELECT * FROM session_events WHERE log = ? AND session_id = ? ORDER BY ts, id")
         .all(key.log, key.id)
         .map(eventFromRow);
@@ -704,13 +626,13 @@ export function createQuery(options: QueryOptions): Query {
         ...meta,
         session: summary(row, issues),
         lanes,
-        events: hide(events, project),
+        events,
         compactions: compactionsOf(key, false),
         subagents,
       };
     },
     listCalls(key, options = {}) {
-      if (sessionProject(key) === undefined) return { ...meta, total: 0, offset: 0, items: [] };
+      if (!hasSession(key)) return { ...meta, total: 0, offset: 0, items: [] };
       const tools = toolUsesOf(key);
       const lane = options.lane ?? null;
       const after = options.afterIndex ?? -1;
@@ -726,16 +648,13 @@ export function createQuery(options: QueryOptions): Query {
       return { ...meta, total: Number(counts?.total), offset: Number(counts?.before), items };
     },
     getCall(key, index) {
-      const found = sessionProject(key);
-      const row = callRow(key, index);
-      if (found === undefined || row === undefined) return undefined;
+      const row = hasSession(key) ? callRow(key, index) : undefined;
+      if (row === undefined) return undefined;
       const call = callSummary(row, toolUsesOf(key).get(String(row.id)) ?? []);
-      return { ...meta, ...hide({ call, raw: { params: callFromRow(row).params } }, found.project) };
+      return { ...meta, call, raw: { params: callFromRow(row).params } };
     },
     callTimeline(key) {
-      const found = sessionProject(key);
-      if (found === undefined) return { ...meta, items: [] };
-      return { ...meta, items: hide(timeline(key), found.project) };
+      return { ...meta, items: hasSession(key) ? timeline(key) : [] };
     },
     contextAt: context,
     contextDiff(key, index) {
@@ -776,8 +695,6 @@ export function createQuery(options: QueryOptions): Query {
       return diff;
     },
     getBlock(hash, log) {
-      const visible = visibleLogs();
-      if (visible !== undefined && !visible.has(log)) return undefined;
       const r = q(
         `SELECT b.*, k.content FROM log_blocks b JOIN blocks k ON k.hash = b.hash WHERE b.log = ? AND b.hash = ?`,
       ).get(log, hash);
@@ -788,7 +705,6 @@ export function createQuery(options: QueryOptions): Query {
         const m = q("SELECT media_type, length(bytes) AS n FROM media WHERE hash = ?").get(h);
         return m === undefined ? [] : [{ hash: h, mediaType: String(m.media_type), bytes: Number(m.n) }];
       });
-      const project = q("SELECT project FROM sessions WHERE log = ? AND parent_id IS NULL LIMIT 1").get(log)?.project;
       const detail: BlockDetail = {
         ...meta,
         hash,
@@ -799,11 +715,9 @@ export function createQuery(options: QueryOptions): Query {
         media: mediaRows,
         raw: { content },
       };
-      return hide(detail, project === null || project === undefined ? undefined : String(project));
+      return detail;
     },
     getMedia(block, log, hash) {
-      const visible = visibleLogs();
-      if (visible !== undefined && !visible.has(log)) return undefined;
       const owner = q(
         "SELECT k.content FROM log_blocks b JOIN blocks k ON k.hash = b.hash WHERE b.log = ? AND b.hash = ?",
       ).get(log, block);
@@ -813,8 +727,7 @@ export function createQuery(options: QueryOptions): Query {
       return { mediaType: String(r.media_type), bytes: r.bytes };
     },
     toolCalls(key) {
-      const found = sessionProject(key);
-      if (found === undefined) return { ...meta, items: [] };
+      if (!hasSession(key)) return { ...meta, items: [] };
       const content = (hash: string) => jsonColumn(q("SELECT content FROM blocks WHERE hash = ?").get(hash)?.content);
       const rows = q(
         `SELECT t.*, c.idx AS call_idx,
@@ -841,12 +754,11 @@ export function createQuery(options: QueryOptions): Query {
         if (r.result_tokens !== null) s.resultTokens = Number(r.result_tokens);
         return s;
       });
-      return { ...meta, items: hide(out, found.project) };
+      return { ...meta, items: out };
     },
     compactions: (key) => ({ ...meta, items: compactionsOf(key, true) }),
     cacheBreaks(key) {
-      const found = sessionProject(key);
-      if (found === undefined) return { ...meta, items: [] };
+      if (!hasSession(key)) return { ...meta, items: [] };
       const rows = q(`${SESSION_BREAKS} ORDER BY idx`).all(key.log, key.id);
       const items = rows.map((r) => {
         const b: CacheBreak = {
@@ -873,11 +785,10 @@ export function createQuery(options: QueryOptions): Query {
         }
         return b;
       });
-      return { ...meta, items: hide(items, found.project) };
+      return { ...meta, items };
     },
     blockLifetimes(key, options = {}) {
-      const found = sessionProject(key);
-      if (found === undefined) return { ...meta, items: [] };
+      if (!hasSession(key)) return { ...meta, items: [] };
       const sort = LIFETIME_SORTS[options.sort ?? "cost"] as keyof LifetimeRow;
       const ranked = [...sessionLifetimes(key).values()]
         .sort((a, b) => Number(b[sort] ?? 0) - Number(a[sort] ?? 0) || (a.block_hash < b.block_hash ? -1 : 1))
@@ -898,11 +809,10 @@ export function createQuery(options: QueryOptions): Query {
           ...lifetimeOf(r as unknown as SqlRow),
         };
       });
-      return { ...meta, items: hide(items, found.project) };
+      return { ...meta, items };
     },
     toolOutputs(key, options = {}) {
-      const found = sessionProject(key);
-      if (found === undefined) return { ...meta, items: [] };
+      if (!hasSession(key)) return { ...meta, items: [] };
       const lives = sessionLifetimes(key);
       const sort = LIFETIME_SORTS[options.sort ?? "cost"] as keyof LifetimeRow;
       const rows = q(SESSION_TOOLS)
@@ -926,24 +836,23 @@ export function createQuery(options: QueryOptions): Query {
         };
         if (r.call_idx !== null) o.callIndex = Number(r.call_idx);
         if (r.input_summary !== null) {
-          o.inputSummary = previewOf(String(r.input_summary), 200, redactText(found.project)).preview;
+          o.inputSummary = previewOf(String(r.input_summary), 200).preview;
         }
         if (r.result_block_hash !== null) o.resultBlockHash = String(r.result_block_hash);
         if (r.first_call !== null) o.firstCall = Number(r.first_call);
         if (r.last_call !== null) o.lastCall = Number(r.last_call);
         return o;
       });
-      return { ...meta, items: hide(items, found.project) };
+      return { ...meta, items };
     },
     projectMemory(project) {
       const logs = q("SELECT DISTINCT l.path, s.project FROM sessions s JOIN logs l ON l.id = s.log")
         .all()
         .filter((r) => {
           const p = r.project === null ? undefined : String(r.project);
-          return p !== undefined && projectAllowed(p, allowed) && (p === project || lastFolder(p) === project);
+          return p !== undefined && (p === project || lastFolder(p) === project);
         });
       const dirs = [...new Set(logs.map((r) => parentOf(String(r.path))))];
-      const root = logs[0]?.project;
       if (dirs.length === 0) return { ...meta, items: [] };
       const docs = db
         .prepare(
@@ -957,40 +866,33 @@ export function createQuery(options: QueryOptions): Query {
           mtimeMs: Number(r.mtime_ms),
           size: Number(r.size),
         }));
-      return { ...meta, items: hide(docs, root === null || root === undefined ? undefined : String(root)) };
+      return { ...meta, items: docs };
     },
-    visibleEvent(event) {
-      const shown = (project: string) => (redacting ? lastFolder(project) : project);
+    publicEvent(event) {
       switch (event.kind) {
         case "calls": {
           const key = { log: event.logId, id: event.sessionId };
-          if (sessionProject(key) === undefined) return null;
           const added = event.added.map((id, i) => ({ id, index: event.addedIndexes[i] ?? -1 }));
           return { kind: "calls", cursor: event.cursor, session: key, added, updated: [...event.updated] };
         }
         case "log-removed":
-          return event.projects.some((p) => projectAllowed(p, allowed))
-            ? { kind: "log-removed", cursor: event.cursor, logId: event.logId }
-            : null;
+          return { kind: "log-removed", cursor: event.cursor, logId: event.logId };
         case "memory": {
           const dirs = new Set(event.projectDirs);
           const projects = q("SELECT DISTINCT l.path, s.project FROM sessions s JOIN logs l ON l.id = s.log")
             .all()
             .filter((r) => r.project !== null && dirs.has(parentOf(String(r.path))))
-            .map((r) => String(r.project))
-            .filter((p) => projectAllowed(p, allowed));
+            .map((r) => String(r.project));
           const unique = [...new Set(projects)].sort();
-          return unique.length === 0 ? null : { kind: "memory", cursor: event.cursor, projects: unique.map(shown) };
+          return unique.length === 0 ? null : { kind: "memory", cursor: event.cursor, projects: unique };
         }
       }
     },
     ingestReport() {
-      const visible = visibleLogs();
-      const ok = (log: SqlValue | undefined) => visible === undefined || visible.has(Number(log));
       const kinds = (status: string) => {
         const counts = new Map<string, number>();
         for (const r of q("SELECT log, kind, count FROM report_kinds WHERE status = ? ORDER BY seq").all(status)) {
-          if (ok(r.log)) counts.set(String(r.kind), (counts.get(String(r.kind)) ?? 0) + Number(r.count));
+          counts.set(String(r.kind), (counts.get(String(r.kind)) ?? 0) + Number(r.count));
         }
         return [...counts]
           .map(([kind, count]) => ({ kind, count }))
@@ -1001,7 +903,6 @@ export function createQuery(options: QueryOptions): Query {
         `SELECT c.log, i.value ->> '$.kind' AS kind, count(*) AS n FROM calls c, json_each(c.issues) i
          WHERE c.issues <> '[]' GROUP BY c.log, kind`,
       ).all()) {
-        if (!ok(r.log)) continue;
         const kind = String(r.kind) as CallIssue["kind"];
         issues[kind] = (issues[kind] ?? 0) + Number(r.n);
       }
@@ -1010,11 +911,9 @@ export function createQuery(options: QueryOptions): Query {
          WHERE kind = 'transcript' AND error IS NULL AND size > byte_offset ORDER BY path`,
       )
         .all()
-        .filter((r) => ok(r.log))
         .map((r) => ({ path: String(r.path), bytes: Number(r.pending) }));
       const requestLogs = new Map<RequestLog, number>();
       for (const r of q("SELECT log, request_log FROM sessions").all()) {
-        if (!ok(r.log)) continue;
         const k = String(r.request_log) as RequestLog;
         requestLogs.set(k, (requestLogs.get(k) ?? 0) + 1);
       }
@@ -1026,27 +925,21 @@ export function createQuery(options: QueryOptions): Query {
           "SELECT r.log, l.path, r.at, r.reason FROM report_unreadable r JOIN logs l ON l.id = r.log ORDER BY r.log, r.seq",
         )
           .all()
-          .filter((r) => ok(r.log))
           .map((r) => ({ log: String(r.path), at: String(r.at), reason: String(r.reason) })),
         errors: q("SELECT log, path, error FROM ingest_files WHERE error IS NOT NULL ORDER BY path")
           .all()
-          .filter((r) => ok(r.log))
           .map((r) => ({ path: String(r.path), error: String(r.error) })),
         pending,
         pendingBytes: pending.reduce((n, p) => n + p.bytes, 0),
-        // A scan issue belongs to no log: in demo mode, none is shown.
-        scan:
-          visible === undefined
-            ? q("SELECT path, issue FROM scan_issues ORDER BY path")
-                .all()
-                .map((r) => ({ path: String(r.path), issue: String(r.issue) }))
-            : [],
+        scan: q("SELECT path, issue FROM scan_issues ORDER BY path")
+          .all()
+          .map((r) => ({ path: String(r.path), issue: String(r.issue) })),
         issues,
         requestLogs: [...requestLogs]
           .sort(([a], [b]) => (a < b ? -1 : 1))
           .map(([requestLog, sessions]) => ({ requestLog, sessions })),
       };
-      return { ...hide(report), ...meta };
+      return report;
     },
   };
 }
@@ -1092,6 +985,12 @@ function parentOf(path: string): string {
   return at <= 0 ? path : path.slice(0, at);
 }
 
-function nonEmpty<K extends string>(key: K, value: string | undefined): { [k in K]?: string } {
-  return value === undefined || value === "" ? {} : ({ [key]: value } as { [k in K]: string });
+/** The last folder name of a path, with `/` or `\` separators. */
+function lastFolder(path: string): string {
+  return (
+    path
+      .split(/[\\/]/)
+      .filter((p) => p !== "")
+      .at(-1) ?? path
+  );
 }
