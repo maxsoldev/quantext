@@ -54,6 +54,17 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // The skill listing found by a search: a part of the merged injected block, and its total under the category.
+    name: "parts",
+    both: true,
+    go: async (page, engine) => {
+      await page.goto(`${await engine.sessionUrl("basic-tools")}?call=1`);
+      await page.getByTestId("block-find").fill("skill");
+      await expect(page.locator('[data-part="Skill listing"]')).toBeVisible();
+      await page.evaluate(`document.getElementById("context-title")?.scrollIntoView({ block: "start" })`);
+    },
+  },
+  {
     // The last answer of the session: reasoning folded, the text with its line breaks.
     name: "response",
     both: true,
