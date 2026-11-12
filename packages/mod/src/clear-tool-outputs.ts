@@ -1,7 +1,6 @@
 /**
  * `/clear-tool-outputs [keep N]`: replace old tool outputs with the stub Claude Code's own microcompact writes,
- * and keep everything else, in place of a summary. It runs as `/compact tool-outputs keep N`, which the mod's
- * `session.compact` hook answers.
+ * and keep everything else, in place of a summary. It runs as `/compact tool-outputs keep N` (`clear-tools.ts`).
  */
 import type { SessionMessage } from "claude-code";
 
@@ -40,16 +39,4 @@ export function clearToolOutputs(messages: readonly SessionMessage[], keep = 0) 
     })
     .reverse();
   return { messages: out, cleared, chars };
-}
-
-/** Reads `keep N`, `N` or nothing (keep 0); undefined when the text is something else. */
-export function parseKeep(args: string): number | undefined {
-  const m = /^\s*(?:keep\s+)?(\d+)?\s*$/i.exec(args);
-  return m ? Number(m[1] ?? 0) : undefined;
-}
-
-/** The N of `/compact tool-outputs [keep N]`; undefined for any other compaction. */
-export function toolOutputsKeep(instructions: string | undefined): number | undefined {
-  const asked = /^\s*tool-outputs\b(.*)$/is.exec(instructions ?? "");
-  return asked ? parseKeep(asked[1] ?? "") : undefined;
 }
