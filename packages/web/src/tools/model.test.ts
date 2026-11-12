@@ -1,6 +1,6 @@
 import type { ToolCallSummary, ToolOutput } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
-import { editDiff, inputSummary, toolRows } from "./model.ts";
+import { costOf, editDiff, inputSummary, toolRows } from "./model.ts";
 
 const call = (id: string, callIndex: number, name: string, resultTokens: number): ToolCallSummary => ({
   id,
@@ -14,7 +14,16 @@ const call = (id: string, callIndex: number, name: string, resultTokens: number)
   resultTokens,
 });
 
-const output = (toolUseId: string, calls: number, total: number): ToolOutput =>
+const lifetime = (calls: number, total: number, tokens = 0) => ({
+  calls,
+  runs: 1,
+  tokens,
+  lifetimeTokens: calls * tokens,
+  tokensByPart: { cacheRead: 0, cacheWrite: 0, input: 0 },
+  costUsd: { cacheRead: total, cacheWrite: 0, input: 0, total },
+});
+
+const output = (toolUseId: string, calls: number, total: number, input?: [number, number, number]): ToolOutput =>
   ({
     toolUseId,
     tool: "Read",
@@ -25,6 +34,7 @@ const output = (toolUseId: string, calls: number, total: number): ToolOutput =>
     lifetimeTokens: 0,
     tokensByPart: { cacheRead: 0, cacheWrite: 0, input: 0 },
     costUsd: { cacheRead: 0, cacheWrite: 0, input: 0, total },
+    ...(input ? { toolCall: { blockHash: `h${toolUseId}`, ...lifetime(...input) } } : {}),
   }) as ToolOutput;
 
 describe("the tool calls of a Session", () => {
@@ -95,5 +105,26 @@ describe("the change an Edit made, line by line", () => {
 
   test("other tools have no diff", () => {
     expect(editDiff("Read", { file_path: "a" })).toBeUndefined();
+  });
+
+  test("the tool call's own input has its lifetime too; the total adds both", () => {
+    // a: a long brief (an Agent task, a Write) whose input costs more than its output.
+    const calls = [call("a", 0, "Bash", 20), call("b", 1, "Read", 9000), call("c", 2, "Edit", 90)];
+    const priced = [
+      output("a", 7, 0.002, [7, 0.05, 3000]),
+      output("b", 4, 0.06, [4, 0.001, 40]),
+      output("c", 6, 0.004),
+    ];
+    const rows = toolRows(calls, priced, "total");
+    expect(rows.map((r) => r.call.id)).toEqual(["b", "a", "c"]);
+    expect(rows.map((r) => [costOf(r).input, costOf(r).output])).toEqual([
+      [0.001, 0.06],
+      [0.05, 0.002],
+      [0, 0.004],
+    ]);
+    expect(rows.map((r) => costOf(r).total)).toEqual([0.001 + 0.06, 0.05 + 0.002, 0.004]);
+    expect(rows[1]?.input?.tokens).toBe(3000);
+    expect(toolRows(calls, priced, "input-cost").map((r) => r.call.id)).toEqual(["a", "b", "c"]);
+    expect(toolRows(calls, priced, "input-tokens").map((r) => r.call.id)).toEqual(["a", "b", "c"]);
   });
 });

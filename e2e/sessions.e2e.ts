@@ -36,3 +36,21 @@ test("arrow keys move between rows and Enter opens the Session", async ({ page, 
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/s\/\d+\//);
 });
+
+test("the cost is the total with the subagents; its tooltip splits it", async ({ page, engine }) => {
+  await page.goto(`${engine.url}/?sort=cost`);
+  const row = page.getByTestId("session-row").filter({ hasText: "1 subagent" });
+  await row.getByTestId("session-cost").focus();
+  const tip = page.getByTestId("tooltip");
+  await expect(tip).toContainText("with its subagents");
+  await expect(tip).toContainText("Main conversation: $");
+  await expect(tip).toContainText("1 subagent (all depths): $");
+  await expect(tip).toContainText("Subagents, most expensive first:");
+  const listed = await row.getByTestId("session-cost").textContent();
+  await row.getByRole("link").first().click();
+  await expect(page).toHaveURL(/\/s\/\d+\//);
+  const head = page.getByTestId("session-cost");
+  await expect(head).toHaveText(listed ?? "");
+  await head.hover();
+  await expect(tip).toContainText("Main conversation: $");
+});

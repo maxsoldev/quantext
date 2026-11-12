@@ -103,6 +103,50 @@ describe("listSessions", () => {
     expect(q.listSessions({ search: "0000000005" }).items.map((s) => s.id)).toEqual([ID(5)]);
   });
 
+  test("totals a main Session with its subagents at any depth", async () => {
+    // Move Session 1 (its row and Calls) into Session 2's log, as a subagent of Session 2's subagent.
+    const { db } = await ingested(["subagent", "basic-tools"], undefined, (w) => {
+      const sub = w.prepare("SELECT log, id FROM sessions WHERE parent_id = ?").get(ID(2));
+      w.exec("PRAGMA foreign_keys = OFF");
+      w.prepare("UPDATE sessions SET log = ?, parent_id = ? WHERE id = ?").run(
+        Number(sub?.log),
+        String(sub?.id),
+        ID(1),
+      );
+      w.prepare("UPDATE calls SET log = ? WHERE session_id = ?").run(Number(sub?.log), ID(1));
+    });
+    const q = createQuery({ db, codec: claudeCodeCodec });
+    const [main] = q.listSessions().items;
+    const sub = main?.subagents?.[0];
+    const deep = sub?.subagents?.[0];
+    expect([main?.id, deep?.id]).toEqual([ID(2), ID(1)]);
+    if (main === undefined || sub === undefined || deep === undefined) return;
+    const t = main.totals;
+    expect(t.main).toEqual({ sessions: 1, calls: main.calls, tokens: main.tokens, cost: main.cost, unpricedCalls: 0 });
+    expect(t.subagents.sessions).toBe(2);
+    expect(t.subagents.calls).toBe(sub.calls + deep.calls);
+    expect(t.subagents.cost.totalUsd).toBeCloseTo(sub.cost.totalUsd + deep.cost.totalUsd, 9);
+    expect(t.subagents.tokens.output).toBe(sub.tokens.output + deep.tokens.output);
+    expect(t.all.cost.totalUsd).toBeCloseTo(main.cost.totalUsd + t.subagents.cost.totalUsd, 9);
+    expect(t.all.calls).toBe(main.calls + t.subagents.calls);
+    expect(sub.totals.subagents.sessions).toBe(1);
+    expect(deep.totals.subagents).toMatchObject({ sessions: 0, calls: 0, cost: { totalUsd: 0 } });
+    // The Session's detail has the same totals; its direct subagents carry theirs.
+    const detail = q.getSession(main);
+    expect(detail?.session.totals).toEqual(t);
+    expect(detail?.subagents[0]?.totals.subagents.sessions).toBe(1);
+  });
+
+  test("sorts by cost with the subagents' cost", async () => {
+    const q = await query();
+    const items = q.listSessions({ sort: "cost", order: "desc", limit: 100 }).items;
+    const all = items.map((s) => s.totals.all.cost.totalUsd);
+    expect(all).toEqual([...all].sort((a, b) => b - a));
+    const withAgent = items.find((s) => s.id === ID(2));
+    expect(withAgent?.totals.subagents.sessions).toBe(1);
+    expect(withAgent?.totals.all.cost.totalUsd ?? 0).toBeGreaterThan(withAgent?.cost.totalUsd ?? 0);
+  });
+
   test("marks a Session live when its last event is recent", async () => {
     const { db } = await ingested(["image"]);
     const at = (iso: string) => createQuery({ db, codec: claudeCodeCodec, now: () => Date.parse(iso) });
@@ -463,6 +507,24 @@ describe("a Session's detail", () => {
       .listCalls(key(q, 1))
       .items.filter((c) => c.toolCalls.filter((t) => t.name === "Read").length === 2);
     expect(parallel).toHaveLength(1);
+  });
+
+  test("prices each tool call's own Block as input to the Calls after it, next to its output", async () => {
+    const q = await query(["basic-tools"]);
+    const outputs = q.toolOutputs(key(q, 1), { limit: 100 }).items;
+    expect(outputs).toHaveLength(9);
+    for (const o of outputs) {
+      // The model wrote the call in Call n; Call n + 1 sends it back with the result, so both stay as long.
+      expect(o.toolCall?.calls).toBeGreaterThan(0);
+      expect(o.toolCall?.calls).toBe(o.calls);
+      expect(o.toolCall?.costUsd.total).toBeGreaterThan(0);
+      expect(["exact", "derived", "anchored", "estimate"]).toContain(o.toolCall?.basis);
+      const parts = o.toolCall?.costUsd;
+      expect((parts?.cacheRead ?? 0) + (parts?.cacheWrite ?? 0) + (parts?.input ?? 0)).toBeCloseTo(
+        parts?.total ?? 0,
+        12,
+      );
+    }
   });
 
   test("has its compaction with the sizes the harness logged, and what was removed and kept", async () => {

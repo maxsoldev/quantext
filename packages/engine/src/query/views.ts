@@ -127,7 +127,7 @@ export function toolOutputsSql(lifetime: string | null, where = "", cut = true):
 SELECT t.log, t.session_id, t.id AS tool_use_id, t.name AS tool, t.mcp_server, t.file_path, t.skill, t.is_error,
   c.idx AS call_idx,
   ${cut ? `substr(${input}, 1, 200)` : input} AS input_summary,
-  t.result_block_hash, l.tokens, l.calls, l.runs,
+  t.result_block_hash, t.block_hash AS call_block_hash, l.tokens, l.calls, l.runs,
   (SELECT min(r.first_call) FROM call_blocks r WHERE r.block_hash = t.result_block_hash AND r.log = t.log
     AND r.session_id = t.session_id) AS first_call,
   (SELECT max(coalesce(r.last_call, (SELECT max(m.idx) FROM calls m

@@ -44,7 +44,7 @@
   font-size: var(--t-small);
 }
 .tools-table {
-  --cols: 56px minmax(0, 1fr) 96px 96px 200px;
+  --cols: 56px minmax(0, 1fr) 100px 108px 84px 96px 108px 168px;
   --row: 56px;
   max-height: calc(100vh - 340px);
   min-height: 0;
@@ -85,6 +85,20 @@
 }
 .tools-table .share-track {
   flex: 1;
+}
+/* Input then output, on one scale: the row with the largest total fills the track. */
+.tools-table .share-track.stacked {
+  display: flex;
+  gap: 2px;
+}
+.tools-table .share-track.stacked .share-fill {
+  flex: none;
+}
+.tools-table th .swatch {
+  width: 10px;
+  height: 10px;
+  margin-right: var(--space-1);
+  vertical-align: -1px;
 }
 .panel-links {
   margin: 0;

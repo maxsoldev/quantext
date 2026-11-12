@@ -13,10 +13,10 @@ All are GET (or HEAD). `:log` and `:id` are a Session's key (`SessionKey`); `:n`
 |---|---|---|
 | `/health` | | `Health`: `ok`, `version`, `apiVersion`, `pid`, `startedAt`, `dataDir` |
 | `/api/v1/status` | | `EngineStatus`: `engine` (`version`, `pid`, `startedAt`), `ingest` (`phase`: `catching-up`, `live`, `stopping`; `logsDone`, `logsTotal`, `bytesDone`, `bytesTotal` of the pass in progress or the last one, its `startedAt`, `lastError`), `streams` |
-| `/api/v1/sessions` | `listSessions` | `project`, `search` (≤ 200), `sort` (`ended` `started` `cost` `calls`), `order` (`asc` `desc`), `changedSince`, `limit` (1–500, default 50), `offset` |
+| `/api/v1/sessions` | `listSessions` | `project`, `search` (≤ 200), `sort` (`ended` `started` `cost` `calls`), `order` (`asc` `desc`), `changedSince`, `limit` (1–500, default 50), `offset`. Each `SessionSummary` has `totals`: `main` (its own Calls, as `tokens` and `cost`), `subagents` (its subagents at any depth) and `all` (both), each `sessions`, `calls`, `tokens`, `cost`, `unpricedCalls`; `sort=cost` sorts by `totals.all` |
 | `/api/v1/projects` | `listProjects` | `Items<ProjectSummary>`: `project` (as Sessions show it), `sessions`, `ended`, latest first |
 | `/api/v1/session-keys` | `findSessions` | `id` (an id or its prefix) |
-| `/api/v1/sessions/:log/:id` | `getSession` | |
+| `/api/v1/sessions/:log/:id` | `getSession` | `SessionDetail`; the Session and each of its direct `subagents` have `totals` as in the list |
 | `/api/v1/sessions/:log/:id/calls` | `listCalls` | `lane`, `afterIndex`, `limit` (1–5000) |
 | `/api/v1/sessions/:log/:id/calls/:n` | `getCall` | |
 | `/api/v1/sessions/:log/:id/calls/:n/context` | `contextAt` | `CallContext`: every entry in order with tokens, basis, cached or not; totals by section and category. A Block that holds attached texts has `parts` (`label`, `source`, `start`/`end` in its text, `tokens`, `basis`, preview): estimates by characters that add up to its tokens; one part only takes the Block's own tokens and basis (ADR 29). `fromResponseOf`: on a Block that an earlier Call answered (its Response, sent back as input), that Call's index: the latest one before the Block's run began. `partTotals`: tokens by category and part label, most first. `turns`: the turns of the messages in order (`turn` from 1, `start` position, `blocks`, `tokens`, `cachedTokens`, `prompt`: `position`, `preview`, absent for a turn with no prompt); each message Block's `turn` names its turn |
@@ -24,7 +24,7 @@ All are GET (or HEAD). `:log` and `:id` are a Session's key (`SessionKey`); `:n`
 | `/api/v1/sessions/:log/:id/calls/:n/response` | `responseAt` | `CallResponseDetail`: what the model answered on Call `n`. `answered` (false while the log holds no answer), `blocks` in order (`hash`, `kind`, `category`, `source`, `reasoning`: `full` `omitted` `redacted`, `toolCall`: `id`, `name`; `preview`, `chars`, `truncated`; `tokens`, `basis`, `costUsd`: its share of the output tokens and output cost, by characters with basis `estimate`, the reported reasoning part to the reasoning Blocks, an only Block all with the Call's basis; the full text from `/api/v1/blocks/:log/:hash`), `stopReason`, `outputTokens`, `reasoningOutputTokens`, `outputUsd`. A Response that grows is an `updated` Call in the `calls` event |
 | `/api/v1/sessions/:log/:id/timeline` | `callTimeline` | |
 | `/api/v1/sessions/:log/:id/tool-calls` | `toolCalls` | |
-| `/api/v1/sessions/:log/:id/tool-outputs` | `toolOutputs` | `sort` (`cost` `tokens` `calls`), `limit` |
+| `/api/v1/sessions/:log/:id/tool-outputs` | `toolOutputs` | `sort` (`cost` `tokens` `calls`, of the result), `limit`. `toolCall`: the lifetime of the tool use's own Block (its input, as the model wrote it) over the Calls that sent it back, with its `blockHash` |
 | `/api/v1/sessions/:log/:id/blocks` | `blockLifetimes` | `sort`, `limit` |
 | `/api/v1/sessions/:log/:id/compactions` | `compactions` | |
 | `/api/v1/sessions/:log/:id/cache-breaks` | `cacheBreaks` | |

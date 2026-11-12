@@ -72,8 +72,22 @@
   position: absolute;
   top: 0;
   height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  cursor: default;
   min-width: 1px;
-  box-shadow: inset -2px 0 0 var(--surface);
+  /* A hairline between segments, low contrast so that a run of small blocks does not read as missing tokens. */
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--surface) 40%, transparent);
+}
+.diff-seg:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  z-index: 1;
+}
+.diff-seg.diff-moved:focus-visible {
+  outline-style: solid;
 }
 .diff-kept,
 .swatch.diff-kept {

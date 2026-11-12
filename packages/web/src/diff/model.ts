@@ -13,8 +13,12 @@ import type {
 
 export type ChangeStatus = "kept" | "added" | "removed" | "moved";
 
+/** One Block, or a run of small adjacent Blocks of the same state and category (`blocks`, in order). */
 export interface StripSegment {
+  /** The first of its Blocks. */
   block: ContextBlock;
+  blocks: ContextBlock[];
+  tokens: number;
   status: ChangeStatus;
   category: ContextCategory;
   /** Kept, but no longer in the cached prefix: written to the cache again. */
@@ -67,6 +71,8 @@ export function diffView(prev: CallContext | undefined, ctx: CallContext, diff: 
     const at = now.segments.find((s) => s.block.position >= (diff.firstChange as number));
     now.firstChange = at ? at.left : percentOf(ctx.totalTokens, scale);
   }
+  before.segments = merged(before.segments);
+  now.segments = merged(now.segments);
   return {
     before,
     now,
@@ -92,6 +98,8 @@ function strip(
       const t = block.tokens ?? 0;
       const s: StripSegment = {
         block,
+        blocks: [block],
+        tokens: t,
         status: status(block),
         category: block.category,
         rewritten: rewritten(block),
@@ -103,6 +111,35 @@ function strip(
     });
   const read = Math.min(ctx.call.usage?.cacheReadTokens ?? 0, ctx.totalTokens);
   return { segments, cachedTo: percentOf(read, scale) };
+}
+
+/** A Block below this share of the scale (percent) is small: about 10 px of a 1,000 px strip. */
+const SMALL = 1;
+
+/** Adjacent small segments of the same state, rewrite mark and category as one; others as they are. */
+function merged(segments: readonly StripSegment[]): StripSegment[] {
+  const out: StripSegment[] = [];
+  let open = false; // the last segment out is a run of small ones, so a small one can join it
+  for (const s of segments) {
+    const last = out.at(-1);
+    const small = s.width < SMALL;
+    if (
+      open &&
+      small &&
+      last !== undefined &&
+      last.status === s.status &&
+      last.rewritten === s.rewritten &&
+      last.category === s.category
+    ) {
+      last.blocks.push(s.block);
+      last.tokens += s.tokens;
+      last.width += s.width;
+    } else {
+      out.push({ ...s, blocks: [...s.blocks] });
+      open = small;
+    }
+  }
+  return out;
 }
 
 function percentOf(n: number, scale: number): number {

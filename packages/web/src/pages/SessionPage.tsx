@@ -27,6 +27,7 @@ import { Term } from "../teach/Term.tsx";
 import { ToolCalls } from "../tools/ToolCalls.tsx";
 import { Tokens } from "../ui/Num.tsx";
 import { useLoad } from "../ui/useLoad.ts";
+import { costSplit, subagentName } from "./totals.ts";
 
 type SessionRoute = Extract<Route, { page: "session" }>;
 
@@ -125,9 +126,10 @@ export function SessionPage({ route }: { route: SessionRoute }) {
               <button
                 type="button"
                 className="tip-anchor num"
-                data-tip={`At list prices, from each call's usage. A compaction's summarising call counts too: its usage is derived from the harness's running totals (it is real spend).\n${CACHE_PARTS.map((p) => `${p.label}: ${usd(partCost(s.cost, p.key))}`).join("\n")}${s.unpricedCalls ? `\n${s.unpricedCalls} calls have no price and are not counted.` : ""}`}
+                data-testid="session-cost"
+                data-tip={costTip(s, detail.subagents)}
               >
-                {usd(s.cost.totalUsd)}
+                {usd(s.totals.all.cost.totalUsd)}
               </button>
             </dd>
           </div>
@@ -281,11 +283,9 @@ function Subagents({ parent, items }: { parent: SessionKey; items: readonly Sess
       {shown.map((a, i) => (
         <span key={a.id}>
           {i > 0 && ", "}
-          <Link to={{ page: "session", key: { log: parent.log, id: a.id } }}>
-            {a.agentName ?? a.title ?? a.id.split(":").at(-1)}
-          </Link>{" "}
+          <Link to={{ page: "session", key: { log: parent.log, id: a.id } }}>{subagentName(a)}</Link>{" "}
           <span className="muted num">
-            ({count(a.calls, "call")}, {usd(a.cost.totalUsd)})
+            ({count(a.calls, "call")}, {usd(a.totals.all.cost.totalUsd)})
           </span>
         </span>
       ))}
@@ -326,6 +326,21 @@ function useCallData(key: SessionKey, call: number | undefined, version: number)
 /** No Call to load yet: stay loading. */
 function pending<T>(): Promise<T> {
   return new Promise<T>(() => undefined);
+}
+
+/** The head's cost tooltip: with the subagents' split, then by part, over all. */
+function costTip(s: SessionSummary, subagents: readonly SessionSummary[]): string {
+  const split = costSplit(s, subagents, 5);
+  const all = s.totals.all;
+  return [
+    split.lines.length > 0
+      ? `${usd(split.total)} with its subagents, at list prices, from each call's usage.`
+      : "At list prices, from each call's usage.",
+    ...split.lines,
+    "A compaction's summarising call counts too: its usage is derived from the harness's running totals (it is real spend).",
+    ...CACHE_PARTS.map((p) => `${p.label}: ${usd(partCost(all.cost, p.key))}`),
+    ...(all.unpricedCalls ? [`${all.unpricedCalls} calls have no price and are not counted.`] : []),
+  ].join("\n");
 }
 
 function partCost(c: { cacheReadUsd: number; cacheWriteUsd: number; inputUsd: number; outputUsd: number }, k: string) {
@@ -450,12 +465,16 @@ function Scrubber({
   );
 }
 
-/** Arrow keys anywhere on the page (not while typing or on the slider, which has its own) move the selected Call. */
+/**
+ * Arrow keys anywhere on the page (not while typing or on the slider, which has its own) move the selected Call.
+ * A key an element already handled (`preventDefault`, as a strip's segments do) is left alone.
+ */
 function usePlaceKeys(place: number, last: number, select: (p: number) => void, on: boolean) {
   useEffect(() => {
     if (!on) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
+      if (e.defaultPrevented) return;
       if (t && (t.closest("input, select, textarea, [contenteditable]") || e.metaKey || e.ctrlKey || e.altKey)) return;
       const step = e.shiftKey ? 10 : 1;
       const next =

@@ -48,6 +48,16 @@ export interface CostParts {
   totalUsd: number;
 }
 
+/** Tokens and cost of a group of Sessions: one Session, its subagents, or both. */
+export interface SessionTotal {
+  sessions: number;
+  calls: number;
+  tokens: TokenParts;
+  cost: CostParts;
+  /** Calls with Usage but no price. */
+  unpricedCalls: number;
+}
+
 export interface SessionSummary extends SessionKey {
   parentId?: string;
   /** The user's own title, else the harness's. */
@@ -76,6 +86,11 @@ export interface SessionSummary extends SessionKey {
   issues: Partial<Record<CallIssue["kind"], number>>;
   /** The last event is recent (`QueryOptions.liveWindowMs`). */
   live: boolean;
+  /**
+   * `main`: this Session's own Calls (as `tokens` and `cost`); `subagents`: its subagents at any depth; `all`:
+   * both. The session list sorts by `all` cost.
+   */
+  totals: { main: SessionTotal; subagents: SessionTotal; all: SessionTotal };
   /** Subagent Sessions, in `listSessions` only (on main Sessions). */
   subagents?: SessionSummary[];
 }
@@ -476,6 +491,11 @@ export interface ToolOutput extends Lifetime {
   /** The Calls (by index) its result stayed in. */
   firstCall?: number;
   lastCall?: number;
+  /**
+   * The ToolCall's own Block (the tool use the model wrote: its input) over the Calls that sent it back as input;
+   * absent when no Call holds it.
+   */
+  toolCall?: Lifetime & { blockHash: string; basis?: TokenBasis };
 }
 
 /** Why the cache read dropped: the first that fits, in this order. */
