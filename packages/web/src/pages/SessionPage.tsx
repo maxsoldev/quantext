@@ -465,12 +465,16 @@ function Scrubber({
   );
 }
 
-/** Arrow keys anywhere on the page (not while typing or on the slider, which has its own) move the selected Call. */
+/**
+ * Arrow keys anywhere on the page (not while typing or on the slider, which has its own) move the selected Call.
+ * A key an element already handled (`preventDefault`, as a strip's segments do) is left alone.
+ */
 function usePlaceKeys(place: number, last: number, select: (p: number) => void, on: boolean) {
   useEffect(() => {
     if (!on) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
+      if (e.defaultPrevented) return;
       if (t && (t.closest("input, select, textarea, [contenteditable]") || e.metaKey || e.ctrlKey || e.altKey)) return;
       const step = e.shiftKey ? 10 : 1;
       const next =

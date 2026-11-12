@@ -88,6 +88,47 @@ describe("what changed at a Call, drawn as two strips", () => {
   });
 });
 
+describe("small blocks next to each other", () => {
+  // 1,000 tokens: 1 % is 10 tokens. Five small reminders, a big file, two small user texts, one small tool result.
+  const small = (p: number, t: number, category: ContextBlock["category"] = "injected-context") =>
+    block(p, t, `h${p}`, { category, kind: category === "user" ? "user" : "reminder" });
+  const blocks = [
+    small(0, 2),
+    small(1, 3),
+    small(2, 4),
+    small(3, 1),
+    small(4, 5),
+    small(5, 900, "injected-context"),
+    small(6, 3, "user"),
+    small(7, 2, "user"),
+    small(8, 80, "user"),
+  ];
+  const one = ctx(1, blocks, 0);
+  const v = diffView(one, one, diff({ previous: 0 }));
+
+  test("of the same state and category merge into one segment, with their blocks and tokens", () => {
+    expect(v.now.segments.map((s) => [s.blocks.map((b) => b.position), s.tokens])).toEqual([
+      [[0, 1, 2, 3, 4], 15],
+      [[5], 900],
+      [[6, 7], 5],
+      [[8], 80],
+    ]);
+    expect(v.now.segments[0]).toMatchObject({ left: 0, width: 1.5, status: "kept", category: "injected-context" });
+    expect(v.now.segments[2]).toMatchObject({ left: 91.5, width: 0.5 });
+  });
+
+  test("do not merge across a change of state", () => {
+    const d = diff({ previous: 0, added: [blocks[2] as ContextBlock], firstChange: 2 });
+    const w = diffView(one, one, d);
+    expect(w.now.segments.slice(0, 3).map((s) => [s.status, s.blocks.length])).toEqual([
+      ["kept", 2],
+      ["added", 1],
+      ["kept", 2],
+    ]);
+    expect(w.now.firstChange).toBe(0.5);
+  });
+});
+
 describe("the cache breaks of a lane, from one call", () => {
   const b = (index: number, reason: CacheBreak["reason"]) => ({ index, reason }) as CacheBreak;
   const breaks = [b(4, "ttl"), b(9, "compaction"), b(12, "ttl"), b(20, "prefix-change")];

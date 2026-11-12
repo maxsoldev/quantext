@@ -4,6 +4,7 @@
  * says why the cache broke and what to do about it.
  */
 import type { CacheBreak, CallContext, ContextBlock, ContextDiff, SessionKey } from "@quantext/shared";
+import type { KeyboardEvent } from "react";
 import { useMemo, useState } from "react";
 import { BlockPanel } from "../context/BlockPanel.tsx";
 import { CATEGORY_LABEL } from "../context/categories.ts";
@@ -15,7 +16,7 @@ import { BREAK_REASONS } from "../teach/cacheBreaks.ts";
 import { Term } from "../teach/Term.tsx";
 import { Tokens } from "../ui/Num.tsx";
 import type { Load } from "../ui/useLoad.ts";
-import type { ChangeStatus, DiffView, Strip } from "./model.ts";
+import type { ChangeStatus, DiffView, Strip, StripSegment } from "./model.ts";
 import { breakSummary, diffView } from "./model.ts";
 
 const STATUS_LABEL: Record<ChangeStatus, string> = {
@@ -214,19 +215,53 @@ function Strips({ d, view }: { d: ContextDiff; view: DiffView }) {
 }
 
 function StripRow({ label, strip, testId }: { label: string; strip: Strip; testId: string }) {
+  const [active, setActive] = useState(0);
+  const at = Math.min(active, Math.max(0, strip.segments.length - 1));
+  // One tab stop per strip; the arrow keys, Home and End move between its segments (each shows its tooltip).
+  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const last = strip.segments.length - 1;
+    const next =
+      e.key === "ArrowRight"
+        ? Math.min(last, at + 1)
+        : e.key === "ArrowLeft"
+          ? Math.max(0, at - 1)
+          : e.key === "Home"
+            ? 0
+            : e.key === "End"
+              ? last
+              : undefined;
+    if (next === undefined) return;
+    e.preventDefault();
+    setActive(next);
+    e.currentTarget.querySelectorAll<HTMLElement>(".diff-seg")[next]?.focus();
+  };
   return (
     <div className="diff-row">
       <span className="diff-label num">{label}</span>
-      <div className="diff-strip" data-testid={testId}>
-        {strip.segments.map((s) => (
-          <span
-            key={s.block.position}
-            className={`diff-seg ${s.status === "kept" ? (s.rewritten ? "diff-rewritten" : "diff-kept") : `cat-${s.category}`}${s.status === "moved" ? " diff-moved" : ""}`}
-            style={{ left: `${s.left}%`, width: `${s.width}%` }}
-            data-status={s.status}
-            data-tip={`${STATUS_LABEL[s.status]}${s.rewritten ? ", written to the cache again" : ""}: ${KIND_LABEL[s.block.kind]} ${sourceLabel(s.block.source)}\nPosition ${s.block.position}, ${tokens(s.block.tokens ?? 0)} tokens\n${CATEGORY_LABEL[s.category]}`}
-          />
-        ))}
+      <div
+        className="diff-strip"
+        data-testid={testId}
+        role="toolbar"
+        aria-label={`${label}: its blocks in order. Arrow keys move between them.`}
+        onKeyDown={onKey}
+      >
+        {strip.segments.map((s, i) => {
+          const tip = segmentTip(s);
+          return (
+            <button
+              type="button"
+              key={s.block.position}
+              className={`diff-seg ${s.status === "kept" ? (s.rewritten ? "diff-rewritten" : "diff-kept") : `cat-${s.category}`}${s.status === "moved" ? " diff-moved" : ""}`}
+              style={{ left: `${s.left}%`, width: `${s.width}%` }}
+              data-status={s.status}
+              data-blocks={s.blocks.length}
+              data-tip={tip}
+              aria-label={tip}
+              tabIndex={i === at ? 0 : -1}
+              onFocus={() => setActive(i)}
+            />
+          );
+        })}
         {strip.cachedTo > 0 && <span className="diff-cached" style={{ left: `${strip.cachedTo}%` }} />}
         {strip.firstChange !== undefined && (
           <span
@@ -239,6 +274,24 @@ function StripRow({ label, strip, testId }: { label: string; strip: Strip; testI
       </div>
     </div>
   );
+}
+
+/** A segment's tooltip: the Block's name, category and tokens; for a merged run, its Blocks (the first few). */
+function segmentTip(s: StripSegment): string {
+  const state = `${STATUS_LABEL[s.status]}${s.rewritten ? ", written to the cache again" : ""}`;
+  const name = (b: ContextBlock) => [KIND_LABEL[b.kind], sourceLabel(b.source)].filter(Boolean).join(" ");
+  if (s.blocks.length === 1) {
+    return `${name(s.block)}\n${CATEGORY_LABEL[s.category]}, ${tokens(s.tokens)} tokens\n${state}, position ${s.block.position}`;
+  }
+  const shown = s.blocks.slice(0, 6).map((b) => `  ${name(b)}: ${tokens(b.tokens ?? 0)}`);
+  const more = s.blocks.length - shown.length;
+  return [
+    `${s.blocks.length} small blocks, ${tokens(s.tokens)} tokens`,
+    `${CATEGORY_LABEL[s.category]}`,
+    `${state}, positions ${s.block.position} to ${s.blocks.at(-1)?.position}`,
+    ...shown,
+    ...(more > 0 ? [`  and ${more} more`] : []),
+  ].join("\n");
 }
 
 function Changes({ d, onOpen }: { d: ContextDiff; onOpen: (o: { block: ContextBlock; call: number }) => void }) {
