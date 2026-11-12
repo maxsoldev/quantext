@@ -354,8 +354,13 @@ describe("qx serve", () => {
     const dataDir = tempDir("qx-data-");
     const run = start(["--root", root, "--data-dir", dataDir]);
     const file = await engineFile(dataDir);
+    await until(async () => (await get(file.port, "/api/v1/sessions")).json<{ total: number }>().total > 0, "ingest");
+    const [key] = (await get(file.port, "/api/v1/sessions")).json<{ items: { log: number; id: string }[] }>().items;
+    // The query worker runs, and stops quietly with the engine.
+    expect((await get(file.port, `/api/v1/sessions/${key?.log}/${key?.id}/blocks?limit=1`)).status).toBe(200);
     run.stop();
     expect(await run.done).toBe(EXIT.ok);
+    expect(run.err()).toBe("");
     expect(existsSync(join(dataDir, "engine.json"))).toBe(false);
     await expect(get(file.port, "/health")).rejects.toThrow();
     const store = await openStore({ dataDir });

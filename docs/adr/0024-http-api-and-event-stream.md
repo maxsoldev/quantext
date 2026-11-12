@@ -28,7 +28,7 @@ reconnects after sleep or a network change and must not miss a Call.
   `Access-Control-*`. Pages get `default-src 'self'` with no inline script, `style-src 'self'` (the viewer uses CSS files, no
   injected styles), `img-src 'self' data: blob:` (images the viewer makes itself) and `frame-ancestors 'none'`; every
   other response `default-src 'none'; sandbox`. API: `no-store`. Files under `assets/`: immutable; others
-  `no-cache`. A Block and its media: `no-cache` with an ETag of its log and hash
+  `no-cache`. A Block and its media: `no-cache` with an ETag of its log, hash and the engine version
   (304 when it matches); in demo mode the tag also holds `demo` and the change cursor, so demo and normal answers
   never share a cache entry. Media: PNG, JPEG, GIF and WebP inline, anything else as an `attachment` download.
 - **Slow routes off the event loop.** `blocks` and `tool-outputs` price every Block over every Call of a Session

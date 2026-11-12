@@ -251,6 +251,7 @@ describe("caching of Blocks and media", () => {
     for (const path of [`/api/v1/blocks/${image.log}/${hash}`, `/api/v1/blocks/${image.log}/${hash}/media/${media}`]) {
       const first = await get(port, path);
       const tag = String(first.headers.etag);
+      expect(tag).toContain(".0.0.0-test"); // another engine version may show a Block otherwise
       expect([path, first.headers["cache-control"], tag]).toEqual([
         path,
         "no-cache",

@@ -3,7 +3,7 @@
  * held in an exclusive transaction for as long as the store is open. The OS releases it when the process ends,
  * also when it is killed, so there is no stale lock and no pid check. The pid file only tells who holds it.
  */
-import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { RawDatabase } from "./driver.ts";
 import { openRaw } from "./driver.ts";
 
@@ -32,7 +32,6 @@ export async function acquireLock(path: string, pidPath: string): Promise<Lock> 
     db = await hold(path, pidPath);
   }
   writeFileSync(pidPath, String(process.pid), { mode: 0o600 });
-  if (process.platform !== "win32") chmodSync(path, 0o600);
   return {
     release() {
       rmSync(pidPath, { force: true });
@@ -42,7 +41,18 @@ export async function acquireLock(path: string, pidPath: string): Promise<Lock> 
   };
 }
 
+/**
+ * Make a database file the user's alone before SQLite opens it: SQLite gives its journal, WAL and shared-memory
+ * files the mode of their database. A missing file is made empty (an empty file is an empty database).
+ */
+export function privateFile(path: string): void {
+  if (process.platform === "win32") return;
+  if (existsSync(path)) chmodSync(path, 0o600);
+  else writeFileSync(path, "", { mode: 0o600 });
+}
+
 async function hold(path: string, pidPath: string): Promise<RawDatabase> {
+  privateFile(path);
   const db = await openRaw(path);
   try {
     db.exec("PRAGMA busy_timeout = 0");

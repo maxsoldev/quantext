@@ -112,10 +112,14 @@ export function createApi(options: ApiOptions): Api {
     streams: events.clients(),
   });
   /**
-   * A Block's content never changes under its hash; demo mode's redaction can, when the store's projects do. So
+   * A Block's content never changes under its hash and engine version; demo mode's redaction can, when the store's projects do. So
    * a demo tag also holds the change cursor, and a demo tag never equals a plain one: no cache entry is shared.
    */
-  const etagOf = (tag: string) => (info.demo ? `"${tag}.demo.${query.changeCursor()}"` : `"${tag}"`);
+  const etagOf = (tag: string) => {
+    // The engine's version too: another version may show the same content differently.
+    const base = `${tag}.${info.version.replace(/[^\w.-]/g, "_")}`;
+    return info.demo ? `"${base}.demo.${query.changeCursor()}"` : `"${base}"`;
+  };
   let port = 0;
   let lastActive = now();
   const sockets = new Set<Socket>();

@@ -22,11 +22,22 @@ describe("opening the store", () => {
   test.skipIf(process.platform === "win32")("makes a new data folder and its files private to the user", async () => {
     const dataDir = join(tempDir("qx-parent-"), "new", ".quantext");
     const store = await openStore({ dataDir });
-    store.db.exec("CREATE TEMP TABLE t (x)"); // the WAL files exist once written
+    store.db.exec("CREATE TABLE t (x)"); // the WAL files exist once written
     const mode = (path: string) => statSync(path).mode & 0o777;
     expect(mode(dataDir)).toBe(0o700);
-    for (const name of ["quantext.db", "writer.lock", "writer.pid"])
+    // SQLite makes its journal, WAL and shared-memory files with the mode of their database.
+    const files = [
+      "quantext.db",
+      "quantext.db-wal",
+      "quantext.db-shm",
+      "writer.lock",
+      "writer.lock-journal",
+      "writer.pid",
+    ];
+    for (const name of files.filter((f) => existsSync(join(dataDir, f)))) {
       expect([name, mode(join(dataDir, name))]).toEqual([name, 0o600]);
+    }
+    expect(existsSync(join(dataDir, "quantext.db-wal"))).toBe(true);
     store.close();
   });
 
