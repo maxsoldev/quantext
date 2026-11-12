@@ -424,3 +424,83 @@ button.link:focus-visible {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Finding a block, and the parts of a block: attached texts, indented under it. */
+.block-find {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--rule);
+}
+.block-find input {
+  flex: 0 1 360px;
+  min-width: 0;
+  font: inherit;
+  padding: 6px var(--space-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  color: var(--ink);
+}
+.block-find input:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 0;
+}
+.part-row {
+  background: var(--surface);
+}
+.part-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  height: 100%;
+}
+.part-main {
+  flex: 1 1 auto;
+  padding-left: var(--space-4);
+}
+/* A tree line from the block down to its part. */
+.part-branch {
+  align-self: flex-start;
+  width: 12px;
+  height: 50%;
+  flex: none;
+  border-left: 2px solid var(--rule-strong);
+  border-bottom: 2px solid var(--rule-strong);
+  border-bottom-left-radius: 4px;
+}
+.part-label {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.part-cache {
+  font-weight: 500;
+  color: var(--ink-3);
+}
+.cat-sub th {
+  padding-left: calc(10px + var(--space-2));
+  color: var(--ink-2);
+  font-size: var(--t-small);
+}
+.cat-sub td {
+  font-size: var(--t-small);
+}
+.part-text {
+  display: block;
+}
+.part-head {
+  display: block;
+  margin: var(--space-3) 0 var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--rule);
+  font-family: var(--font-ui);
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.part-text:first-child .part-head {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}

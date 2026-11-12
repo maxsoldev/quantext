@@ -1,6 +1,6 @@
 import type { CallContext, ContextBlock } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
-import { hiddenPart, listRows, sourceLabel } from "./model.ts";
+import { blockSource, hiddenPart, listRows, sourceLabel } from "./model.ts";
 
 const block = (position: number, section: ContextBlock["section"], tokens: number, extra: Partial<ContextBlock> = {}) =>
   ({
@@ -37,6 +37,61 @@ describe("the rows of a Call's block list", () => {
       2,
       3,
     ]);
+  });
+});
+
+describe("the parts of a block", () => {
+  const part = (label: string, tokens: number, preview = "") => ({
+    label,
+    source: { attachment: label.toLowerCase() },
+    start: 0,
+    end: 1,
+    tokens,
+    basis: "estimate" as const,
+    preview,
+    chars: 1,
+    truncated: false,
+  });
+  const merged = block(2, "messages", 45, {
+    kind: "system",
+    preview: "# Environment",
+    parts: [part("Environment", 15), part("Skill listing", 30, "The following skills are available")],
+  });
+  const rowsOf = (c: CallContext, find?: string) =>
+    listRows(c, find).map((r) =>
+      r.type === "section" ? `# ${r.section}` : r.type === "part" ? `  ${r.part.label}` : r.block.position,
+    );
+
+  test("follow their block as rows of their own, when it has more than one", () => {
+    const single = block(3, "messages", 0, { parts: [part("Date", 0)] });
+    expect(rowsOf(ctx([block(0, "tools", 30), merged, single]))).toEqual([
+      "# tools",
+      0,
+      "# messages",
+      2,
+      "  Environment",
+      "  Skill listing",
+      3,
+    ]);
+  });
+
+  test("a search keeps the blocks whose kind, source, preview or part matches, with only the parts that match", () => {
+    const read = block(4, "messages", 0, { kind: "tool-result", source: { tool: "Read", filePath: "skills.md" } });
+    const c = ctx([block(0, "tools", 30, { preview: "Bash" }), merged, read]);
+    expect(rowsOf(c, "SKILL")).toEqual(["# messages", 2, "  Skill listing", 4]);
+    expect(rowsOf(c, "environment")).toEqual(["# messages", 2, "  Environment"]);
+    expect(rowsOf(c, "tool schema")).toEqual(["# tools", 0]);
+    expect(rowsOf(c, "nothing like it")).toEqual([]);
+  });
+
+  test("a block that one attached text is all of is named by its part, one with several by their number", () => {
+    expect(blockSource(merged)).toBe("2 attached texts");
+    expect(blockSource(block(3, "messages", 0, { source: { attachment: "date" }, parts: [part("Date", 0)] }))).toBe(
+      "Date",
+    );
+    expect(blockSource(block(3, "messages", 0, { source: { tool: "Read", filePath: "a", attachment: "file" } }))).toBe(
+      "Read a",
+    );
   });
 });
 

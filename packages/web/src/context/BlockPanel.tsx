@@ -14,17 +14,20 @@ import { Tokens } from "../ui/Num.tsx";
 import { useLoad } from "../ui/useLoad.ts";
 import { CATEGORY_LABEL } from "./categories.ts";
 import { KIND_EXPLAIN, KIND_LABEL, SECTION } from "./kinds.ts";
-import { sourceLabel } from "./model.ts";
+import { blockSource } from "./model.ts";
 
 export function BlockPanel({
   log,
   block,
   call,
+  part,
   onClose,
 }: {
   log: number;
   block: ContextBlock;
   call: number;
+  /** The start of a part to scroll to. */
+  part?: number | undefined;
   onClose: () => void;
 }) {
   const hash = block.hash;
@@ -47,7 +50,13 @@ export function BlockPanel({
     if (route.page === "session") navigate({ ...route, call: n }, { replace: true });
   };
   const d = detail.value;
-  const source = sourceLabel(block.source);
+  const source = blockSource(block);
+  const parts = (block.parts?.length ?? 0) > 1 ? (block.parts ?? []) : [];
+  const text = useRef<HTMLPreElement>(null);
+  useEffect(() => {
+    if (part === undefined || !d) return;
+    text.current?.querySelector(`[data-part-start="${part}"]`)?.scrollIntoView({ block: "start" });
+  }, [part, d]);
   return (
     <aside className="block-panel" aria-labelledby="block-title" data-testid="block-panel">
       <div className="block-panel-head">
@@ -131,8 +140,18 @@ export function BlockPanel({
                 </figcaption>
               </figure>
             ))}
-            <pre className="content block-text" data-testid="block-text">
-              {d.text}
+            <pre className="content block-text" data-testid="block-text" ref={text}>
+              {parts.length === 0
+                ? d.text
+                : parts.map((p) => (
+                    <span key={p.start} className="part-text" data-part-start={p.start}>
+                      <span className="part-head">
+                        {p.label}
+                        {p.tokens !== undefined && `, ${tokens(p.tokens)} tokens (estimate)`}
+                      </span>
+                      {d.text.slice(p.start, p.end)}
+                    </span>
+                  ))}
             </pre>
             <details className="block-raw">
               <summary>As sent to the provider</summary>

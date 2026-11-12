@@ -55,10 +55,25 @@ export const TERMS: readonly Term[] = [
     term: "Deferred tools and ToolSearch",
     short: "Tool schemas that are sent only after the model asks for them.",
     body:
-      "A harness with many tools (MCP servers, for example) does not send all their schemas. It lists only their " +
-      "names, and gives the model a ToolSearch tool. When the model needs one, ToolSearch loads its schema, and " +
+      "A harness with many tools (MCP servers, for example) does not send all their schemas. It sends only their " +
+      "names, in a list of injected context sent on every call, and gives the model a ToolSearch tool. When the model needs one, ToolSearch loads its schema, and " +
       "from that call on the schema is sent in the messages. This keeps the hidden part small.",
     where: { label: "Blocks marked Deferred in the block list", view: "context", selector: ".tag.deferred" },
+  },
+  {
+    id: "skill-listing",
+    term: "Skill listing",
+    short: "The list of skills the model may load: sent as injected context on every call.",
+    body:
+      "The harness tells the model which skills it can load: the name and a short description of each. Only the " +
+      "list is sent; the text of a skill comes in when the model loads it. The list sits in the first message, so " +
+      "every later call sends it again, mostly read from the cache. Each installed skill adds to it, used or not. " +
+      "The deferred tools list works the same way for tool names.",
+    where: {
+      label: "The Skill listing row under its block in the block list",
+      view: "context",
+      selector: '[data-part="Skill listing"]',
+    },
   },
   {
     id: "prompt-cache",

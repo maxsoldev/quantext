@@ -1,23 +1,52 @@
 /** Shaping a Call's context for the viewer: the rows of its block list, its hidden part, a Block's source in words. */
-import type { BlockSource, CallContext, ContextBlock, RequestSection } from "@quantext/shared";
+import type { BlockSource, CallContext, ContextBlock, ContextPart, RequestSection } from "@quantext/shared";
+import { KIND_LABEL } from "./kinds.ts";
 
 export type Row =
   | { type: "section"; section: RequestSection; tokens: number; blocks: number }
-  | { type: "block"; block: ContextBlock };
+  | { type: "block"; block: ContextBlock }
+  | { type: "part"; block: ContextBlock; part: ContextPart };
 
 const ORDER: readonly RequestSection[] = ["tools", "system", "messages"];
 
-/** The sections in request order, each with a header row; the framing tokens go last, with the messages. */
-export function listRows(ctx: CallContext): Row[] {
+/**
+ * The sections in request order, each with a header row, then its blocks, each followed by its parts when it has
+ * more than one; the framing tokens go last, with the messages. `find` keeps the blocks whose kind, source,
+ * preview or part matches (case does not count), with only the parts that match when any does.
+ */
+export function listRows(ctx: CallContext, find = ""): Row[] {
+  const needle = find.trim().toLowerCase();
+  const has = (...texts: string[]) => texts.some((t) => t.toLowerCase().includes(needle));
+  const blockRows = (block: ContextBlock): Row[] => {
+    const parts = (block.parts?.length ?? 0) > 1 ? (block.parts ?? []) : [];
+    const own = has(KIND_LABEL[block.kind], blockSource(block), block.preview);
+    const hits = needle === "" ? parts : parts.filter((p) => has(p.label, p.preview));
+    if (needle !== "" && !own && hits.length === 0) return [];
+    const shown = hits.length > 0 ? hits : parts;
+    return [{ type: "block", block }, ...shown.map((part): Row => ({ type: "part", block, part }))];
+  };
   const rows: Row[] = [];
   for (const section of ORDER) {
     const blocks = ctx.blocks.filter((b) => b.section === section);
-    if (blocks.length === 0) continue;
-    rows.push({ type: "section", section, tokens: ctx.sections[section], blocks: blocks.length });
-    for (const block of blocks) rows.push({ type: "block", block });
+    const shown = blocks.flatMap(blockRows);
+    if (shown.length === 0) continue;
+    rows.push({ type: "section", section, tokens: ctx.sections[section], blocks: blocks.length }, ...shown);
   }
-  for (const block of ctx.blocks.filter((b) => b.section === "framing")) rows.push({ type: "block", block });
+  for (const block of ctx.blocks.filter((b) => b.section === "framing")) rows.push(...blockRows(block));
   return rows;
+}
+
+/**
+ * A block's source in words: by its part when one attached text is all of it and the log tells nothing finer, or
+ * the number of attached texts it holds.
+ */
+export function blockSource(b: ContextBlock): string {
+  const s = sourceLabel(b.source);
+  const parts = b.parts ?? [];
+  const [only] = parts;
+  if (parts.length === 1 && only !== undefined && s === (b.source.attachment ?? "")) return only.label;
+  const attached = parts.filter((p) => p.source.attachment !== undefined).length;
+  return s === "" && parts.length > 1 ? `${attached} attached texts` : s;
 }
 
 /** The tool schemas and the system prompt: sent before the first message, never shown in the chat. */

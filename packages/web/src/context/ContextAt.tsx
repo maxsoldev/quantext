@@ -3,10 +3,12 @@
  * by category, with the hidden part and the end of the cached prefix marked), the totals by category, and the
  * ordered block list by section. Opening a Block shows all of its content.
  */
-import type { CallContext, ContextBlock, SessionKey } from "@quantext/shared";
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { CallContext, ContextBlock, ContextPart, SessionKey } from "@quantext/shared";
+import type { KeyboardEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { percent, shortModel, tokens, usd, when } from "../format/format.ts";
 import { callNumber } from "../route.ts";
+import { partTeach } from "../teach/parts.ts";
 import { Term } from "../teach/Term.tsx";
 import { Tokens } from "../ui/Num.tsx";
 import type { Load } from "../ui/useLoad.ts";
@@ -15,9 +17,11 @@ import { BlockPanel } from "./BlockPanel.tsx";
 import { CATEGORIES, CATEGORY_LABEL } from "./categories.ts";
 import { KIND_EXPLAIN, KIND_LABEL, SECTION } from "./kinds.ts";
 import type { Row } from "./model.ts";
-import { barSegments, hiddenPart, listRows, sourceLabel } from "./model.ts";
+import { barSegments, blockSource, hiddenPart, listRows } from "./model.ts";
 
 const ROW = 48;
+/** The label of text in a block that no attached text accounts for. */
+const OTHER_PART = "Other text";
 
 /** `ctx` is loaded by the page, which shares it with the diff card. */
 export function ContextAt({
@@ -35,6 +39,11 @@ export function ContextAt({
   onOpened?: () => void;
 }) {
   const [open, setOpen] = useState<ContextBlock | null>(null);
+  const [openPart, setOpenPart] = useState<number | undefined>(undefined);
+  const openBlock = (b: ContextBlock, part?: number) => {
+    setOpen(b);
+    setOpenPart(part);
+  };
   const [selected, setSelected] = useState<number | null>(null);
   const c = ctx.value;
   useEffect(() => {
@@ -64,9 +73,9 @@ export function ContextAt({
       <ContextHead ctx={c} />
       {c.rebuilt ? (
         <>
-          <ContextBar ctx={c} selected={selected} onPick={(b) => setSelected(b.position)} onOpen={setOpen} />
+          <ContextBar ctx={c} selected={selected} onPick={(b) => setSelected(b.position)} onOpen={openBlock} />
           <div className="context-body">
-            <BlockList ctx={c} selected={selected} onSelect={setSelected} onOpen={setOpen} />
+            <BlockList ctx={c} selected={selected} onSelect={setSelected} onOpen={openBlock} />
             <CategoryTable ctx={c} />
           </div>
         </>
@@ -79,7 +88,15 @@ export function ContextAt({
           </p>
         </div>
       )}
-      {open && <BlockPanel log={sessionKey.log} block={open} call={c.call.index} onClose={() => setOpen(null)} />}
+      {open && (
+        <BlockPanel
+          log={sessionKey.log}
+          block={open}
+          call={c.call.index}
+          part={openPart}
+          onClose={() => setOpen(null)}
+        />
+      )}
     </section>
   );
 }
@@ -154,7 +171,7 @@ function ContextBar({
           const t = seg.blocks.reduce((n, x) => n + (x.tokens ?? 0), 0);
           const what =
             seg.blocks.length === 1
-              ? `${KIND_LABEL[first.kind]} ${sourceLabel(first.source)}`
+              ? `${KIND_LABEL[first.kind]} ${blockSource(first)}`
               : `${seg.blocks.length} small blocks, positions ${first.position} to ${seg.blocks.at(-1)?.position}`;
           return (
             <button
@@ -196,6 +213,8 @@ function ContextBar({
 function CategoryTable({ ctx }: { ctx: CallContext }) {
   const total = Math.max(1, ctx.totalTokens);
   const rows = CATEGORIES.map((c) => ({ ...c, tokens: ctx.categories[c.key] })).filter((r) => r.tokens > 0);
+  const subRows = (key: string) =>
+    ctx.partTotals.filter((p) => p.category === key && p.tokens > 0 && p.label !== OTHER_PART);
   return (
     <table className="cat-table" aria-label="Tokens by category">
       <thead>
@@ -211,23 +230,34 @@ function CategoryTable({ ctx }: { ctx: CallContext }) {
       </thead>
       <tbody>
         {rows.map((r) => (
-          <tr key={r.key}>
-            <th scope="row">
-              <button type="button" className="tip-anchor legend-item" data-tip={r.explain}>
-                <span className={`swatch cat-${r.key}`} aria-hidden="true" />
-                {r.label}
-              </button>
-            </th>
-            <td className="right num">{tokens(r.tokens)}</td>
-            <td className="right">
-              <span className="share">
-                <span className="num">{percent(r.tokens / total)}</span>
-                <span className="share-track">
-                  <span className={`share-fill cat-${r.key}`} style={{ width: `${(100 * r.tokens) / total}%` }} />
+          <Fragment key={r.key}>
+            <tr>
+              <th scope="row">
+                <button type="button" className="tip-anchor legend-item" data-tip={r.explain}>
+                  <span className={`swatch cat-${r.key}`} aria-hidden="true" />
+                  {r.label}
+                </button>
+              </th>
+              <td className="right num">{tokens(r.tokens)}</td>
+              <td className="right">
+                <span className="share">
+                  <span className="num">{percent(r.tokens / total)}</span>
+                  <span className="share-track">
+                    <span className={`share-fill cat-${r.key}`} style={{ width: `${(100 * r.tokens) / total}%` }} />
+                  </span>
                 </span>
-              </span>
-            </td>
-          </tr>
+              </td>
+            </tr>
+            {subRows(r.key).map((p) => (
+              <tr key={p.label} className="cat-sub" data-testid="part-total">
+                <th scope="row">{p.label}</th>
+                <td className="right">
+                  <Tokens n={p.tokens} basis="estimate" note={`Estimated: part of ${r.label}.`} />
+                </td>
+                <td className="right num muted">{percent(p.tokens / total)}</td>
+              </tr>
+            ))}
+          </Fragment>
         ))}
       </tbody>
     </table>
@@ -243,24 +273,44 @@ function BlockList({
   ctx: CallContext;
   selected: number | null;
   onSelect: (position: number) => void;
-  onOpen: (b: ContextBlock) => void;
+  onOpen: (b: ContextBlock, part?: number) => void;
 }) {
-  const rows = useMemo(() => listRows(ctx), [ctx]);
+  const [find, setFind] = useState("");
+  const rows = useMemo(() => listRows(ctx, find), [ctx, find]);
   const scroller = useRef<HTMLDivElement>(null);
   const w = useWindow(scroller, rows.length, ROW);
   const totalCost = ctx.blocks.reduce((a, b) => a + (b.costUsd ?? 0), 0);
   const total = Math.max(1, ctx.totalTokens);
+  const matched = rows.filter((r) => r.type === "block").length;
   const move = (from: number, delta: number) => {
     let i = from + delta;
-    while (i >= 0 && i < rows.length && rows[i]?.type !== "block") i += delta;
+    while (i >= 0 && i < rows.length && rows[i]?.type === "section") i += delta;
     const row = rows[i];
-    if (row?.type !== "block") return;
+    if (row === undefined || row.type === "section") return;
     w.reveal(i);
     onSelect(row.block.position);
     requestAnimationFrame(() => scroller.current?.querySelector<HTMLElement>(`[data-i="${i}"]`)?.focus());
   };
   return (
     <div className="block-list" data-testid="block-list">
+      <div className="block-find">
+        <input
+          type="search"
+          value={find}
+          onChange={(e) => setFind(e.target.value)}
+          onKeyDown={(e) => e.stopPropagation()}
+          placeholder="Find a block by kind, source or text"
+          aria-label="Find a block"
+          data-testid="block-find"
+        />
+        {find.trim() !== "" && (
+          <span className="muted" role="status">
+            {matched === 0
+              ? `No block matches “${find.trim()}”.`
+              : `${matched} of ${ctx.blocks.length} ${ctx.blocks.length === 1 ? "block" : "blocks"}`}
+          </span>
+        )}
+      </div>
       <div className="block-list-head" aria-hidden="true">
         <span>#</span>
         <span>Block</span>
@@ -272,9 +322,22 @@ function BlockList({
         <div style={{ height: w.before }} />
         {rows.slice(w.start, w.end).map((row, k) => {
           const i = w.start + k;
-          return row.type === "section" ? (
-            <SectionRow key={`s-${row.section}`} row={row} total={total} />
-          ) : (
+          if (row.type === "section") return <SectionRow key={`s-${row.section}`} row={row} total={total} />;
+          if (row.type === "part") {
+            return (
+              <PartRow
+                key={`${row.block.position}-${row.part.start}`}
+                b={row.block}
+                part={row.part}
+                i={i}
+                total={total}
+                onOpen={() => onOpen(row.block, row.part.start)}
+                onKey={(delta) => move(i, delta)}
+                onFocus={() => onSelect(row.block.position)}
+              />
+            );
+          }
+          return (
             <BlockRow
               key={row.block.position}
               b={row.block}
@@ -290,6 +353,75 @@ function BlockList({
         })}
         <div style={{ height: w.after }} />
       </div>
+    </div>
+  );
+}
+
+/** Arrow keys step through the rows, as in the block rows. */
+function arrows(onKey: (delta: number) => void) {
+  return (e: KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      e.stopPropagation();
+      onKey(e.key === "ArrowDown" ? 1 : -1);
+    }
+  };
+}
+
+/** One attached text of a block, indented under it: its label, its estimated share and the block's cache state. */
+function PartRow({
+  b,
+  part,
+  i,
+  total,
+  onOpen,
+  onKey,
+  onFocus,
+}: {
+  b: ContextBlock;
+  part: ContextPart;
+  i: number;
+  total: number;
+  onOpen: () => void;
+  onKey: (delta: number) => void;
+  onFocus: () => void;
+}) {
+  const teach = partTeach(part.label, part.tokens);
+  return (
+    <div className="block-row part-row" data-testid="part-row" data-part={part.label}>
+      <span aria-hidden="true" />
+      <div className="part-cell">
+        <button
+          type="button"
+          className="block-main part-main"
+          data-i={i}
+          onClick={onOpen}
+          onFocus={onFocus}
+          onKeyDown={arrows(onKey)}
+          aria-label={`Open block ${b.position}, part ${part.label}`}
+          {...(teach ? { "data-tip": teach.tip } : {})}
+        >
+          <span className="part-branch" aria-hidden="true" />
+          <span className="part-label">{part.label}</span>
+          <span className="preview">{part.preview}</span>
+        </button>
+        {teach && <Term id={teach.term} />}
+      </div>
+      <span className="right">
+        {part.tokens !== undefined && part.basis ? (
+          <Tokens
+            n={part.tokens}
+            basis={part.basis}
+            note={`${percent(part.tokens / total)} of the input. Its share of block ${b.position}, by characters.`}
+          />
+        ) : (
+          <span className="muted">none</span>
+        )}
+      </span>
+      <span className={b.inCachedPrefix ? "cache-tag cached part-cache" : "cache-tag new part-cache"}>
+        {b.inCachedPrefix ? "Cached" : "New"}
+      </span>
+      <span aria-hidden="true" />
     </div>
   );
 }
@@ -330,7 +462,7 @@ function BlockRow({
   onKey: (delta: number) => void;
   onFocus: () => void;
 }) {
-  const source = sourceLabel(b.source);
+  const source = blockSource(b);
   const kindTip = KIND_EXPLAIN[b.kind];
   return (
     <div className={selected ? "block-row selected" : "block-row"} data-testid="block-row">
@@ -341,13 +473,7 @@ function BlockRow({
         data-i={i}
         onClick={onOpen}
         onFocus={onFocus}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-            e.preventDefault();
-            e.stopPropagation();
-            onKey(e.key === "ArrowDown" ? 1 : -1);
-          }
-        }}
+        onKeyDown={arrows(onKey)}
         aria-label={`Open block ${b.position}: ${KIND_LABEL[b.kind]} ${source}`}
       >
         <span className={`kind-dot cat-${b.category}`} aria-hidden="true" />
