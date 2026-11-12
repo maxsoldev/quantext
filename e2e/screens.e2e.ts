@@ -54,6 +54,16 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // The last answer of the session: reasoning folded, the text with its line breaks.
+    name: "response",
+    both: true,
+    go: async (page, engine) => {
+      await page.goto(await engine.sessionUrl("basic-tools"));
+      await expect(page.getByTestId("response-text")).toBeVisible();
+      await page.evaluate(`document.getElementById("response-title")?.scrollIntoView({ block: "start" })`);
+    },
+  },
+  {
     name: "block-panel",
     both: false,
     go: async (page, engine) => {
