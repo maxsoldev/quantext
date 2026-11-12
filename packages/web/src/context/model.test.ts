@@ -1,6 +1,6 @@
 import type { CallContext, ContextBlock } from "@quantext/shared";
 import { describe, expect, test } from "vitest";
-import { blockSource, hiddenPart, listRows, sourceLabel } from "./model.ts";
+import { blockSource, hiddenPart, listRows, shareRows, sourceLabel } from "./model.ts";
 
 const block = (position: number, section: ContextBlock["section"], tokens: number, extra: Partial<ContextBlock> = {}) =>
   ({
@@ -144,5 +144,27 @@ describe("the context bar's segments", () => {
       ["user", [4]],
       ["user", [5]],
     ]);
+  });
+});
+
+describe("the token-share table", () => {
+  test("lists the categories with tokens by share, largest first, and the parts in each the same way", () => {
+    const c = {
+      categories: { "tool-definitions": 10, "base-instructions": 40, "injected-context": 25, user: 0, assistant: 25 },
+      partTotals: [
+        { category: "injected-context", label: "Date", tokens: 2 },
+        { category: "injected-context", label: "Skill listing", tokens: 15 },
+        { category: "injected-context", label: "Environment", tokens: 8 },
+      ],
+      totalTokens: 100,
+    } as unknown as CallContext;
+    const rows = shareRows(c);
+    expect(rows.map((r) => `${r.label} ${r.tokens}`)).toEqual([
+      "System prompt 40",
+      "Injected context 25",
+      "Assistant text 25",
+      "Tool definitions 10",
+    ]);
+    expect(rows[1]?.parts.map((p) => p.label)).toEqual(["Skill listing", "Environment", "Date"]);
   });
 });

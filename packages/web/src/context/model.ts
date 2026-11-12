@@ -4,10 +4,14 @@ import type {
   CallContext,
   CallResponseDetail,
   ContextBlock,
+  ContextCategory,
   ContextPart,
+  PartTotal,
   ResponseEntry,
   TokenBasis,
 } from "@quantext/shared";
+import type { Part } from "./categories.ts";
+import { CATEGORIES } from "./categories.ts";
 import type { Collapse, Fold } from "./collapse.ts";
 import { KIND_LABEL } from "./kinds.ts";
 
@@ -138,6 +142,25 @@ export function blockSource(b: ContextBlock): string {
   if (parts.length === 1 && only !== undefined && s === (b.source.attachment ?? "")) return only.label;
   const attached = parts.filter((p) => p.source.attachment !== undefined).length;
   return s === "" && parts.length > 1 ? `${attached} attached texts` : s;
+}
+
+/** The label of text in a block that no attached text accounts for. */
+const OTHER_PART = "Other text";
+
+/**
+ * The token-share table: the categories that hold tokens, largest share first (ties in the categories' order),
+ * each with its part totals the same way, without the text no attached text accounts for.
+ */
+export function shareRows(ctx: CallContext): (Part<ContextCategory> & { tokens: number; parts: PartTotal[] })[] {
+  return CATEGORIES.map((c) => ({
+    ...c,
+    tokens: ctx.categories[c.key] ?? 0,
+    parts: ctx.partTotals
+      .filter((p) => p.category === c.key && p.tokens > 0 && p.label !== OTHER_PART)
+      .sort((a, b) => b.tokens - a.tokens),
+  }))
+    .filter((r) => r.tokens > 0)
+    .sort((a, b) => b.tokens - a.tokens);
 }
 
 /** The tool schemas and the system prompt: sent before the first message, never shown in the chat. */

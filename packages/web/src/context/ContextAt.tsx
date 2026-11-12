@@ -20,7 +20,7 @@ import type { Load } from "../ui/useLoad.ts";
 import type { ListActions } from "./BlockList.tsx";
 import { BlockList } from "./BlockList.tsx";
 import { BlockPanel } from "./BlockPanel.tsx";
-import { CATEGORIES, CATEGORY_LABEL } from "./categories.ts";
+import { CATEGORY_LABEL } from "./categories.ts";
 import type { Collapse } from "./collapse.ts";
 import {
   collapseAll,
@@ -32,10 +32,8 @@ import {
   toggleSection,
 } from "./collapse.ts";
 import { KIND_LABEL } from "./kinds.ts";
-import { barSegments, blockSource, hiddenPart } from "./model.ts";
+import { barSegments, blockSource, hiddenPart, shareRows } from "./model.ts";
 
-/** The label of text in a block that no attached text accounts for. */
-const OTHER_PART = "Other text";
 const STORE = "quantext.context.open";
 
 /** The open sections, kept in localStorage: the same on every call and after a reload. */
@@ -320,9 +318,7 @@ function CategoryTable({
   onCategory: (cat: ContextCategory) => void;
 }) {
   const total = Math.max(1, ctx.totalTokens);
-  const rows = CATEGORIES.map((c) => ({ ...c, tokens: ctx.categories[c.key] })).filter((r) => r.tokens > 0);
-  const subRows = (key: string) =>
-    ctx.partTotals.filter((p) => p.category === key && p.tokens > 0 && p.label !== OTHER_PART);
+  const rows = shareRows(ctx);
   return (
     <table className="cat-table" aria-label="Tokens by category">
       <thead>
@@ -342,7 +338,7 @@ function CategoryTable({
             <tr>
               <th scope="row">
                 <span className="cat-head">
-                  {subRows(r.key).length > 0 && (
+                  {r.parts.length > 0 && (
                     <button
                       type="button"
                       className="part-toggle"
@@ -371,7 +367,7 @@ function CategoryTable({
                 </span>
               </td>
             </tr>
-            {(fold.cats.includes(r.key) ? subRows(r.key) : []).map((p, k) => (
+            {(fold.cats.includes(r.key) ? r.parts : []).map((p, k) => (
               <tr
                 key={p.label}
                 className="cat-sub"
