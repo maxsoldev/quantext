@@ -56,9 +56,6 @@ export interface ServeHooks {
   defaultPort?: number;
   /** How long a start that finds the store locked waits for the other engine to answer (default 5 s). */
   lockWaitMs?: number;
-  /** How long a stop may take (default STOP_TIMEOUT_MS), and how the process ends past it (default process.exit). */
-  stopTimeoutMs?: number;
-  exit?: (code: number) => void;
 }
 
 type Running = { kind: "same"; file: EngineFile } | { kind: "other"; file: EngineFile; version: string };
@@ -203,7 +200,6 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
   } finally {
     clearInterval(idle);
     stopping.abort();
-    const ms = hooks.stopTimeoutMs ?? STOP_TIMEOUT_MS;
     await withDeadline(
       async () => {
         await catchUp.catch(() => undefined); // reported above
@@ -214,12 +210,13 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
         store.close();
         removeEngineFile(dataDir, process.pid);
       },
-      ms,
+      STOP_TIMEOUT_MS,
       () => {
         // A stuck stop still answers /health from memory while file reads never end: the viewer would load forever.
-        hooks.err(`qx: the engine did not stop within ${ms / 1000} s; exiting\n`);
+        hooks.err(`qx: the engine did not stop within ${STOP_TIMEOUT_MS / 1000} s; exiting\n`);
         removeEngineFile(dataDir, process.pid);
-        (hooks.exit ?? process.exit)(1);
+        // Not process.exit: it waits for the thread pool, and a thread blocked in a system call never returns.
+        process.kill(process.pid, "SIGKILL");
       },
     );
   }
