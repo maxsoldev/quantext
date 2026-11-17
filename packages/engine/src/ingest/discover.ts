@@ -88,7 +88,8 @@ export async function logFiles(main: string): Promise<{ files: LogFiles; errors:
       errors.push({ path: dir, error: describe(error) });
       return;
     }
-    const names = new Set(entries.map((e) => e.name));
+    // Regular files only: open() on a FIFO waits for a writer and holds a thread-pool thread for ever.
+    const names = new Set(entries.filter((e) => e.isFile()).map((e) => e.name));
     for (const entry of entries) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) await walk(path);
