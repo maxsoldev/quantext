@@ -34,6 +34,8 @@ export interface WorldOptions {
   /** What each URL answers; one not listed is refused. Once the engine starts: `afterStart`, and an engine.json. */
   http?: Record<string, Answer>;
   afterStart?: Record<string, Answer>;
+  /** What each URL answers once `kill` has run with this signal (`TERM` for a plain `kill`); unset: no change. */
+  afterKill?: Partial<Record<"TERM" | "KILL", Record<string, Answer>>>;
   /** Each command's `--version` output; a command not listed is not on PATH. */
   versions?: Record<string, string>;
   /** What `uname -s` prints. */
@@ -91,6 +93,11 @@ export function world(on: On, options: WorldOptions = {}) {
       return { value: ran("") };
     }
     if (cmd === "open" || cmd === "xdg-open") return { value: ran("") };
+    if (cmd === "kill") {
+      const after = options.afterKill?.[arg === "-KILL" ? "KILL" : "TERM"];
+      if (after !== undefined) http = after;
+      return { value: ran("") };
+    }
     const version = options.versions?.[cmd];
     if (version === undefined || arg !== "--version") throw new Error(`spawn ${cmd} ENOENT`);
     return { value: ran(`${version}\n`) };

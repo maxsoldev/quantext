@@ -1,6 +1,6 @@
 /**
  * `/quantext view`: find the engine by `~/.quantext/engine.json` and `/health`, start the bundled one when none
- * runs, and open the viewer. The engine is started only here, never by itself (ARCHITECTURE "Starting the
+ * runs (or when the one found does not serve the viewer's page: it is stopped first), and open the viewer. The engine is started only here, never by itself (ARCHITECTURE "Starting the
  * engine"). Each step's outcome reaches the person as a toast.
  */
 import type { EngineInterface } from "claude-code";
@@ -13,6 +13,10 @@ export const HEALTH_TIMEOUT_MS = 1_000;
 /** How long a started engine has to answer, and how often it is asked. */
 export const START_TIMEOUT_MS = 10_000;
 export const START_POLL_MS = 250;
+/** How long the viewer's page may take: an engine still catching up is slow, a stuck one never answers. */
+export const PAGE_TIMEOUT_MS = 5_000;
+/** How long an engine has to go after each signal (`kill`, then `kill -KILL`). */
+export const STOP_WAIT_MS = 3_000;
 
 /**
  * Starts the engine detached, with every path passed as an argument (`$0` the runtime, `$1` the engine, `$2`
@@ -25,7 +29,10 @@ export const START_SCRIPT =
 /** How much of a failed start's stderr a toast shows. */
 const STDERR_SHOWN = 200;
 
-type Found = { kind: "same"; url: string } | { kind: "other"; version: string; pid: number } | { kind: "none" };
+type Found =
+  | { kind: "same"; url: string; port: number; pid: number }
+  | { kind: "other"; version: string; pid: number }
+  | { kind: "none" };
 
 /**
  * What a command run gave, or undefined when it could not start (not on PATH). It runs in `cwd`, never the
@@ -52,9 +59,13 @@ async function readEngineFile($: EngineInterface, dataDir: string): Promise<Engi
   return parseEngineFile(text);
 }
 
+/** `answer`, or undefined when it has not come within `ms`. */
+function within<T>($: EngineInterface, ms: number, answer: Promise<T>): Promise<T | undefined> {
+  return Promise.race([answer, $.clock.sleep(ms).then(() => undefined)]);
+}
+
 /** `/health` of the address, or undefined when it does not answer within HEALTH_TIMEOUT_MS. */
 async function askHealth($: EngineInterface, port: number) {
-  const timeout = $.clock.sleep(HEALTH_TIMEOUT_MS).then(() => undefined);
   const answer = $.http.fetch(`${engineUrl(port)}health`).then(
     (r) => (r.ok ? parseHealth(r.text) : undefined),
     (error: unknown) => {
@@ -62,7 +73,39 @@ async function askHealth($: EngineInterface, port: number) {
       return undefined;
     },
   );
-  return Promise.race([answer, timeout]);
+  return within($, HEALTH_TIMEOUT_MS, answer);
+}
+
+/**
+ * Whether the engine serves the viewer's page. `/health` is answered from memory, so an engine whose file reads
+ * hang (seen in a stop that never ended) passes it, and the browser then waits for ever.
+ */
+async function servesPage($: EngineInterface, port: number): Promise<boolean> {
+  const answer = $.http.fetch(engineUrl(port)).then(
+    (r) => r.ok,
+    (error: unknown) => {
+      $.ui.log(`quantext: the viewer's page: ${String(error)}`, { to: "debug" });
+      return false;
+    },
+  );
+  return (await within($, PAGE_TIMEOUT_MS, answer)) === true;
+}
+
+/**
+ * Stops the engine with this pid: `kill`, then `kill -KILL`, each given STOP_WAIT_MS to take effect. The pid is
+ * the one `/health` answered with, so it is the engine's. True once that engine answers no more.
+ */
+async function stopEngine($: EngineInterface, dataDir: string, version: string, pid: number, cwd: string) {
+  const signals = [() => tryRun($, ["kill", String(pid)], cwd), () => tryRun($, ["kill", "-KILL", String(pid)], cwd)];
+  for (const send of signals) {
+    await send();
+    const until = (await $.clock.now()) + STOP_WAIT_MS;
+    while ((await $.clock.now()) < until) {
+      await $.clock.sleep(START_POLL_MS);
+      if ((await findEngine($, dataDir, version)).kind === "none") return true;
+    }
+  }
+  return false;
 }
 
 /** The engine `engine.json` names, if it answers as that process; `other` when it is another version. */
@@ -72,7 +115,7 @@ async function findEngine($: EngineInterface, dataDir: string, version: string):
   const health = await askHealth($, file.port);
   if (health === undefined || health.pid !== file.pid) return { kind: "none" }; // stale file, or a hung engine
   if (health.version !== version) return { kind: "other", version: health.version, pid: health.pid };
-  return { kind: "same", url: engineUrl(file.port) };
+  return { kind: "same", url: engineUrl(file.port), port: file.port, pid: file.pid };
 }
 
 /** `node` when it is 22.18 or later, else `bun` when it is 1.3.3 or later, else undefined. */
@@ -109,6 +152,18 @@ export async function openViewer($: EngineInterface): Promise<void> {
   }
 
   let found = await findEngine($, dataDir, version);
+  if (found.kind === "same" && !(await servesPage($, found.port))) {
+    const { pid } = found;
+    $.ui.toast(`quantext: the engine (pid ${pid}) does not serve the viewer; starting it again…`);
+    if (!(await stopEngine($, dataDir, version, pid, engineDir))) {
+      $.ui.toast(
+        `quantext: the engine (pid ${pid}) does not serve the viewer and did not stop; ` +
+          `stop it (kill -9 ${pid}), then run /quantext view again.`,
+      );
+      return;
+    }
+    found = { kind: "none" };
+  }
   if (found.kind === "none") {
     const runtime = await findRuntime($, engineDir);
     if (runtime === undefined) {

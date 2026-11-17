@@ -39,7 +39,9 @@ agents (SQL, CLI, later MCP). Nothing leaves the machine.
 `/quantext view`:
 
 1. `$.http.fetch('http://127.0.0.1:<port>/health')`, with the port from `~/.quantext/engine.json` (4747 when free;
-   ADR 25). If it answers, go to step 4.
+   ADR 25). If it answers with the pid the file names, fetch `/` too (5 s): `/health` is answered from memory, so
+   an engine whose file reads hang passes it while the browser waits for ever. If `/` answers, go to step 4; if not,
+   stop that pid (`kill`, then `kill -KILL`, 3 s each) and go on to step 2.
 2. Find a runtime: `node` ≥ 22.18, else `bun`, else show a clear message with install steps.
 3. Start it detached: `$.process.run(['sh', '-c', 'umask 077; mkdir -p "$3" && chmod 700 "$3" && cd "$3" && nohup "$0" "$1" serve --live while-viewer >>"$2" 2>&1 </dev/null &', runtime, '<plugin root>/engine/engine.js', log, dataDir])`,
    paths as arguments (ADR 27). Poll `/health` up to 10 s. Every command, the version probes too, runs in
@@ -52,6 +54,7 @@ The engine:
 
 - keeps **one instance per machine** (an OS file lock in `~/.quantext/`, plus the port; ADR 22);
 - **exits after an idle period** with no viewer connected (setting: `live ingest: while viewer open | always`);
+- **ends its process when a stop takes more than 10 s**, so a stuck stop cannot keep the port and the lock;
 - writes its database and log to **`~/.quantext/`**, not to the plugin's data folder, because uninstalling a plugin
   deletes that folder.
 
