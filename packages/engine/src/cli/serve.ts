@@ -15,6 +15,7 @@ import { createIngest, watchTranscripts } from "../ingest/index.ts";
 import { createQuery, installViews } from "../query/index.ts";
 import type { SqlDriver, Store } from "../store/index.ts";
 import { openReader, openStore, StoreLockedError } from "../store/index.ts";
+import { withDeadline } from "./deadline.ts";
 import { engineUrl, printable, readEngineFile, removeEngineFile, writeEngineFile } from "./engine-file.ts";
 import { openUrl } from "./open-url.ts";
 import { probeHealth } from "./probe.ts";
@@ -24,6 +25,8 @@ const API_VERSION = 1;
 /** The engine's port when it is free (ADR 25); else any free port, named in `engine.json`. */
 export const DEFAULT_PORT = 4747;
 export const DEFAULT_IDLE_MINUTES = 10;
+/** How long a stop may take before the process ends anyway: a stuck stop must not hold the port and the lock. */
+export const STOP_TIMEOUT_MS = 10_000;
 
 export interface ServeOptions {
   dataDir: string;
@@ -197,13 +200,25 @@ export async function serve(options: ServeOptions, hooks: ServeHooks): Promise<n
   } finally {
     clearInterval(idle);
     stopping.abort();
-    await catchUp.catch(() => undefined); // reported above
-    await watcher?.stop();
-    await api?.close();
-    await worker?.close();
-    reader?.close();
-    store.close();
-    removeEngineFile(dataDir, process.pid);
+    await withDeadline(
+      async () => {
+        await catchUp.catch(() => undefined); // reported above
+        await watcher?.stop();
+        await api?.close();
+        await worker?.close();
+        reader?.close();
+        store.close();
+        removeEngineFile(dataDir, process.pid);
+      },
+      STOP_TIMEOUT_MS,
+      () => {
+        // A stuck stop still answers /health from memory while file reads never end: the viewer would load forever.
+        hooks.err(`qx: the engine did not stop within ${STOP_TIMEOUT_MS / 1000} s; exiting\n`);
+        removeEngineFile(dataDir, process.pid);
+        // Not process.exit: it waits for the thread pool, and a thread blocked in a system call never returns.
+        process.kill(process.pid, "SIGKILL");
+      },
+    );
   }
 }
 

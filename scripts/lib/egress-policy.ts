@@ -26,6 +26,11 @@ export const POLICY: EgressPolicy = {
     { argv: [["node", "bun"], "--version"], reason: "the mod finds a runtime for the engine" },
     { argv: ["uname", "-s"], reason: "the mod picks open or xdg-open" },
     {
+      argv: ["kill", null],
+      reason: "the mod stops its own engine (pid from /health) when it does not serve the viewer",
+    },
+    { argv: ["kill", "-KILL", null], reason: "the mod ends its own engine when kill did not stop it" },
+    {
       argv: ["sh", "-c", START_SCRIPT, ["node", "bun"], null, null, null],
       reason: "the mod starts the bundled engine detached (ARCHITECTURE, Starting the engine)",
     },

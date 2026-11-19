@@ -1,7 +1,11 @@
+import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
   chmodSync,
+  closeSync,
+  constants,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   renameSync,
@@ -425,6 +429,29 @@ describe("subagents", () => {
     ]);
     expect(graphOf(s.store, files.main)).toEqual(expected);
     expect(expected.sessions.find((x) => x.parentId !== undefined)).toBeDefined();
+  });
+
+  test("whose meta file is not a regular file (a FIFO) are read without it, and the read does not block", async () => {
+    // open() on a FIFO waits for a writer, holding a thread-pool thread: the stop of the engine then never ended.
+    const s = await setup();
+    const files = layout(s.root, "subagent");
+    writeText(files.main, readFileSync(files.source));
+    const agent = files.subagents[0];
+    if (agent === undefined || agent.meta === undefined) throw new Error("the subagent scenario has a meta file");
+    writeText(agent.path, readFileSync(agent.source));
+    execFileSync("mkfifo", [agent.meta]);
+    const fifo = agent.meta;
+    // Lets a blocked open() go on, so a failing run does not keep a pool thread for ever.
+    onCleanup(() => {
+      try {
+        closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK));
+      } catch {
+        // ENXIO: no reader waits on the FIFO, which is the passing case
+      }
+    });
+    const timeout = new Promise((r) => setTimeout(() => r("blocked"), 2000));
+    expect(await Promise.race([s.ingest.ingestAll().then(() => "read"), timeout])).toBe("read");
+    expect(graphOf(s.store, files.main).sessions).toHaveLength(2);
   });
 
   test("and the main transcript growing together give the same graph as one read", async () => {

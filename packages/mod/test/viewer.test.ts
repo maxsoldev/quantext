@@ -1,3 +1,4 @@
+import type { HttpResponse } from "claude-code";
 import { expect, test } from "claude-code/testing";
 import { parseEngineFile } from "../src/engine-file.ts";
 import { command } from "./kit.ts";
@@ -6,12 +7,15 @@ import { DATA, engineFile, health, world } from "./viewer-world.ts";
 const HEALTH = "http://127.0.0.1:4747/health";
 const URL = "http://127.0.0.1:4747/";
 
+const PAGE: HttpResponse = { status: 200, ok: true, headers: { "content-type": "text/html" }, text: "<!doctype html>" };
+const SERVES = { [HEALTH]: health(), [URL]: PAGE };
+
 test("/quantext view opens a running engine of the same version and starts nothing", async ($, on) => {
-  const w = world(on, { files: { [`${DATA}/engine.json`]: engineFile() }, http: { [HEALTH]: health() } });
+  const w = world(on, { files: { [`${DATA}/engine.json`]: engineFile() }, http: SERVES });
   const r = await $.command.run(command("quantext", "view"));
   expect(r.text).toBe("quantext: opening the viewer…");
   await w.settle();
-  expect(w.fetched).toEqual([HEALTH]);
+  expect(w.fetched).toEqual([HEALTH, URL]);
   expect(w.argvs).toEqual([
     ["uname", "-s"],
     ["open", URL],
@@ -24,13 +28,69 @@ test("the address is built from the port alone: a url in engine.json reaches no 
   const file = engineFile({ port: 5001, url: evil });
   const w = world(on, {
     files: { [`${DATA}/engine.json`]: file },
-    http: { "http://127.0.0.1:5001/health": health() },
+    http: { "http://127.0.0.1:5001/health": health(), "http://127.0.0.1:5001/": PAGE },
   });
   await $.command.run(command("quantext", "view"));
   await w.settle();
-  expect(w.fetched).toEqual(["http://127.0.0.1:5001/health"]);
+  expect(w.fetched).toEqual(["http://127.0.0.1:5001/health", "http://127.0.0.1:5001/"]);
   expect(w.argvs.at(-1)).toEqual(["open", "http://127.0.0.1:5001/"]);
   expect(JSON.stringify([w.fetched, w.argvs, w.toasts])).not.toContain("evil");
+});
+
+test("an engine that answers /health but not the viewer's page is stopped and started again", async ($, on) => {
+  const w = world(on, {
+    files: { [`${DATA}/engine.json`]: engineFile() },
+    http: { [HEALTH]: health(), [URL]: "hang" },
+    afterKill: { TERM: {} },
+    versions: { node: "v24.14.0" },
+    afterStart: SERVES,
+  });
+  await $.command.run(command("quantext", "view"));
+  await w.settle();
+  expect(w.argvs.map((a) => a.slice(0, 2))).toEqual([
+    ["kill", "4242"],
+    ["node", "--version"],
+    ["sh", "-c"],
+    ["uname", "-s"],
+    ["open", URL],
+  ]);
+  expect(w.toasts).toEqual([
+    "quantext: the engine (pid 4242) does not serve the viewer; starting it again…",
+    "quantext: starting the engine…",
+    `quantext: the viewer is at ${URL}`,
+  ]);
+});
+
+test("a stuck engine that outlasts kill gets kill -KILL", async ($, on) => {
+  const w = world(on, {
+    files: { [`${DATA}/engine.json`]: engineFile() },
+    http: { [HEALTH]: health(), [URL]: { ...PAGE, status: 500, ok: false } },
+    afterKill: { KILL: {} },
+    versions: { node: "v24.14.0" },
+    afterStart: SERVES,
+  });
+  await $.command.run(command("quantext", "view"));
+  await w.settle();
+  expect(w.argvs.slice(0, 3).map((a) => a.slice(0, 2))).toEqual([
+    ["kill", "4242"],
+    ["kill", "-KILL"],
+    ["node", "--version"],
+  ]);
+  expect(w.toasts.at(-1)).toBe(`quantext: the viewer is at ${URL}`);
+});
+
+test("an engine that cannot be stopped is named with its pid, and nothing is started", async ($, on) => {
+  const w = world(on, {
+    files: { [`${DATA}/engine.json`]: engineFile() },
+    http: { [HEALTH]: health(), [URL]: "hang" },
+    versions: { node: "v24.14.0" },
+  });
+  await $.command.run(command("quantext", "view"));
+  await w.settle();
+  expect(w.argvs.map((a) => a[0])).toEqual(["kill", "kill"]);
+  expect(w.toasts.at(-1)).toBe(
+    "quantext: the engine (pid 4242) does not serve the viewer and did not stop; stop it (kill -9 4242), then run /quantext view again.",
+  );
 });
 
 test("engine.json is checked field by field", () => {
@@ -162,7 +222,7 @@ test("an engine of another version is named with its pid to stop, and nothing is
 });
 
 test("on Linux it opens the viewer with xdg-open; elsewhere it only shows the address", async ($, on) => {
-  const w = world(on, { files: { [`${DATA}/engine.json`]: engineFile() }, http: { [HEALTH]: health() }, os: "Linux" });
+  const w = world(on, { files: { [`${DATA}/engine.json`]: engineFile() }, http: SERVES, os: "Linux" });
   await $.command.run(command("quantext", "view"));
   await w.settle();
   expect(w.argvs.at(-1)).toEqual(["xdg-open", URL]);
@@ -171,7 +231,7 @@ test("on Linux it opens the viewer with xdg-open; elsewhere it only shows the ad
 test("on another OS it shows the address and opens nothing", async ($, on) => {
   const w = world(on, {
     files: { [`${DATA}/engine.json`]: engineFile() },
-    http: { [HEALTH]: health() },
+    http: SERVES,
     os: "FreeBSD",
   });
   await $.command.run(command("quantext", "view"));
