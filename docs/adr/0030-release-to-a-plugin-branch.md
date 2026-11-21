@@ -1,6 +1,6 @@
 # 30. Releases publish the built plugin to a `plugin` branch; one version, in the root package.json
 
-Status: accepted
+Status: accepted (amended by ADR 31: release-please makes the version bump, the tag and the release)
 
 ## Context
 
@@ -65,7 +65,7 @@ Options considered:
   `claude plugin install quantext@quantext` fails at fetch. Development installs use `quantext-dev`.
 - A developer who added the repo folder as marketplace `quantext` (ADR 27) now gets the GitHub source from it;
   they remove it and add `./dist` instead.
-- To release: bump the root version, merge, tag `v<version>` on `main` and push the tag. A tag that does not match
+- To release (before ADR 31): bump the root version, merge, tag `v<version>` on `main` and push the tag. A tag that does not match
   the version fails the first step. Users update with `claude plugin update quantext@quantext`.
 - The branch is not protected by a review: anyone with push access could write it. A ruleset that lets only GitHub
   Actions push `plugin` would close that.

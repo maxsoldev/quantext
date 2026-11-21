@@ -40,7 +40,15 @@ quality bar. Decisions that are hard to change are recorded in `docs/adr/`.
 ## Commits
 
 - One logical change per commit. No co-author lines.
-- **Subject:** imperative, about 50 characters, at most 72, no period at the end. It says *what* changed.
+- **Subject:** [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scope>): <summary>`, scope
+  optional. Then imperative, lower case, about 50 characters, at most 72 in all, no period at the end. It says
+  *what* changed. release-please reads the types to pick the next version and write the changelog (ADR 31):
+  - `feat` (a new user-visible feature, minor bump) and `fix` (a user-visible bug fix, patch bump) go in the
+    changelog. A fix to work that is not released yet is not a `fix`: use the type of the work it corrects.
+  - `perf`, `refactor`, `docs`, `test`, `build`, `ci`, `chore`, `revert` for the rest.
+  - `!` after the type (`feat!:`), or a `BREAKING CHANGE:` footer, marks a breaking change.
+  - CI checks every commit of a pull request (`scripts/check-commits.ts`). Check yours before you push, because
+    pushed commits are not rewritten: `git config core.hooksPath .githooks` turns on the `commit-msg` hook.
 - **Body:** after one blank line, wrapped at 72. It says *why*, and anything a reviewer would not see in the diff
   (a trade-off, a rejected option, a link to an ADR or a known issue). Leave it out only for trivial commits.
 - **Size:** keep a commit reviewable, as a rule under ~400 changed lines (lockfiles and recorded fixtures do not

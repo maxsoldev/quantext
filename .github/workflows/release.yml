@@ -1,10 +1,13 @@
 name: Release
 
-# On a tag v<version> (the root package.json's version): check, build and publish the plugin (ADR 30).
+# On a push to main, release-please keeps a release PR open: the next version and its changelog (ADR 31). When that
+# PR is merged, it tags v<version> and creates the GitHub Release; then, as on a tag pushed by hand (ADR 30):
 # build: pnpm check (the no-egress guard included), the smoke test, dist/plugin, a tarball and the SBOMs.
-# attest: build provenance for the tarball. publish: the plugin branch and the GitHub Release.
+# attest: build provenance for the tarball. publish: the plugin branch and the release's files.
+# release-please's tag starts no workflow (GITHUB_TOKEN), so the build runs in this one.
 on:
   push:
+    branches: [main]
     tags: ["v*"]
 
 permissions:
@@ -15,15 +18,39 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  release-please:
+    name: Release PR
+    if: github.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # the release branch, the tag and the GitHub Release
+      pull-requests: write # open and update the release PR
+      issues: write # the release PR's labels
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
   build:
     name: Check and build
+    needs: release-please
+    # On a tag push the release-please job is skipped; !failure() lets this job run then.
+    if: ${{ !failure() && !cancelled() && (github.ref_type == 'tag' || needs.release-please.outputs.created == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
+      tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.release-please.outputs.tag || github.ref_name }}
           fetch-depth: 0 # gitleaks scans the full history
           persist-credentials: false
 
@@ -37,9 +64,10 @@ jobs:
       - id: version
         run: |
           node scripts/release.ts check-tag "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.release-please.outputs.tag || github.ref_name }}
 
       - run: pnpm install --frozen-lockfile
 
@@ -69,6 +97,7 @@ jobs:
   attest:
     name: Build provenance
     needs: build
+    if: ${{ !failure() && !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -89,6 +118,7 @@ jobs:
   publish:
     name: Plugin branch and GitHub Release
     needs: [build, attest]
+    if: ${{ !failure() && !cancelled() && needs.attest.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -97,6 +127,7 @@ jobs:
       # The one job that pushes, so the only one that keeps the token in git's config.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.build.outputs.tag }}
           persist-credentials: true
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -118,7 +149,7 @@ jobs:
           found=0; git ls-remote --exit-code --heads origin plugin > /dev/null || found=$?
           if [ "$found" = 0 ]; then git fetch --no-tags origin "+refs/heads/plugin:refs/remotes/origin/plugin";
           elif [ "$found" != 2 ]; then exit "$found"; fi
-          sha=$(node scripts/release.ts commit-plugin unpacked/plugin refs/remotes/origin/plugin "$GITHUB_SHA")
+          sha=$(node scripts/release.ts commit-plugin unpacked/plugin refs/remotes/origin/plugin "$(git rev-parse HEAD)")
           git push origin "$sha:refs/heads/plugin"
         env:
           VERSION: ${{ needs.build.outputs.version }}
@@ -127,11 +158,19 @@ jobs:
           GIT_COMMITTER_NAME: github-actions[bot]
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
 
-      - name: Create the GitHub Release
+      # release-please created the release with the changelog as its notes; a tag pushed by hand has none yet.
+      - name: The GitHub Release's files and notes
         run: |
-          gh release create "$TAG" out/* --verify-tag --title "Quantext $VERSION" --generate-notes \
-            --notes "Install: \`claude plugin marketplace add $GITHUB_REPOSITORY\`, then \`claude plugin install quantext@quantext\`. Verify the tarball: \`gh attestation verify quantext-plugin-$VERSION.tar.gz --repo $GITHUB_REPOSITORY\`."
+          install="Install: \`claude plugin marketplace add $GITHUB_REPOSITORY\`, then \`claude plugin install quantext@quantext\`. Verify the tarball: \`gh attestation verify quantext-plugin-$VERSION.tar.gz --repo $GITHUB_REPOSITORY\`."
+          if gh release view "$TAG" > /dev/null; then
+            gh release upload "$TAG" out/*
+            gh release edit "$TAG" --title "Quantext $VERSION" --notes "$(gh release view "$TAG" --json body --jq .body)
+
+          $install"
+          else
+            gh release create "$TAG" out/* --verify-tag --title "Quantext $VERSION" --generate-notes --notes "$install"
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.build.outputs.tag }}
           VERSION: ${{ needs.build.outputs.version }}
