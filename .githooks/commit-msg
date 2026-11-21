@@ -1,0 +1,3 @@
+#!/bin/sh
+# Check the message against Conventional Commits (ADR 31). Enable: git config core.hooksPath .githooks
+exec node scripts/check-commits.ts --file "$1"

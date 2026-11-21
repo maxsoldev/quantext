@@ -11,6 +11,9 @@ updates:
       default-days: 1
     versioning-strategy: increase # keep exact pins (saveExact)
     open-pull-requests-limit: 5
+    commit-message: # Conventional Commits (ADR 31): "build(deps): bump …", "build(deps-dev): bump …"
+      prefix: build
+      include: scope
     ignore:
       # rolldown is pinned to the version Vite resolves (scripts/dependencies.test.ts); it moves with Vite.
       - dependency-name: rolldown
@@ -30,6 +33,9 @@ updates:
       day: monday
     cooldown:
       default-days: 1
+    commit-message:
+      prefix: ci
+      include: scope
     groups:
       actions:
         patterns: ["*"]

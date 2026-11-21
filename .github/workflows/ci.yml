@@ -13,6 +13,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  commits:
+    name: Commit messages
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      # Every commit of the pull request, so release-please reads each one when it is merged (ADR 31).
+      - run: node scripts/check-commits.ts "$BASE..$HEAD"
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+
   check:
     name: pnpm ${{ matrix.check }} (${{ matrix.runtime }})
     runs-on: ubuntu-latest
