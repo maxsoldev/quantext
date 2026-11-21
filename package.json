@@ -14,7 +14,7 @@
     "lint": "biome ci .",
     "format": "biome check --write .",
     "typecheck": "tsc -p tsconfig.json && pnpm -r typecheck",
-    "test": "vitest run",
+    "test": "vitest run --project unit && vitest run --project perf",
     "test:bun": "bun test ./fixtures ./packages/engine ./packages/shared ./packages/web ./scripts",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:mod && pnpm layers && pnpm scan && pnpm egress && pnpm supply-chain",
     "layers": "node scripts/check-layers.ts",
