@@ -54,10 +54,9 @@ describe("imageSize", () => {
   });
 
   test("reads only the header bytes: a huge image decodes no more than its first 64 KB", () => {
-    const huge = PNG_96x64 + "A".repeat(20_000_000);
-    const start = performance.now();
+    // Not valid base64 after the first 64 KB: an image read whole would not decode. No clock, so no flake on CI.
+    const huge = `${PNG_96x64}${"A".repeat(200_000)}!!!!`;
     expect(imageSize(huge)).toEqual({ width: 96, height: 64 });
-    expect(performance.now() - start).toBeLessThan(50);
   });
 
   test("returns undefined for data that is not a known image format", () => {
