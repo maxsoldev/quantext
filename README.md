@@ -12,8 +12,9 @@ agents through SQL and a CLI. Nothing leaves the machine.
 ## What you get
 
 - **A status line in Claude Code:** `qx $3.42 · ctx 182k · cache 96%`, from the harness's own numbers.
-- **Nudges** (toasts, never added to the model's context): the prompt cache expired after idle time and the next
-  call re-wrote it; the context passed 200k.
+- **Nudges** (toasts, never added to the model's context): a call re-wrote the prompt cache, with the reason
+  (a compaction, a model switch, idle past the cache's lifetime, or a change at the start of the request, which
+  is worth a look); the context passed 200k.
 - **`/clear-tools [outputs] [keep N]`:** compacts by replacing old tool calls (their inputs) and old tool outputs
   with short stubs instead of a summary, in one pass, so the prompt cache is written once. `outputs` clears only
   the outputs; `keep N` leaves the last N whole. Also as `/compact tools [outputs] [keep N]`. The next call
