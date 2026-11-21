@@ -4,7 +4,16 @@ import { atom, read, update } from "claude-code";
 import type { Live } from "../types/index.js";
 import { tokens, usd } from "./format.ts";
 
-export const EMPTY: Live = { ctx: 0, read: 0, input: 0, lastEndAt: 0, lastCtx: 0, bigCtxNudged: false };
+export const EMPTY: Live = {
+  ctx: 0,
+  read: 0,
+  input: 0,
+  lastEndAt: 0,
+  lastCtx: 0,
+  bigCtxNudged: false,
+  compacted: false,
+  hourCache: false,
+};
 export const live = atom({ plugin: "quantext", key: "live" } as const, EMPTY);
 
 // Function declarations: the mod's loader follows `$` across files only into those.

@@ -3106,7 +3106,7 @@ async function logFiles(main) {
 			});
 			return;
 		}
-		const names = new Set(entries.map((e) => e.name));
+		const names = new Set(entries.filter((e) => e.isFile()).map((e) => e.name));
 		for (const entry of entries) {
 			const path = join(dir, entry.name);
 			if (entry.isDirectory()) await walk(path);
@@ -8066,6 +8066,21 @@ function decodeSegments(pathname) {
 		}
 	});
 }
+// packages/engine/src/cli/deadline.ts
+/** A time limit for work that must not hang the process, such as the engine's stop. */
+/**
+* Runs `work` and calls `onLate` once if it has not settled within `ms`; the work goes on. The timer does not keep
+* the process alive, so work that ends in time ends the process as before.
+*/
+async function withDeadline(work, ms, onLate) {
+	const timer = setTimeout(onLate, ms);
+	timer.unref();
+	try {
+		return await work();
+	} finally {
+		clearTimeout(timer);
+	}
+}
 // packages/engine/src/cli/engine-file.ts
 /**
 * `engine.json` in the data folder: where the running engine listens (ADR 25). It is a hint for a second start
@@ -8316,6 +8331,8 @@ function createQueryWorker(options, limits = {}) {
 const API_VERSION = 1;
 /** The engine's port when it is free (ADR 25); else any free port, named in `engine.json`. */
 const DEFAULT_PORT = 4747;
+/** How long a stop may take before the process ends anyway: a stuck stop must not hold the port and the lock. */
+const STOP_TIMEOUT_MS = 1e4;
 /** An engine that answers at the port `engine.json` names, with the pid it names. */
 async function running(dataDir, version, warn) {
 	const file = readEngineFile(dataDir, warn);
@@ -8470,13 +8487,19 @@ async function serve(options, hooks) {
 	} finally {
 		clearInterval(idle);
 		stopping.abort();
-		await catchUp.catch(() => void 0);
-		await watcher?.stop();
-		await api?.close();
-		await worker?.close();
-		reader?.close();
-		store.close();
-		removeEngineFile(dataDir, process.pid);
+		await withDeadline(async () => {
+			await catchUp.catch(() => void 0);
+			await watcher?.stop();
+			await api?.close();
+			await worker?.close();
+			reader?.close();
+			store.close();
+			removeEngineFile(dataDir, process.pid);
+		}, STOP_TIMEOUT_MS, () => {
+			hooks.err(`qx: the engine did not stop within ${STOP_TIMEOUT_MS / 1e3} s; exiting\n`);
+			removeEngineFile(dataDir, process.pid);
+			process.kill(process.pid, "SIGKILL");
+		});
 	}
 }
 /** Listen on the asked port, or on the default port, else on any free one. */
@@ -8525,7 +8548,7 @@ function defaultStaticDir() {
 * The release version, from the root package.json: its one source (ADR 30). The bundler inlines only this
 * string, so the engine reports the same version run from source or from `dist/engine.js`.
 */
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 // packages/engine/src/cli/main.ts
 /**
 * The `qx` command: ingest the transcripts, and read the store through the query layer (or SQL, read-only).

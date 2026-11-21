@@ -14,6 +14,10 @@ export type Live = {
   model?: string;
   /** Whether the large-context nudge was shown since the last compaction or /clear. */
   bigCtxNudged: boolean;
+  /** Whether the main loop compacted since its last call: the next cache re-write is expected. */
+  compacted: boolean;
+  /** Whether the cache held over a pause longer than 5 minutes: this session's cache lives an hour. */
+  hourCache: boolean;
 };
 
 declare module "claude-code" {
