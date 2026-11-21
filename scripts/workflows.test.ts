@@ -20,13 +20,18 @@ describe("workflows", () => {
     }
   });
 
-  test("only the release's publish job may write contents; each workflow's default is read or none", () => {
+  test("only release-please and the publish job may write; each workflow's default is read or none", () => {
     for (const { name, text } of workflows) expect(text, name).toMatch(/^permissions:(?: \{\}|\n {2}contents: read)$/m);
-    const writers = workflows.filter(({ text }) => /contents: write/.test(text)).map(({ name }) => name);
+    const writers = workflows.filter(({ text }) => /(?:contents|pull-requests): write/.test(text)).map((w) => w.name);
     expect(writers).toEqual(["release.yml"]);
     const release = workflows.find(({ name }) => name === "release.yml")?.text ?? "";
-    expect(release.match(/contents: write/g)).toHaveLength(1);
-    expect(release.slice(release.indexOf("\n  publish:"))).toContain("contents: write");
+    const jobs = Object.fromEntries(
+      release.split(/\n(?= {2}[\w-]+:\n)/).map((block) => [block.match(/^ {2}([\w-]+):/)?.[1] ?? "", block] as const),
+    );
+    const writing = (permission: string) =>
+      Object.keys(jobs).filter((job) => jobs[job]?.includes(`${permission}: write`));
+    expect(writing("contents")).toEqual(["release-please", "publish"]);
+    expect(writing("pull-requests")).toEqual(["release-please"]);
     expect(release).not.toMatch(/secrets\./); // only GITHUB_TOKEN
   });
 });
