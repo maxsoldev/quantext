@@ -23,7 +23,7 @@ Options considered:
 - **The check** is `scripts/check-commits.ts` (subject rules in `scripts/lib/commit-message.ts`), not commitlint,
   which would add many dependencies for a few rules. The `commits` job in `ci.yml` checks every commit of a pull
   request except merges; `.githooks/commit-msg` checks one before it is pushed. Dependabot writes `build(deps)` and
-  `ci(deps)` subjects.
+  `ci(deps)` subjects; a bot's subject may be longer than 72, since we do not choose its words.
 - **release-please** (`release-please-config.json`, `.release-please-manifest.json`, release type `node`, tags
   `v<version>`) runs as the first job of `release.yml` on each push to `main`, with `GITHUB_TOKEN` only. It writes
   the root `package.json` version, so ADR 30's one version stays. A tag made with `GITHUB_TOKEN` starts no other

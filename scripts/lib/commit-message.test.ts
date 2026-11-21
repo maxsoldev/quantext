@@ -28,4 +28,11 @@ describe("checkCommitMessage", () => {
     expect(problems.length).toBeGreaterThan(0);
     expect(problems.join("\n")).toMatch(reason);
   });
+
+  test("a bot's subject may be longer than 72, but still needs a type", () => {
+    const long = "build(deps-dev): bump the development group across 1 directory with 4 updates";
+    expect(checkCommitMessage(long, { bot: true })).toEqual([]);
+    expect(checkCommitMessage(long)).not.toEqual([]);
+    expect(checkCommitMessage("Bump vite from 7.1.0 to 7.1.1", { bot: true }).join("\n")).toMatch(/type/);
+  });
 });

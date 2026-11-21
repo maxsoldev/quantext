@@ -6,3 +6,5 @@ coverage/
 .DS_Store
 # Written by Claude Code when it loads the mod from a folder it hot-reloads.
 packages/mod/.claude-plugin/types/
+# Agents' git worktrees.
+.agents/worktrees/
