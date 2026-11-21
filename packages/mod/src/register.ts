@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from "claude-code";
 import type { ClearArgs } from "./clear-tools.ts";
 import { clearRequest, clearTools, clearWhat, compactArgs, parseClearArgs, USAGE } from "./clear-tools.ts";
 import { EMPTY, inputOf, readLive, statusLabel, updateLive } from "./live.ts";
-import { cacheExpiryNudge, contextNudge } from "./nudges.ts";
+import { CACHE_TTL_MS, cacheBreakNudge, cacheHeld, contextNudge } from "./nudges.ts";
 import { openViewer } from "./viewer.ts";
 
 /**
@@ -91,10 +91,15 @@ export const register: Register = (on) => {
     const r = yield* next(e);
     const u = r.usage;
     if (u === null || e.agentId !== undefined) return r; // subagents have their own caches: count the main loop
-    const nudge = cacheExpiryNudge(await readLive($), u, startedAt);
+    const before = await readLive($);
+    const nudge = cacheBreakNudge(before, u, startedAt);
+    // A cache read after more than 5 minutes idle shows that this session's cache lives an hour.
+    const heldOverPause = before.lastEndAt > 0 && startedAt - before.lastEndAt > CACHE_TTL_MS && cacheHeld(before, u);
     const endedAt = await $.clock.now();
     await updateLive($, (l) => ({
       ...l,
+      compacted: false,
+      hourCache: l.hourCache || heldOverPause,
       read: l.read + u.cache_read_input_tokens,
       input: l.input + u.input_tokens + u.cache_creation_input_tokens,
       lastEndAt: endedAt,
@@ -129,7 +134,7 @@ export const register: Register = (on) => {
       r = { messages: cleared.messages };
     }
     if (e.agentId === undefined && e.trigger !== "precompute" && r.messages !== undefined) {
-      await updateLive($, (l) => ({ ...l, bigCtxNudged: false }));
+      await updateLive($, (l) => ({ ...l, bigCtxNudged: false, compacted: true }));
       remeasureSoon($);
     }
     if (note !== undefined) $.ui.toast(note); // after the update, so a failed clear shows no "Cleared"
