@@ -1,3 +1,5 @@
 #!/bin/sh
 # Check the message against Conventional Commits (ADR 31). Enable: git config core.hooksPath .githooks
+# A merge commit is skipped, as in CI: its message is git's "Merge branch …".
+git rev-parse -q --verify MERGE_HEAD > /dev/null && exit 0
 exec node scripts/check-commits.ts --file "$1"
