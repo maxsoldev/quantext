@@ -227,7 +227,7 @@ Each step ends with tests, and later steps never reach below the layer they depe
 | 6 | **Query layer + CLI**: `qx ingest`, `qx sessions`, `qx call`, `qx sql` with views | 1 | An agent answers "top tool outputs by lifetime cost" with `qx sql` |
 | 7 | **API + engine process**: HTTP JSON + SSE, Host check, single instance, idle exit | 1 | SSE fires on a new call; a second start reuses the running engine |
 | 8 | **Live context viewer**: reuse the eduagent visualiser components with a read-only Claude Code adapter; the teaching features above | 1 | A running session updates in the browser call by call; meets the UX bar |
-| 9 | **Mod**: status line, nudges, `/clear-tools` from in-process `usage`; `/quantext view` starts the engine and opens the viewer | 1 | Works on a fresh Claude Code install; harness features work with no Node or Bun |
+| 9 | **Mod**: status line, nudges (kept in the `/quantext` pane), `/clear-tools` from in-process `usage`; `/quantext view` starts the engine and opens the viewer | 1 | Works on a fresh Claude Code install; harness features work with no Node or Bun |
 | 10 | **Agent surface**: schema docs, a skill, MCP later | **2** | The reviewer questions are answered and checked in the viewer |
 
 Code from the earlier prototype (the Python parser and incremental store, pricing, the mod widget) is ported inside

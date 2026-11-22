@@ -248,10 +248,11 @@ test("a plugin without its bundled engine says so", async ($, on) => {
   expect(w.toasts).toEqual(["quantext: this plugin has no bundled engine (engine/); reinstall it."]);
 });
 
-test("/quantext alone, or with other words, answers its usage", async ($, on) => {
+test("/quantext with other words answers its usage and starts nothing", async ($, on) => {
   const w = world(on);
-  expect((await $.command.run(command("quantext"))).text).toBe("Usage: /quantext view");
-  expect((await $.command.run(command("quantext", "open now"))).text).toBe("Usage: /quantext view");
+  expect((await $.command.run(command("quantext", "open now"))).text).toBe(
+    "Usage: /quantext (the messages pane) or /quantext view (the viewer)",
+  );
   await w.settle();
   expect(w.argvs).toEqual([]);
 });

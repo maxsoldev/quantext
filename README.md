@@ -15,6 +15,9 @@ agents through SQL and a CLI. Nothing leaves the machine.
 - **Nudges** (toasts, never added to the model's context): a call re-wrote the prompt cache, with the reason
   (a compaction, a model switch, idle past the cache's lifetime, or a change at the start of the request, which
   is worth a look); the context passed 200k.
+- **`/quantext`:** opens or closes a pane with the session's last 50 messages (nudges, `/clear-tools` results,
+  viewer steps), newest first, so a toast you missed is still there. While the pane is closed, the status line
+  counts the new ones (`· 2 new`).
 - **`/clear-tools [outputs] [keep N]`:** compacts by replacing old tool calls (their inputs) and old tool outputs
   with short stubs instead of a summary, in one pass, so the prompt cache is written once. `outputs` clears only
   the outputs; `keep N` leaves the last N whole. Also as `/compact tools [outputs] [keep N]`. The next call

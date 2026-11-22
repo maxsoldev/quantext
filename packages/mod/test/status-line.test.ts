@@ -10,7 +10,8 @@ test("the label shows the harness's cost, the context and the cache hit rate, be
   await measure($, 333_000, 14.456);
   await draw($, ["stash 3"]);
   // 30k of the 50k input tokens were read from the cache
-  expect(modes()).toEqual(["stash 3", "qx $14.46 · ctx 333k · cache 60%"]);
+  // 1 new: the large-context nudge at 333k, shown while the messages pane was closed
+  expect(modes()).toEqual(["stash 3", "qx $14.46 · ctx 333k · cache 60% · 1 new"]);
 });
 
 test("subagent calls do not count toward the cache rate", async ($, on) => {

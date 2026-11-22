@@ -20,8 +20,14 @@ export type Live = {
   hourCache: boolean;
 };
 
+/** One message the mod showed as a toast: when (ms since the epoch) and its words. */
+export type Message = { at: number; text: string };
+
+/** The session's messages for the pane, newest first, and how many came while the pane was closed. */
+export type Messages = { list: Message[]; unread: number };
+
 declare module "claude-code" {
   interface PluginState {
-    quantext: { live: Live };
+    quantext: { live: Live; messages: Shaped<Messages> };
   }
 }

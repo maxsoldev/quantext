@@ -3,9 +3,11 @@
  * runs (or when the one found does not serve the viewer's page: it is stopped first), and open the viewer. The engine is started only here, never by itself (ARCHITECTURE "Starting the
  * engine"). Each step's outcome reaches the person as a toast.
  */
+
 import type { EngineInterface } from "claude-code";
 import type { EngineAddress } from "./engine-file.ts";
 import { engineUrl, parseEngineFile, parseEngineVersion, parseHealth, printable } from "./engine-file.ts";
+import { say } from "./messages.ts";
 import { INSTALL_HINT, MIN_BUN, MIN_NODE, meetsVersion } from "./runtime.ts";
 
 /** How long one `/health` may take: a local engine answers in milliseconds. */
@@ -140,23 +142,24 @@ async function openUrl($: EngineInterface, url: string, cwd: string): Promise<bo
 export async function openViewer($: EngineInterface): Promise<void> {
   const home = await $.env.get("HOME");
   if (home === undefined || home === "") {
-    $.ui.toast("quantext: HOME is not set, so the engine's folder (~/.quantext) cannot be found.");
+    await say($, "quantext: HOME is not set, so the engine's folder (~/.quantext) cannot be found.");
     return;
   }
   const dataDir = `${home}/.quantext`;
   const engineDir = `${$.plugin.root}/engine`;
   const version = await bundledVersion($, engineDir);
   if (version === undefined) {
-    $.ui.toast("quantext: this plugin has no bundled engine (engine/); reinstall it.");
+    await say($, "quantext: this plugin has no bundled engine (engine/); reinstall it.");
     return;
   }
 
   let found = await findEngine($, dataDir, version);
   if (found.kind === "same" && !(await servesPage($, found.port))) {
     const { pid } = found;
-    $.ui.toast(`quantext: the engine (pid ${pid}) does not serve the viewer; starting it again…`);
+    await say($, `quantext: the engine (pid ${pid}) does not serve the viewer; starting it again…`);
     if (!(await stopEngine($, dataDir, version, pid, engineDir))) {
-      $.ui.toast(
+      await say(
+        $,
         `quantext: the engine (pid ${pid}) does not serve the viewer and did not stop; ` +
           `stop it (kill -9 ${pid}), then run /quantext view again.`,
       );
@@ -167,33 +170,34 @@ export async function openViewer($: EngineInterface): Promise<void> {
   if (found.kind === "none") {
     const runtime = await findRuntime($, engineDir);
     if (runtime === undefined) {
-      $.ui.toast(INSTALL_HINT);
+      await say($, INSTALL_HINT);
       return;
     }
-    $.ui.toast("quantext: starting the engine…");
+    await say($, "quantext: starting the engine…");
     const log = `${dataDir}/engine.log`;
     const argv = ["sh", "-c", START_SCRIPT, runtime, `${engineDir}/engine.js`, log, dataDir];
     const started = await tryRun($, argv, engineDir);
     if (started?.exitCode !== 0) {
       const why = printable(started?.stderr.trim() ?? "").slice(0, STDERR_SHOWN) || "sh did not run";
-      $.ui.toast(`quantext: the engine could not be started (${why}).`);
+      await say($, `quantext: the engine could not be started (${why}).`);
       return;
     }
     found = await waitForEngine($, dataDir, version);
     if (found.kind === "none") {
-      $.ui.toast(`quantext: the engine did not answer within ${START_TIMEOUT_MS / 1000} s; see ${log}`);
+      await say($, `quantext: the engine did not answer within ${START_TIMEOUT_MS / 1000} s; see ${log}`);
       return;
     }
   }
   if (found.kind === "other") {
-    $.ui.toast(
+    await say(
+      $,
       `quantext: an engine of version ${found.version} (pid ${found.pid}) runs; this plugin brings ${version}. ` +
         `Stop it (kill ${found.pid}), then run /quantext view again.`,
     );
     return;
   }
   const opened = await openUrl($, found.url, engineDir);
-  $.ui.toast(`quantext: the viewer is at ${found.url}${opened ? "" : " (open it in a browser)"}`);
+  await say($, `quantext: the viewer is at ${found.url}${opened ? "" : " (open it in a browser)"}`);
 }
 
 /** The bundled engine's version, or undefined when the plugin has no engine. */
