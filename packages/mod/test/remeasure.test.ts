@@ -47,7 +47,7 @@ test("the context is counted again once a compaction has landed", async ($, on) 
   await $.session.compact({ trigger: "auto", messages: [{ role: "user", text: "hi", toolUses: [] }] } as never);
   await clock.advance(1_000);
   await draw($);
-  expect(modes()).toEqual(["qx $2.00 · ctx 25k"]);
+  expect(modes()).toEqual(["qx $2.00 · ctx 25k · 1 new"]); // 1 new: the large-context nudge at 300k
 });
 
 test("a compaction made ahead of time (precompute) or a subagent's does not count again", async ($, on) => {
@@ -72,5 +72,5 @@ test("after /clear the figures start over from a new count", async ($, on) => {
   await $.session.end({ reason: "clear", sessionId: "s1", resume: {} } as never);
   await clock.advance(1_000);
   await draw($);
-  expect(modes()).toEqual(["qx $2.00 · ctx 18k"]);
+  expect(modes()).toEqual(["qx $2.00 · ctx 18k · 1 new"]); // 1 new: the large-context nudge at 300k
 });

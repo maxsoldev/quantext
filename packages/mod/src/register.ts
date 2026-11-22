@@ -1,8 +1,9 @@
-/** The Quantext mod: a footer label and nudges from in-process usage, /clear-tools, /quantext view. */
+/** The Quantext mod: a footer label and nudges from in-process usage, a messages pane, /clear-tools, /quantext view. */
 import type { EngineInterface, Register } from "claude-code";
 import type { ClearArgs } from "./clear-tools.ts";
 import { clearRequest, clearTools, clearWhat, compactArgs, parseClearArgs, USAGE } from "./clear-tools.ts";
 import { EMPTY, inputOf, readLive, statusLabel, updateLive } from "./live.ts";
+import { drawPane, PANE, say, togglePane, unread } from "./messages.ts";
 import { CACHE_TTL_MS, cacheBreakNudge, cacheHeld, contextNudge } from "./nudges.ts";
 import { openViewer } from "./viewer.ts";
 
@@ -16,7 +17,7 @@ async function clearNow($: EngineInterface, a: ClearArgs): Promise<void> {
     await $.command.run({ command: "compact", args });
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
-    $.ui.toast(`/clear-tools failed: ${why}; try /compact ${args}`);
+    await say($, `/clear-tools failed: ${why}; try /compact ${args}`);
   }
 }
 
@@ -57,8 +58,8 @@ export const register: Register = (on) => {
     });
     await $.command.register({
       name: "quantext",
-      description: "Quantext: open the live context viewer (starts the engine when it is not running)",
-      argumentHint: "view",
+      description: "Quantext: open or close the messages pane; view: open the live context viewer",
+      argumentHint: "[view]",
     });
     if (e.isInteractive) remeasureSoon($); // show the context before the first call
     return started;
@@ -82,7 +83,7 @@ export const register: Register = (on) => {
       ...(e.cost === undefined ? {} : { usd: e.cost.usd }),
       bigCtxNudged: l.bigCtxNudged || nudge !== undefined,
     }));
-    if (nudge !== undefined) $.ui.toast(nudge);
+    if (nudge !== undefined) await say($, nudge);
     return r;
   });
 
@@ -106,17 +107,18 @@ export const register: Register = (on) => {
       lastCtx: inputOf(u),
       model: u.model,
     }));
-    if (nudge !== undefined) $.ui.toast(nudge);
+    if (nudge !== undefined) await say($, nudge);
     return r;
   });
 
   on("command.run", { command: "quantext" }, async ($, e) => {
-    if (e.args.trim().toLowerCase() !== "view") return { text: "Usage: /quantext view" };
+    const arg = e.args.trim().toLowerCase();
+    if (arg === "") return { text: await togglePane($) };
+    if (arg !== "view") return { text: "Usage: /quantext (the messages pane) or /quantext view (the viewer)" };
     // The flow waits up to ~11 s, past a hook's budget: it runs from a timer and answers with toasts.
     $.clock.after(
       0,
-      () =>
-        void openViewer($).catch((error: unknown) => $.ui.toast(`quantext: /quantext view failed: ${String(error)}`)),
+      () => void openViewer($).catch((error: unknown) => say($, `quantext: /quantext view failed: ${String(error)}`)),
     );
     return { text: "quantext: opening the viewer…" };
   });
@@ -137,7 +139,7 @@ export const register: Register = (on) => {
       await updateLive($, (l) => ({ ...l, bigCtxNudged: false, compacted: true }));
       remeasureSoon($);
     }
-    if (note !== undefined) $.ui.toast(note); // after the update, so a failed clear shows no "Cleared"
+    if (note !== undefined) await say($, note); // after the update, so a failed clear shows no "Cleared"
     return r;
   }).catch((_$, e, next) => {
     // A failed clear must not fall back to a paid summary; any other failure leaves it to Claude Code.
@@ -155,9 +157,11 @@ export const register: Register = (on) => {
     return r;
   });
 
+  on("ui.render", { component: "Pane", requestId: PANE }, ($, e) => drawPane($, e));
+
   // Appends to the footer's mode labels, so the labels of other plugins stay.
   on("ui.render", { component: "SessionMode" }, async ($, e, next) => {
-    const label = statusLabel(await readLive($));
+    const label = statusLabel(await readLive($), await unread($));
     if (label === undefined) return next(e);
     return next({ ...e, props: { ...e.props, modes: [...e.props.modes, label] } });
   });
